@@ -161,10 +161,10 @@ export default function Auth({ mode = 'signin' }) {
         <div style={S('position:relative;max-width:400px')}>
           <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#D2775B`)}>{copy.kicker}</div>
           <h2 style={S('margin:16px 0 0;font:600 34px/1.14 Geist;letter-spacing:-0.04em;color:#fff;text-wrap:balance')}>
-            Every hour on your record is confirmed by the host
+            Your hours count themselves
           </h2>
           <p style={S('margin:14px 0 0;font:400 16px/1.6 Geist;color:#A79E96;text-wrap:pretty')}>
-            Check in when you arrive, check out when you leave. Nothing to submit and nothing to chase in June.
+            Check in when you arrive and out when you leave. The organization confirms each shift, so your verified hours are ready the moment a school or scholarship asks.
           </p>
           <div style={S('margin-top:34px;padding:18px;border-radius:14px;background:#26221E;border:1px solid #363029')}>
             <div style={S('font:450 14px/1.55 Geist;color:#CFC7BF')}>
