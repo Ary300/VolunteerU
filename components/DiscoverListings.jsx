@@ -16,7 +16,7 @@ import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function DiscoverListings({ q = '', causes = [], kind = 'all', place = 'all', sort = 'recent' }) {
+export default function DiscoverListings({ q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent' }) {
   const [listings, setListings] = useState(null);
   const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
@@ -36,7 +36,7 @@ export default function DiscoverListings({ q = '', causes = [], kind = 'all', pl
     let alive = true;
     const run = async () => {
       try {
-        const ls = await searchListings({ q, causes, kind, place, sort });
+        const ls = await searchListings({ q, causes, kind, place, near, sort });
         if (!alive) return;
         setListings(ls);
         refreshMine();
@@ -44,12 +44,12 @@ export default function DiscoverListings({ q = '', causes = [], kind = 'all', pl
         if (alive) setListings([]);
       }
     };
-    const t = setTimeout(run, q ? 280 : 0);
+    const t = setTimeout(run, (q || near) ? 280 : 0);
     return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, causeKey, kind, place, sort]);
+  }, [q, causeKey, kind, place, near, sort]);
 
-  const active = Boolean(q || (causes || []).length || kind !== 'all' || place !== 'all');
+  const active = Boolean(q || (causes || []).length || kind !== 'all' || place !== 'all' || near);
 
   if (listings === null) {
     return <div style={S('margin-bottom:22px')}><SkeletonRows n={2} h={96} /></div>;

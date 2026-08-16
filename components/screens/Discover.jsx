@@ -60,6 +60,7 @@ export default function Discover() {
   const tab = params.get('tab') === 'projects' ? 'projects' : 'openings';
   const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
   const kind = ['student', 'official'].includes(params.get('kind')) ? params.get('kind') : 'all';
+  const near = params.get('near') || '';
 
   const { state } = useSnapshot();
   const [draftQuery, setDraftQuery] = useState(q);
@@ -381,6 +382,33 @@ export default function Discover() {
           ) : null}
         </div>
 
+        <div
+          className={H.input}
+          style={S('margin-top:10px;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;max-width:420px;transition:border-color .16s ease')}
+        >
+          <span aria-hidden="true" style={S('color:#BEB5AC;font-size:14px')}>◎</span>
+          <input
+            type="text"
+            aria-label="Filter by location"
+            autoComplete="off"
+            value={near}
+            placeholder={`City or ZIP${state.account.city ? ` — e.g. ${String(state.account.city).split(',')[0]}` : ' — e.g. San Diego'}`}
+            onChange={(e) => setParams({ near: e.target.value || null }, { replace: true })}
+            style={S('flex:1;min-width:0;font:450 14px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
+          />
+          {near ? (
+            <button
+              type="button"
+              aria-label="Clear location"
+              className={cx(H.icon, H.press)}
+              onClick={() => setParams({ near: null }, { replace: true })}
+              style={S('flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#A9A097;font-size:12px;cursor:pointer;transition:background .16s ease')}
+            >
+              ✕
+            </button>
+          ) : null}
+        </div>
+
         {showSuggest ? (
           <div
             id="vu-suggest"
@@ -528,7 +556,7 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <DiscoverListings q={q} causes={causes} kind={kind} place={place} sort={sort} />
+          <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
           {searching ? (
             <SkeletonRows n={3} h={168} />
           ) : rows.length ? (
