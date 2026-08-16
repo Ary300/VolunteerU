@@ -48,10 +48,10 @@ export default function Profile() {
   };
 
   function shareCard() {
-    const link = `https://volunteeru.app/r/${a.name.toLowerCase().replace(/\s+/g, '-')}`;
+    const link = typeof window !== 'undefined' ? window.location.origin : 'https://volunteeru.app';
     openModal({
       title: 'Share your record',
-      subtitle: 'Anyone with the link sees hours, causes and organizer notes — never your address or contact details.',
+      subtitle: 'Download a verified record a school or scholarship can check. The link points to VolunteerU — never your address or contact details.',
       body: (
         <div>
           <div style={S('padding:22px;border-radius:16px;background:#1F1B18;position:relative;overflow:hidden')}>
@@ -65,7 +65,7 @@ export default function Profile() {
             </div>
           </div>
           <div style={S('margin-top:16px')}>
-            <Field label="Shareable link" value={link} readOnly />
+            <Field label="Link to VolunteerU" value={link} readOnly />
           </div>
           <div style={S('margin-top:14px;display:flex;gap:10px;flex-wrap:wrap')}>
             <Pressable
@@ -455,7 +455,7 @@ export default function Profile() {
                     key={k}
                     label={`Share to ${k}`}
                     onClick={async () => {
-                      const link = `https://volunteeru.app/r/${a.name.toLowerCase().replace(/\s+/g, '-')}`;
+                      const link = typeof window !== 'undefined' ? window.location.origin : 'https://volunteeru.app';
                       if (k === 'Link') {
                         const ok = await copyText(link);
                         toast(ok ? { title: 'Link copied', message: 'Paste it anywhere.', tone: 'ok' } : { title: 'Could not copy', message: link, tone: 'warn' });
