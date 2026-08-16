@@ -1,0 +1,54 @@
+- generic [active] [ref=f17e1]:
+  - link "Skip to main content" [ref=f17e2] [cursor=pointer]:
+    - /url: "#vu-main"
+  - generic [ref=f17e3]:
+    - navigation "Screens" [ref=f17e4]:
+      - generic [ref=f17e5]: VU
+      - link "Landing" [ref=f17e6] [cursor=pointer]:
+        - /url: /
+      - link "Onboarding" [ref=f17e7] [cursor=pointer]:
+        - /url: /onboarding
+      - link "Home" [ref=f17e8] [cursor=pointer]:
+        - /url: /app
+      - link "Discover" [ref=f17e9] [cursor=pointer]:
+        - /url: /discover
+      - link "Opportunity" [ref=f17e10] [cursor=pointer]:
+        - /url: /opportunity/opp-food-dist
+      - link "Apply" [ref=f17e11] [cursor=pointer]:
+        - /url: /apply/opp-food-dist
+      - link "Lead" [ref=f17e12] [cursor=pointer]:
+        - /url: /lead
+      - link "New project" [ref=f17e13] [cursor=pointer]:
+        - /url: /create
+      - link "Profile" [ref=f17e14] [cursor=pointer]:
+        - /url: /profile
+    - generic [ref=f17e244]:
+      - generic [ref=f17e245]:
+        - generic [ref=f17e246]:
+          - link "VolunteerU home" [ref=f17e247] [cursor=pointer]:
+            - /url: /
+          - navigation "Sections" [ref=f17e250]
+          - generic [ref=f17e260]: Saved
+          - generic [ref=f17e261]
+        - generic [ref=f17e264]:
+          - link "School requirement progress" [ref=f17e265] [cursor=pointer]:
+            - /url: /profile
+          - button "Account menu" [ref=f17e270] [cursor=pointer]
+      - generic [ref=f17e278]:
+        - generic [ref=f17e279]: ◈
+        - generic [ref=f17e280]: No project workspace yet
+        - generic [ref=f17e281]: Set one up under a verified sponsor and you get applications, a roster, attendance and verified hours in one place.
+        - button "Start a project" [ref=f17e283] [cursor=pointer]:
+          - generic [ref=f17e284]: ▷
+          - text: Start a project
+    - region "Notifications"
+  - generic [ref=f17e67] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f17e68]
+    - generic [ref=f17e285]:
+      - button "Open issues overlay" [ref=f17e286]:
+        - generic [ref=f17e287]:
+          - generic [ref=f17e288]: "0"
+          - generic [ref=f17e289]: "1"
+        - generic [ref=f17e290]: Issue
+      - button "Collapse issues badge" [ref=f17e291]
+  - alert [ref=f17e72]

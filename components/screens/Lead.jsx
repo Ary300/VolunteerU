@@ -497,6 +497,16 @@ function People({ p, params, setParam }) {
     });
   }
 
+  function personProfile(person) {
+    openModal({
+      title: person.n,
+      subtitle: person.s,
+      Body: function ProfileBody({ api }) {
+        return <PersonProfile api={api} project={p} person={person} onNote={() => { api.close(); noteFor(person); }} />;
+      },
+    });
+  }
+
   function personMenu(e, person) {
     menuFromEvent(
       e,
@@ -671,7 +681,7 @@ function People({ p, params, setParam }) {
                         style={S('width:15px;height:15px;border-radius:4px;accent-color:#C2603C;cursor:pointer')}
                       />
                     </div>
-                    <Pressable label={`Notes for ${x.n}`} onClick={() => noteFor(x)} style={S('display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0')}>
+                    <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} style={S('display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0')}>
                       <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
                         <ImageSlot src={`https://picsum.photos/seed/${x.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
                       </div>
@@ -760,6 +770,91 @@ function People({ p, params, setParam }) {
             </Pressable>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* A member's reliability, derived from status, hours and readiness. This is the
+   quality-control read a lead uses to staff sessions and a volunteer earns. */
+function reliabilityOf(person) {
+  const base = { Active: 84, Onboarding: 60, Invited: 50, Waitlist: 50, Inactive: 34, Removed: 30 }[person.st] ?? 55;
+  const pct = Math.max(20, Math.min(99, Math.round(base + person.hrs * 1.2 + (person.trained ? 6 : 0) + (person.consent ? 4 : 0))));
+  const label = pct >= 90 ? 'Exceptional' : pct >= 75 ? 'Strong' : pct >= 60 ? 'Solid' : pct >= 45 ? 'Developing' : 'At risk';
+  const t = pct >= 75 ? { bg: '#EAF3EC', color: '#3F6B4E' } : pct >= 60 ? { bg: '#F6F2EE', color: '#57504A' } : { bg: '#F5E7E0', color: '#A8482A' };
+  return { pct, label, t };
+}
+
+function PersonProfile({ api, project, person, onNote }) {
+  const r = reliabilityOf(person);
+  const st = tone(PERSON_TONE, person.st);
+  const Stat = ({ l, v }) => (
+    <div style={S('padding:12px 14px;border-radius:11px;border:1px solid #E8E1D9;background:#fff')}>
+      <div style={S(`font:500 9px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>{l}</div>
+      <div style={S('margin-top:6px;font:600 16px/1 Geist;letter-spacing:-0.02em;color:#1A1714')}>{v}</div>
+    </div>
+  );
+  return (
+    <div style={S('display:flex;flex-direction:column;gap:16px')}>
+      <div style={S('display:flex;align-items:center;gap:14px')}>
+        <div style={S('width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none')}>
+          <ImageSlot src={`https://picsum.photos/seed/${person.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+        </div>
+        <div style={S('min-width:0')}>
+          <div style={S('font:600 18px/1.2 Geist;letter-spacing:-0.02em')}>{person.n}</div>
+          <div style={S('margin-top:4px;font:450 13px/1.3 Geist;color:#8A8179')}>{person.school} · Grade {person.grade} · {person.role}</div>
+        </div>
+        <div style={S('margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px')}>
+          <span style={S(`padding:5px 9px;border-radius:7px;background:${st.stBg};font:500 11px/1 ${MONO};color:${st.stColor}`)}>{person.st}</span>
+          <span style={S(`padding:5px 9px;border-radius:7px;background:${r.t.bg};font:500 11px/1 ${MONO};color:${r.t.color}`)}>{r.label} · {r.pct}%</span>
+        </div>
+      </div>
+
+      <div style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:10px')}>
+        <Stat l="Hours logged" v={person.hrs.toFixed(1)} />
+        <Stat l="Reliability" v={`${r.pct}%`} />
+        <Stat l="Last seen" v={person.last} />
+        <Stat l="Position" v={person.role} />
+      </div>
+
+      <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
+        <span style={S(`padding:6px 10px;border-radius:8px;background:${person.consent ? '#EAF3EC' : '#FDF3E7'};font:500 12px/1 Geist;color:${person.consent ? '#3F6B4E' : '#8A5A20'}`)}>{person.consent ? '✓ Guardian consent on file' : '⚠ Consent pending'}</span>
+        <span style={S(`padding:6px 10px;border-radius:8px;background:${person.trained ? '#EAF3EC' : '#F6F2EE'};font:500 12px/1 Geist;color:${person.trained ? '#3F6B4E' : '#57504A'}`)}>{person.trained ? '✓ Training complete' : 'Training pending'}</span>
+      </div>
+
+      {person.tags.length ? (
+        <div>
+          <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Tags</div>
+          <div style={S('margin-top:8px;display:flex;gap:6px;flex-wrap:wrap')}>
+            {person.tags.map((tg) => (
+              <span key={tg} style={S('padding:5px 9px;border-radius:7px;background:#F6F2EE;font:500 11px/1 Geist;color:#57504A')}>{tg}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Notes</div>
+        {person.notes.length ? (
+          <div style={S('margin-top:8px;display:flex;flex-direction:column;gap:8px')}>
+            {person.notes.map((nn, i) => (
+              <div key={i} style={S('padding:10px 12px;border-radius:10px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#332D28')}>
+                {typeof nn === 'string' ? nn : nn.text}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={S('margin-top:8px;font:450 13px/1.4 Geist;color:#A9A097')}>No notes yet.</div>
+        )}
+      </div>
+
+      <div style={S('display:flex;gap:10px;margin-top:4px')}>
+        <Pressable label="Add a note" onClick={onNote} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>
+          Add a note
+        </Pressable>
+        <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer')}>
+          Close
+        </Pressable>
       </div>
     </div>
   );

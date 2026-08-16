@@ -1,0 +1,46 @@
+- generic [active] [ref=f14e1]:
+  - link "Skip to main content" [ref=f14e2] [cursor=pointer]:
+    - /url: "#vu-main"
+  - generic [ref=f14e3]:
+    - navigation "Screens" [ref=f14e4]:
+      - generic [ref=f14e5]: VU
+      - link "Landing" [ref=f14e6] [cursor=pointer]:
+        - /url: /
+      - link "Onboarding" [ref=f14e7] [cursor=pointer]:
+        - /url: /onboarding
+      - link "Home" [ref=f14e8] [cursor=pointer]:
+        - /url: /app
+      - link "Discover" [ref=f14e9] [cursor=pointer]:
+        - /url: /discover
+      - link "Opportunity" [ref=f14e10] [cursor=pointer]:
+        - /url: /opportunity/opp-food-dist
+      - link "Apply" [ref=f14e11] [cursor=pointer]:
+        - /url: /apply/opp-food-dist
+      - link "Lead" [ref=f14e12] [cursor=pointer]:
+        - /url: /lead
+      - link "New project" [ref=f14e13] [cursor=pointer]:
+        - /url: /create
+      - link "Profile" [ref=f14e14] [cursor=pointer]:
+        - /url: /profile
+    - generic [ref=f14e24]:
+      - generic [ref=f14e25]:
+        - link "VolunteerU" [ref=f14e27] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f14e30]
+        - generic [ref=f14e40]: Free for students · Vetted organizations only · Ages 13+
+      - generic [ref=f14e42]:
+        - heading "Sign in to VolunteerU" [level=1] [ref=f14e43]
+        - paragraph [ref=f14e44]: Your hours, applications and workspace are exactly where you left them.
+        - generic [ref=f14e45]
+        - generic [ref=f14e63]: or
+        - generic [ref=f14e67]
+        - generic [ref=f14e70]
+    - region "Notifications"
+  - generic [ref=f14e76] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f14e77]
+    - generic [ref=f14e81]:
+      - button "Open issues overlay" [ref=f14e82]:
+        - generic [ref=f14e83]
+        - generic [ref=f14e86]: Issue
+      - button "Collapse issues badge" [ref=f14e87]
+  - alert [ref=f14e90]

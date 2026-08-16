@@ -12,7 +12,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { Field, PrimaryButton, SecondaryButton, ImageSlot, Checkbox } from '../ui.jsx';
 import { toast } from '../../lib/overlays.js';
-import { useSnapshot, update } from '../../lib/store.js';
+import { useSnapshot, update, resetStore } from '../../lib/store.js';
+import { supabase } from '../../lib/supabase.js';
 import { validateEmail, validatePassword, passwordStrength, signIn, signUp, perform } from '../../lib/db.js';
 
 const MONO = "'Geist Mono',monospace";
@@ -131,8 +132,12 @@ export default function Auth({ mode = 'signin' }) {
   }
 
   function demo() {
-    // A local preview of the seeded record — no real account needed. It lasts
-    // for this browser session; the real backend takes over on next load.
+    // A preview of the seeded record — no real account needed. It persists for
+    // this browser (via a flag the auth bridge respects) until sign-out.
+    try { sessionStorage.setItem('vu.demo', '1'); } catch { /* private mode */ }
+    // Drop any real session so it can't override the seed on the next load.
+    if (supabase) supabase.auth.signOut().catch(() => {});
+    resetStore(); // state = the full seeded record (record, project, roster)
     update((st) => {
       st.session.authed = true;
       st.session.signedInAt = Date.now();
