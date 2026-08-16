@@ -9,6 +9,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, SkeletonRows, Chip, Select, Checkbox, PrimaryButton, SecondaryButton } from '../ui.jsx';
 import MapPanel from '../MapPanel.jsx';
+import DiscoverListings from '../DiscoverListings.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, toast } from '../../lib/overlays.js';
 import {
@@ -499,6 +500,7 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
+          <DiscoverListings />
           {searching ? (
             <SkeletonRows n={3} h={168} />
           ) : rows.length ? (

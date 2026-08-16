@@ -11,6 +11,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, Field, Select, Chip } from '../ui.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
+import CrossApplications from '../CrossApplications.jsx';
 import {
   getProject, taskProgress, toggleTask, pendingApplications, pendingHours,
   positionLabel, positionAppsLabel, sessionStatus, sessionTone, shortSessions, peopleStats, filterPeople,
@@ -48,7 +49,8 @@ export default function Lead({ projectId, tab: tabParam }) {
 
   if (!p) {
     return (
-      <div className="vu-pad-40" style={S('padding:28px 40px 96px')}>
+      <div className="vu-pad-40" style={S('padding:28px 40px 96px;display:flex;flex-direction:column;gap:20px')}>
+        <CrossApplications />
         <EmptyState
           icon="◈"
           title="No project workspace yet"
@@ -217,6 +219,7 @@ function Overview({ p, goTab }) {
   return (
     <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
       <div style={S('display:flex;flex-direction:column;gap:16px')}>
+        <CrossApplications />
         <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
           <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
             <div>
