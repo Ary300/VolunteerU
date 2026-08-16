@@ -7,6 +7,7 @@
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable } from '../ui.jsx';
+import VolunteerApplications from '../VolunteerApplications.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
@@ -191,6 +192,10 @@ export default function Home() {
             </Pressable>
           );
         })}
+      </div>
+
+      <div style={S('margin-top:20px')}>
+        <VolunteerApplications />
       </div>
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:20px;align-items:start')}>
