@@ -256,8 +256,12 @@ img { border-style:none; }
   .vu-pad-32 { padding-left:18px !important; padding-right:18px !important; }
   .vu-stack { flex-direction:column !important; align-items:stretch !important; }
   .vu-stack-gap { gap:12px !important; }
-  .vu-hero { grid-template-columns:1fr !important; padding-top:48px !important; padding-bottom:44px !important; }
+  .vu-hero { grid-template-columns:1fr !important; min-width:0 !important; padding-top:48px !important; padding-bottom:44px !important; }
   .vu-hero-art { min-width:0 !important; }
+  /* Any element that hard-set a 1180 min-width without vu-fixed-width. */
+  .vu-fluid-mobile { min-width:0 !important; }
+  /* Hide secondary/marketing nav on small screens. */
+  .vu-hide-mobile { display:none !important; }
   .vu-h1 { font-size:40px !important; }
   .vu-h2-big { font-size:52px !important; }
   .vu-h2 { font-size:34px !important; }

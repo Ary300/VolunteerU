@@ -24,7 +24,7 @@ function useMounted() {
 export function ScreenFallback({ bare }) {
   return (
     <div
-      className={bare ? 'vu-fixed-width' : 'vu-pad-40'}
+      className={bare ? 'vu-fixed-width vu-fluid-mobile' : 'vu-pad-40'}
       style={S(bare ? 'min-width:1180px;padding:64px 40px' : 'padding:32px 40px 96px')}
       aria-busy="true"
       aria-label="Loading"

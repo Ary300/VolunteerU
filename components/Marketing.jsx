@@ -55,7 +55,7 @@ export function MarketingHeader({ active = '' }) {
             </div>
             <div style={S('font:600 17px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
           </Link>
-          <nav aria-label="Primary" style={S('display:flex;gap:26px;font:450 14px/1 Geist;color:#57504A')}>
+          <nav aria-label="Primary" className="vu-hide-mobile" style={S('display:flex;gap:26px;font:450 14px/1 Geist;color:#57504A')}>
             {NAV.map((l) => (
               <Link
                 key={l.key}
