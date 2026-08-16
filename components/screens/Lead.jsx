@@ -458,6 +458,8 @@ function Overview({ p, goTab }) {
           </div>
         </div>
 
+        <CrewFunnel p={p} />
+
         {(p.eventsHosted > 0 || p.approxVolunteers > 0) ? (
           <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
             <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Track record</div>
@@ -491,6 +493,43 @@ function SideRow({ l, v }) {
     <div style={S('display:flex;justify-content:space-between;gap:10px')}>
       <span>{l}</span>
       <span style={S('color:#1A1714;font-weight:500')}>{v}</span>
+    </div>
+  );
+}
+
+/* A simple, real bar chart of where the crew stands. Populates from live roster
+   and application data — no fabricated numbers. */
+function CrewFunnel({ p }) {
+  const waiting = p.applications.filter((a) => a.status === 'pending').length;
+  const onboarding = p.people.filter((x) => x.st === 'Onboarding').length;
+  const active = p.people.filter((x) => x.st === 'Active').length;
+  const rows = [
+    { l: 'Applications waiting', v: waiting, c: '#8A5A20', bg: '#FDF3E7' },
+    { l: 'Onboarding', v: onboarding, c: '#5B6BB0', bg: '#EEF3FB' },
+    { l: 'Active crew', v: active, c: '#3F6B4E', bg: '#EAF3EC' },
+  ];
+  const max = Math.max(1, waiting, onboarding, active);
+  const total = waiting + onboarding + active;
+  return (
+    <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
+      <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Crew at a glance</div>
+      {total === 0 ? (
+        <div style={S('margin-top:12px;font:450 13px/1.5 Geist;color:#8A8179')}>No crew yet. As applications come in and you accept people, this chart fills in.</div>
+      ) : (
+        <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
+          {rows.map((r) => (
+            <div key={r.l}>
+              <div style={S('display:flex;justify-content:space-between;gap:10px;font:450 12px/1 Geist;color:#57504A')}>
+                <span>{r.l}</span>
+                <span style={S('color:#1A1714;font-weight:600')}>{r.v}</span>
+              </div>
+              <div style={s('margin-top:6px;height:8px;border-radius:5px;overflow:hidden', `background:${r.bg}`)}>
+                <div style={s('height:100%;border-radius:5px;transition:width .4s cubic-bezier(.16,1,.3,1)', `width:${Math.round((r.v / max) * 100)}%`, `background:${r.c}`)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

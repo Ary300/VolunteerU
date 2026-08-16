@@ -29,7 +29,7 @@ export default function Profile() {
   const focus = params.get('focus');
   const apps = state.applications.filter((x) => x.st !== 'Withdrawn');
   const history = showAll ? state.hoursLog : state.hoursLog.slice(0, 4);
-  const maxCause = Math.max(...state.causeBars.map((b) => b.n));
+  const maxCause = Math.max(1, ...state.causeBars.map((b) => b.n));
 
   useEffect(() => {
     if (focus === 'badges' && badgesRef.current) badgesRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -309,6 +309,11 @@ export default function Profile() {
               ) : null}
             </div>
             <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:13px')}>
+              {state.causeBars.length === 0 ? (
+                <div style={S('padding:16px;border-radius:12px;border:1px dashed #E7DED6;background:#FCFAF8;font:450 13px/1.6 Geist;color:#8A8179')}>
+                  Your causes chart fills in as your verified hours post. Log service with an organization and it shows up here, split by cause.
+                </div>
+              ) : null}
               {state.causeBars.map((b) => {
                 const dim = isolated && isolated !== b.name;
                 return (
