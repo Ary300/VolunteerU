@@ -25,6 +25,9 @@ const ITEMS = [
 export default function ScreenNav() {
   const pathname = usePathname() || '/';
 
+  // Developer-only screen switcher. Never shown in the real (production) app.
+  if (process.env.NODE_ENV === 'production') return null;
+
   return (
     <nav
       className="vu-devnav vu-noprint"

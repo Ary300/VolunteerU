@@ -135,6 +135,39 @@ export default function AppShell({ children }) {
               );
             })}
           </nav>
+
+          {(() => {
+            const mine = state.projects.filter((p) => !p.archived);
+            if (!mine.length) return null;
+            return (
+              <div style={S('margin-top:18px')}>
+                <div style={S(`padding:0 10px;font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#BEB5AC`)}>Your projects</div>
+                <div style={S('margin-top:10px;display:flex;flex-direction:column;gap:2px')}>
+                  {mine.map((p) => {
+                    const on = pathname.startsWith(`/lead/${p.id}`);
+                    return (
+                      <Link
+                        key={p.id}
+                        href={`/lead/${p.id}/overview`}
+                        aria-current={on ? 'page' : undefined}
+                        className={on ? undefined : H.nav}
+                        style={s(
+                          'display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer;color:inherit;transition:background .16s ease',
+                          `background:${on ? '#F2ECE5' : 'transparent'}`,
+                          `font:${on ? '600' : '450'} 13px/1.2 Geist`,
+                          `color:${on ? '#1A1714' : '#6B635C'}`
+                        )}
+                      >
+                        <span aria-hidden="true" style={s('width:7px;height:7px;border-radius:50%;flex:none', `background:${p.orgType === 'team' ? '#5B6BB0' : '#C2603C'}`)} />
+                        <span className="vu-trunc" style={S('min-width:0')}>{p.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={S('height:1px;background:#EFE9E2;margin:18px 8px')} />
           <div style={S(`padding:0 10px;font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#BEB5AC`)}>Saved</div>
           <div style={S('margin-top:10px;display:flex;flex-direction:column;gap:2px;font:450 14px/1 Geist;color:#6B635C')}>
@@ -175,9 +208,9 @@ export default function AppShell({ children }) {
               <ImageSlot src={state.account.avatar} shape="circle" placeholder="avatar" />
             </div>
             <div style={S('min-width:0;text-align:left')}>
-              <div className="vu-trunc" style={S('font:600 13px/1.2 Geist')}>{state.account.name}</div>
+              <div className="vu-trunc" style={S('font:600 13px/1.2 Geist')}>{state.account.name || 'Your account'}</div>
               <div className="vu-trunc" style={S('font:450 11px/1.2 Geist;color:#8A8179;margin-top:2px')}>
-                Grade {state.account.grade} · {String(state.account.city).split(',')[0]}
+                {[state.account.grade ? `Grade ${state.account.grade}` : null, String(state.account.city || '').split(',')[0] || null].filter(Boolean).join(' · ') || 'Set up your profile'}
               </div>
             </div>
           </button>

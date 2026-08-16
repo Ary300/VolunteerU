@@ -12,7 +12,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { Field, PrimaryButton, SecondaryButton, ImageSlot, Checkbox } from '../ui.jsx';
 import { toast } from '../../lib/overlays.js';
-import { useSnapshot, update, resetStore } from '../../lib/store.js';
+import { useSnapshot, update } from '../../lib/store.js';
 import { supabase } from '../../lib/supabase.js';
 import { validateEmail, validatePassword, passwordStrength, signIn, signUp, perform } from '../../lib/db.js';
 
@@ -137,22 +137,6 @@ export default function Auth({ mode = 'signin' }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  function demo() {
-    // A preview of the seeded record — no real account needed. It persists for
-    // this browser (via a flag the auth bridge respects) until sign-out.
-    try { sessionStorage.setItem('vu.demo', '1'); } catch { /* private mode */ }
-    // Drop any real session so it can't override the seed on the next load.
-    if (supabase) supabase.auth.signOut().catch(() => {});
-    resetStore(); // state = the full seeded record (record, project, roster)
-    update((st) => {
-      st.session.authed = true;
-      st.session.signedInAt = Date.now();
-      st.onboarding.completed = true;
-    });
-    toast({ title: `Signed in as ${state.account.name}`, message: 'Demo account with a seeded record and one live project.', tone: 'ok' });
-    router.replace(next);
   }
 
   return (
@@ -300,22 +284,6 @@ export default function Auth({ mode = 'signin' }) {
               </div>
             </form>
           )}
-
-          {mode !== 'forgot' && !sent ? (
-            <>
-              <div style={S('margin-top:26px;display:flex;align-items:center;gap:12px')}>
-                <div style={S('flex:1;height:1px;background:#EFE9E2')} />
-                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#BEB5AC`)}>or</div>
-                <div style={S('flex:1;height:1px;background:#EFE9E2')} />
-              </div>
-              <div style={S('margin-top:18px')}>
-                <SecondaryButton full center h={44} px={18} r={12} fs={14} onClick={demo}>
-                  Continue as {state.account.name} (demo account)
-                </SecondaryButton>
-                <div className="vu-hint">Loads a seeded record: 86 verified hours, four applications and one live project.</div>
-              </div>
-            </>
-          ) : null}
 
           {!sent ? (
             <div style={S('margin-top:24px;font:450 13px/1.5 Geist;color:#8A8179')}>

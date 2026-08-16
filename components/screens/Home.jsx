@@ -116,10 +116,12 @@ export default function Home() {
           <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>{todayLabel()}</div>
           <h1 style={S('margin:12px 0 0;font:600 34px/1.06 Geist;letter-spacing:-0.04em')}>Welcome back, {state.account.firstName}</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
-            {word(bookingCount)} {plural(bookingCount, 'shift')} booked this week.
-            {tutorsShort > 0
-              ? ` Your reading circle needs ${lowerWord(tutorsShort)} more ${plural(tutorsShort, 'tutor')}.`
-              : ' Your reading circle is fully staffed.'}
+            {bookingCount > 0
+              ? `${word(bookingCount)} ${plural(bookingCount, 'shift')} booked this week.`
+              : 'No shifts booked this week.'}
+            {proj && tutorsShort > 0
+              ? ` ${proj.name} needs ${lowerWord(tutorsShort)} more ${plural(tutorsShort, 'tutor')}.`
+              : ''}
           </p>
         </div>
         <div style={S('display:flex;gap:10px')}>
