@@ -1,0 +1,310 @@
+/* ==========================================================================
+   VolunteerU — global stylesheet
+   The `<helmet>` block from `VolunteerU Design.dc.html` is reproduced verbatim
+   at the top. Everything below is behaviour the static design could not
+   express: interaction states, motion, overlays, responsive collapse, a11y.
+   ========================================================================== */
+
+/* ---- design <helmet> base (verbatim) ---------------------------------- */
+html, body { margin:0; padding:0; background:#FAF8F5; }
+body {
+  font-family:'Geist', 'Helvetica Neue', Helvetica, sans-serif;
+  color:#1A1714;
+  -webkit-font-smoothing:antialiased;
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+a { color:#C2603C; text-decoration:none; }
+a:hover { color:#A8482A; }
+::selection { background:#F3D9CE; }
+
+:root {
+  --vu-dur-1:.12s; --vu-dur-2:.16s; --vu-dur-3:.24s; --vu-dur-4:.36s;
+  --vu-ease:cubic-bezier(.22,.61,.36,1);
+  --vu-ease-out:cubic-bezier(.16,1,.3,1);
+  --vu-z-sticky:60; --vu-z-devnav:80; --vu-z-overlay:200; --vu-z-toast:300;
+}
+
+/* ---- native control reset (keeps real inputs pixel-identical) ---------- */
+button, input, textarea, select {
+  font:inherit; color:inherit; margin:0;
+  background:none; border:none; border-radius:0; padding:0;
+  -webkit-appearance:none; appearance:none;
+}
+button { cursor:pointer; text-align:inherit; }
+button:disabled, [aria-disabled="true"] { cursor:not-allowed; }
+textarea { resize:vertical; }
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance:none; }
+input::placeholder, textarea::placeholder { color:#A9A097; opacity:1; }
+select::-ms-expand { display:none; }
+ul, ol { margin:0; padding:0; list-style:none; }
+h1,h2,h3,h4 { font-weight:inherit; }
+img { border-style:none; }
+
+/* ---- focus ------------------------------------------------------------- */
+:focus { outline:none; }
+:focus-visible { outline:2px solid #C2603C; outline-offset:2px; border-radius:6px; }
+.vu-skip {
+  position:fixed; top:-100px; left:14px; z-index:400;
+  padding:10px 16px; border-radius:10px;
+  background:#1F1B18; color:#fff; font:600 14px/1 Geist;
+  transition:top var(--vu-dur-2) var(--vu-ease);
+}
+.vu-skip:focus { top:14px; color:#fff; }
+.vu-sr {
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+
+/* ==========================================================================
+   Interaction states — the design's `style-hover` / `style-active` values,
+   centralised so every component shares one definition.
+   ========================================================================== */
+.h-press { -webkit-tap-highlight-color:transparent; user-select:none; }
+.h-press:active { transform:scale(.985); }
+
+@media (hover:hover) {
+  .h-primary:hover { background:linear-gradient(180deg,#DA8267 0%,#C96844 100%); }
+  .h-primary-lift:hover {
+    background:linear-gradient(180deg,#DA8267 0%,#C96844 100%);
+    transform:translateY(-1px);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 2px 4px rgba(80,30,12,.2), 0 14px 26px -10px rgba(150,60,30,.6);
+  }
+  .h-secondary:hover { background:#FBF7F3; border-color:#D8CEC3; }
+  .h-secondary-lift:hover { background:#FBF7F3; border-color:#D8CEC3; transform:translateY(-1px); }
+  .h-card:hover { border-color:#DCD1C5; }
+  .h-card-soft:hover { border-color:#E0D5C9; }
+  .h-row:hover { background:#FCFAF8; }
+  .h-link:hover { opacity:.72; }
+  .h-nav:hover { background:#FAF6F3; }
+  .h-chip:hover { border-color:#D8CEC3; background:#FBF7F3; }
+  .h-input:hover { border-color:#D8CEC3; }
+  .h-icon:hover { background:#F6F2EE; color:#57504A; }
+  .h-to-ink:hover { color:#1A1714; }
+  .h-to-brand:hover { color:#C2603C; }
+  .h-danger:hover { background:#FAF0EB; border-color:#E2BCAB; }
+}
+.h-primary-lift:active, .h-secondary-lift:active { transform:translateY(0); }
+.h-input:focus-within { border-color:#D8CEC3; }
+[data-disabled="true"], [data-disabled="1"] { opacity:.45; pointer-events:none; }
+[data-busy="true"] { pointer-events:none; opacity:.72; }
+
+/* ---- motion ------------------------------------------------------------ */
+@keyframes vu-screen-in { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
+@keyframes vu-fade-in   { from { opacity:0 } to { opacity:1 } }
+@keyframes vu-rise      { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:none } }
+@keyframes vu-sheet-in  { from { opacity:0; transform:translateY(16px) scale(.985) } to { opacity:1; transform:none } }
+@keyframes vu-drawer-in { from { transform:translateX(100%) } to { transform:none } }
+@keyframes vu-toast-in  { from { opacity:0; transform:translateY(10px) scale(.97) } to { opacity:1; transform:none } }
+@keyframes vu-toast-out { to { opacity:0; transform:translateY(6px) scale(.98) } }
+@keyframes vu-spin      { to { transform:rotate(360deg) } }
+@keyframes vu-shimmer   { 0%{background-position:-420px 0} 100%{background-position:420px 0} }
+@keyframes vu-shake     { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-3px)} 40%,60%{transform:translateX(3px)} }
+@keyframes vu-check     { from { transform:scale(.4); opacity:0 } to { transform:scale(1); opacity:1 } }
+@keyframes vu-slide     { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+
+.vu-screen { animation:vu-screen-in var(--vu-dur-3) var(--vu-ease-out); }
+.vu-pop { animation:vu-check var(--vu-dur-2) var(--vu-ease-out); }
+.vu-shake { animation:vu-shake .4s var(--vu-ease); }
+.vu-spin {
+  display:inline-block; width:13px; height:13px; flex:none;
+  border:2px solid currentColor; border-top-color:transparent; border-radius:50%;
+  animation:vu-spin .7s linear infinite;
+}
+.vu-skel {
+  border-radius:8px;
+  background:#EFE9E2 linear-gradient(90deg, rgba(255,255,255,0) 0, rgba(255,255,255,.75) 50%, rgba(255,255,255,0) 100%) 0 0/420px 100% no-repeat;
+  animation:vu-shimmer 1.25s infinite linear;
+}
+
+/* ---- image slot (reimplements <image-slot>) ---------------------------- */
+.vu-slot { position:relative; width:100%; height:100%; background:#EFE9E2; overflow:hidden; }
+.vu-slot > img {
+  width:100%; height:100%; object-fit:cover; display:block;
+  opacity:0; transition:opacity var(--vu-dur-3) var(--vu-ease);
+}
+.vu-slot[data-state="ready"] > img { opacity:1; }
+.vu-slot[data-state="failed"] { display:grid; place-items:center; background:#F3EEE8; }
+.vu-slot[data-state="failed"] > img { display:none; }
+.vu-slot-ph {
+  display:none; flex-direction:column; align-items:center; gap:5px;
+  padding:8px; text-align:center;
+  font:500 9px/1.3 'Geist Mono', monospace; letter-spacing:.06em;
+  text-transform:uppercase; color:#B3A99F;
+}
+.vu-slot[data-state="failed"] .vu-slot-ph { display:flex; }
+
+/* ---- overlays ---------------------------------------------------------- */
+.vu-scrim {
+  position:fixed; inset:0; z-index:var(--vu-z-overlay);
+  background:rgba(31,27,24,.36); backdrop-filter:blur(2px);
+  display:grid; place-items:center; padding:24px;
+  animation:vu-fade-in var(--vu-dur-2) var(--vu-ease);
+  overscroll-behavior:contain;
+}
+.vu-dialog {
+  width:100%; max-width:520px; max-height:calc(100vh - 48px); overflow:auto;
+  border-radius:18px; border:1px solid #E8E1D9; background:#fff;
+  box-shadow:0 50px 90px -40px rgba(70,45,28,.55), 0 2px 6px rgba(70,45,28,.08);
+  animation:vu-sheet-in var(--vu-dur-3) var(--vu-ease-out);
+}
+.vu-dialog--wide { max-width:760px; }
+.vu-dialog--slim { max-width:420px; }
+.vu-menu {
+  position:fixed; z-index:var(--vu-z-overlay); min-width:190px; max-width:280px;
+  border-radius:12px; border:1px solid #E8E1D9; background:#fff;
+  box-shadow:0 22px 44px -22px rgba(60,40,25,.42), 0 1px 2px rgba(30,20,10,.06);
+  padding:5px; animation:vu-sheet-in var(--vu-dur-2) var(--vu-ease-out);
+}
+.vu-menu-item {
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:9px 11px; border-radius:8px;
+  font:500 13px/1.3 Geist; color:#332D28; cursor:pointer; text-align:left;
+  transition:background var(--vu-dur-1) var(--vu-ease);
+}
+.vu-menu-item:hover { background:#FBF7F3; }
+.vu-menu-item[data-tone="danger"] { color:#A8482A; }
+.vu-menu-item[data-tone="danger"]:hover { background:#FAF0EB; }
+.vu-menu-sep { height:1px; background:#F1EBE4; margin:5px 4px; }
+
+/* ---- toasts ------------------------------------------------------------ */
+.vu-toasts {
+  position:fixed; z-index:var(--vu-z-toast); right:16px; bottom:16px;
+  display:flex; flex-direction:column-reverse; gap:9px;
+  max-width:min(400px, calc(100vw - 32px)); pointer-events:none;
+}
+.vu-toast {
+  pointer-events:auto; display:flex; align-items:flex-start; gap:11px;
+  padding:13px 14px; border-radius:13px;
+  border:1px solid #E8E1D9; background:rgba(255,255,255,.97);
+  backdrop-filter:blur(12px);
+  box-shadow:0 22px 44px -24px rgba(60,40,25,.55), 0 1px 2px rgba(30,20,10,.06);
+  animation:vu-toast-in var(--vu-dur-3) var(--vu-ease-out);
+}
+.vu-toast[data-out="true"] { animation:vu-toast-out var(--vu-dur-2) var(--vu-ease) forwards; }
+.vu-toast-dot { width:8px; height:8px; border-radius:50%; flex:none; margin-top:5px; background:#C2603C; }
+.vu-toast[data-tone="ok"] .vu-toast-dot { background:#3F6B4E; }
+.vu-toast[data-tone="warn"] .vu-toast-dot { background:#8A5A20; }
+.vu-toast[data-tone="danger"] .vu-toast-dot { background:#A8482A; }
+.vu-toast-title { font:600 13px/1.35 Geist; letter-spacing:-.01em; color:#1A1714; }
+.vu-toast-msg { margin-top:4px; font:450 12px/1.45 Geist; color:#6B635C; overflow-wrap:anywhere; }
+.vu-toast-act {
+  margin-top:9px; padding:6px 10px; border-radius:8px;
+  border:1px solid #E4DDD4; background:#fff; font:600 12px/1 Geist; color:#1A1714;
+}
+.vu-toast-act:hover { background:#FBF7F3; }
+.vu-toast-x {
+  flex:none; width:22px; height:22px; border-radius:6px; display:grid; place-items:center;
+  color:#A9A097; font-size:13px;
+}
+.vu-toast-x:hover { background:#F6F2EE; color:#57504A; }
+
+/* ---- form validity ----------------------------------------------------- */
+[data-invalid="true"] { border-color:#C2603C !important; background:#FDF7F4 !important; }
+.vu-err { margin-top:7px; display:flex; align-items:center; gap:6px; font:500 12px/1.35 Geist; color:#A8482A; }
+.vu-err::before {
+  content:"!"; display:grid; place-items:center; flex:none;
+  width:14px; height:14px; border-radius:50%; background:#F5E7E0; font:700 9px/1 Geist;
+}
+.vu-hint { margin-top:7px; font:450 12px/1.45 Geist; color:#8A8179; }
+.vu-count { font:500 11px/1 'Geist Mono',monospace; color:#A9A097; }
+.vu-count[data-over="true"] { color:#A8482A; }
+
+/* Grid items default to min-width:auto, which lets a wide table push the whole
+   shell past the viewport. Every content column opts out explicitly. */
+#vu-main { min-width: 0; }
+.vu-split > *, .vu-2col > *, .vu-3col > *, .vu-4col > *, .vu-5col > * { min-width: 0; }
+
+/* ---- helpers ----------------------------------------------------------- */
+.vu-trunc { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.vu-break { overflow-wrap:anywhere; word-break:break-word; }
+.vu-scroll-x { overflow-x:auto; overscroll-behavior-x:contain; }
+.vu-scroll-x::-webkit-scrollbar { height:8px; }
+.vu-scroll-x::-webkit-scrollbar-thumb { background:#E4DAD0; border-radius:4px; }
+
+/* ---- mobile chrome ----------------------------------------------------- */
+.vu-mobilebar { display:none; }
+.vu-mobilebar {
+  position:fixed; top:0; left:0; right:0; z-index:var(--vu-z-sticky);
+  align-items:center; gap:12px; padding:12px 16px;
+  background:rgba(250,248,245,.9); backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(232,225,217,.9);
+}
+.vu-burger {
+  width:36px; height:36px; border-radius:10px; border:1px solid #E4DDD4; background:#fff;
+  display:grid; place-items:center; gap:3px; align-content:center;
+}
+.vu-burger i { display:block; width:15px; height:1.5px; background:#57504A; border-radius:1px; }
+
+/* ---- responsive: the desktop layout is untouched at >= 1180px ---------- */
+@media (max-width: 1179px) {
+  .vu-root, .vu-fixed-width { min-width:0 !important; }
+  .vu-app-shell { grid-template-columns:1fr !important; }
+  .vu-sidebar {
+    position:fixed !important; z-index:var(--vu-z-overlay);
+    top:0; bottom:0; left:0; width:250px;
+    transform:translateX(-100%); transition:transform var(--vu-dur-3) var(--vu-ease-out);
+  }
+  .vu-sidebar[data-open="true"] { transform:none; box-shadow:20px 0 60px -30px rgba(70,45,28,.5); }
+  .vu-mobilebar { display:flex !important; }
+  .vu-main-pad { padding-top:64px !important; }
+  .vu-devnav { display:none !important; }
+  .vu-2col, .vu-3col, .vu-4col, .vu-5col, .vu-split { grid-template-columns:1fr !important; }
+  .vu-2col-keep { grid-template-columns:1fr 1fr !important; }
+  .vu-pad-40 { padding-left:20px !important; padding-right:20px !important; }
+  .vu-pad-32 { padding-left:18px !important; padding-right:18px !important; }
+  .vu-stack { flex-direction:column !important; align-items:stretch !important; }
+  .vu-stack-gap { gap:12px !important; }
+  .vu-hero { grid-template-columns:1fr !important; padding-top:48px !important; padding-bottom:44px !important; }
+  .vu-hero-art { min-width:0 !important; }
+  .vu-h1 { font-size:40px !important; }
+  .vu-h2-big { font-size:52px !important; }
+  .vu-h2 { font-size:34px !important; }
+  .vu-table-wrap { overflow-x:auto; }
+  .vu-table-wrap > * { min-width:720px; }
+  .vu-media-row { grid-template-columns:1fr !important; }
+  .vu-media-row > .vu-media-thumb { min-height:150px !important; }
+  .vu-sticky-side { position:static !important; }
+  .vu-onboard { grid-template-columns:1fr !important; }
+  .vu-onboard-aside { padding:28px 22px !important; }
+  .vu-onboard-form { padding:28px 22px !important; }
+  .vu-toasts { left:16px; right:16px; max-width:none; }
+}
+@media (max-width: 720px) {
+  .vu-2col-keep { grid-template-columns:1fr !important; }
+  .vu-h1 { font-size:32px !important; }
+  .vu-h2-big { font-size:36px !important; }
+  .vu-h2 { font-size:27px !important; }
+  .vu-stat-big { font-size:30px !important; }
+  .vu-pad-40 { padding-left:14px !important; padding-right:14px !important; }
+  .vu-dialog { max-height:calc(100vh - 24px); }
+  .vu-scrim { padding:12px; align-items:flex-end; }
+}
+
+/* ---- print (record export preview) ------------------------------------- */
+@media print {
+  .vu-devnav, .vu-toasts, .vu-scrim, .vu-mobilebar, .vu-sidebar, .vu-noprint { display:none !important; }
+  .vu-app-shell { grid-template-columns:1fr !important; }
+  body { background:#fff; }
+}
+
+/* ---- user preferences -------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto; }
+  *, *::before, *::after {
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important; scroll-behavior:auto !important;
+  }
+}
+html[data-motion="off"] { scroll-behavior:auto; }
+html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+  animation-duration:.001ms !important; animation-iteration-count:1 !important;
+  transition-duration:.001ms !important;
+}
+html[data-textsize="large"] body { font-size:17px; zoom:1.06; }
+html[data-textsize="xlarge"] body { font-size:18px; zoom:1.12; }
+html[data-contrast="high"] [style*="color:#A9A097"],
+html[data-contrast="high"] [style*="color: rgb(169, 160, 151)"],
+html[data-contrast="high"] [style*="color:#BEB5AC"],
+html[data-contrast="high"] [style*="color:#8A8179"] { color:#5F574F !important; }
