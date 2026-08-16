@@ -9,13 +9,14 @@
 
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
-import { loadDiscoverListings, applyToListing, loadMyApplications } from '../lib/listings.js';
+import { searchListings, applyToListing, loadMyApplications } from '../lib/listings.js';
 import { toast, openModal } from '../lib/overlays.js';
+import { SkeletonRows } from './ui.jsx';
 import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function DiscoverListings({ kind = 'all' }) {
+export default function DiscoverListings({ q = '', causes = [], kind = 'all', place = 'all', sort = 'recent' }) {
   const [listings, setListings] = useState(null);
   const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
@@ -29,21 +30,41 @@ export default function DiscoverListings({ kind = 'all' }) {
     }
   }
 
+  const causeKey = (causes || []).join('|');
+  // Debounced server-side search: filtering runs in Postgres, not the browser.
   useEffect(() => {
-    (async () => {
+    let alive = true;
+    const run = async () => {
       try {
-        const ls = await loadDiscoverListings();
+        const ls = await searchListings({ q, causes, kind, place, sort });
+        if (!alive) return;
         setListings(ls);
-        await refreshMine();
+        refreshMine();
       } catch {
-        setListings([]);
+        if (alive) setListings([]);
       }
-    })();
-  }, []);
+    };
+    const t = setTimeout(run, q ? 280 : 0);
+    return () => { alive = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, causeKey, kind, place, sort]);
 
-  if (listings === null) return null;
-  const shown = kind === 'all' ? listings : listings.filter((l) => (l.org_class || 'student') === kind);
-  if (shown.length === 0) return null;
+  const active = Boolean(q || (causes || []).length || kind !== 'all' || place !== 'all');
+
+  if (listings === null) {
+    return <div style={S('margin-bottom:22px')}><SkeletonRows n={2} h={96} /></div>;
+  }
+  const shown = listings;
+  if (shown.length === 0) {
+    // Silent on a blank, unfiltered feed; explicit "no matches" once searching.
+    if (!active) return null;
+    return (
+      <div style={S('margin-bottom:22px;padding:28px 22px;border-radius:14px;border:1px dashed #E0D8CF;background:#FCFAF8;text-align:center')}>
+        <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>No projects match that yet</div>
+        <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#8A8179')}>Try a broader search, clear a filter, or check back — new projects are published all the time.</div>
+      </div>
+    );
+  }
 
   async function apply(listing) {
     if (busy) return;

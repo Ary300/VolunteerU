@@ -297,9 +297,9 @@ export default function Discover() {
     <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
       <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:24px')}>
         <div>
-          <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Good morning, {state.account.firstName}</h1>
+          <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Discover{state.account.firstName ? `, ${state.account.firstName}` : ''}</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
-            {state.opportunities.length} openings match you this week. {word(closingSoon)} close in 48 hours.
+            Search real student projects and nonprofits. Filter by cause, kind and where they run.
           </p>
         </div>
         <div style={S('display:flex;gap:10px')}>
@@ -528,7 +528,7 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <DiscoverListings kind={kind} />
+          <DiscoverListings q={q} causes={causes} kind={kind} place={place} sort={sort} />
           {searching ? (
             <SkeletonRows n={3} h={168} />
           ) : rows.length ? (
