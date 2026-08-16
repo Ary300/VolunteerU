@@ -94,9 +94,7 @@ export default function Auth({ mode = 'signin' }) {
       await perform(`auth.${mode}`, async () => {
         if (mode === 'signin') {
           await signIn(form.email.trim(), form.password);
-          // A returning account has already been through onboarding.
           update((st) => {
-            st.onboarding.completed = true;
             st.session.remember = form.remember;
           });
         } else if (mode === 'signup') {
