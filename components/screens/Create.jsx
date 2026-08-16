@@ -10,21 +10,32 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, Field, Select, TextArea, Checkbox, Chip, EmptyState } from '../ui.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
-import { createProject, perform } from '../../lib/db.js';
+import { createProject, perform, verifiedHours } from '../../lib/db.js';
 import { projectTemplates, PEXELS } from '../../lib/seed.js';
 import {
   defaultDraft, generatedSessions, totalSlots, safetyComplete,
   CAUSE_OPTIONS, TERM_OPTIONS, VISIBILITY_OPTIONS, REPEAT_OPTIONS, AUDIENCE_OPTIONS, MISSION_MAX,
+  ORG_TYPES, TASK_KINDS,
 } from '../../lib/createDraft.js';
 
 const MONO = "'Geist Mono',monospace";
 
-const STEPS = [
-  { label: 'Basics', desc: 'Name, mission, cause' },
-  { label: 'Positions', desc: 'Roles and requirements' },
-  { label: 'Schedule', desc: 'Sessions and safety' },
-  { label: 'Review', desc: 'Publish settings' },
-];
+const STEP_SETS = {
+  volunteering: [
+    { label: 'Basics', desc: 'Type, mission, cause' },
+    { label: 'Positions', desc: 'Roles and requirements' },
+    { label: 'Schedule', desc: 'Sessions, safety, pipeline' },
+    { label: 'Review', desc: 'Publish settings' },
+  ],
+  team: [
+    { label: 'Basics', desc: 'Type, mission, cause' },
+    { label: 'Roles', desc: 'Roles and briefings' },
+    { label: 'Tasks', desc: 'Starter task board' },
+    { label: 'Review', desc: 'Publish settings' },
+  ],
+};
+
+const KIND_LABEL = { meeting: 'Meeting', form: 'Form', training: 'Training', check: 'Check' };
 
 const COVERS = [PEXELS.reading2, PEXELS.food, PEXELS.trail, PEXELS.seniors, PEXELS.shelter, PEXELS.lead];
 
@@ -46,7 +57,10 @@ export default function Create() {
   }, [draft]);
 
   const step = Math.min(4, Math.max(1, draft.step || 1));
+  const isTeam = draft.orgType === 'team';
+  const STEPS = STEP_SETS[isTeam ? 'team' : 'volunteering'];
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+  const hasHours = verifiedHours() > 0;
 
   function validate(n) {
     const e = {};
@@ -56,11 +70,20 @@ export default function Create() {
       if (!draft.mission.trim()) e.mission = 'One sentence on what happens and who it is for.';
       else if (draft.mission.length > MISSION_MAX) e.mission = `Trim it to ${MISSION_MAX} characters.`;
       if (draft.website.trim() && !/^https?:\/\/.+\..+/.test(draft.website.trim())) e.website = 'Use a full link starting with https://';
+      // Light QC: a founder should have done a little volunteering first. We
+      // waive it automatically if they already have verified hours in-app.
+      if (!hasHours && draft.founderExperience.trim().length < 12) {
+        e.founderExperience = 'A sentence or two about volunteering you have done. This is all we ask.';
+      }
     }
     if (n === 2) {
-      if (!draft.positions.length) e.positions = 'Add at least one position so students have something to apply for.';
+      if (isTeam) {
+        if (!draft.teamRoles.some((r) => r.name && r.name.trim())) e.teamRoles = 'Add at least one role so members know what they are joining.';
+      } else if (!draft.positions.length) {
+        e.positions = 'Add at least one position so students have something to apply for.';
+      }
     }
-    if (n === 3) {
+    if (n === 3 && !isTeam) {
       if (!/[A-Za-z]{3}\s+\d{1,2}/.test(draft.firstSession)) e.firstSession = 'Use a date like “Aug 9”.';
       if (!/\d{1,2}:\d{2}\s*(?:to|-|–)\s*\d{1,2}:\d{2}/.test(draft.time)) e.time = 'Use a range like “10:00 to 12:00”.';
       if (!safetyComplete(draft)) e.safety = 'All three safety commitments are required before a sponsor will take you.';
@@ -100,8 +123,15 @@ export default function Create() {
     }
     setPublishing(true);
     try {
-      const project = await perform('create.publish', () => createProject({ ...draft, sessions: generatedSessions(draft) }));
-      toast({ title: `${project.name} is live`, message: 'Sponsor requests are going out to vetted organizations near you.', tone: 'ok' });
+      const payload = isTeam
+        ? { ...draft, positions: [], sessions: [] }
+        : { ...draft, sessions: generatedSessions(draft) };
+      const project = await perform('create.publish', () => createProject(payload));
+      toast({
+        title: `${project.name} is live`,
+        message: isTeam ? 'Share the join link and start assigning tasks.' : 'Sponsor requests are going out to vetted organizations near you.',
+        tone: 'ok',
+      });
       router.replace(`/lead/${project.id}/overview`);
     } catch (err) {
       if (err && err.code === 'OFFLINE') toast({ title: 'You are offline', message: 'Your draft is saved. Publish once you reconnect.', tone: 'danger' });
@@ -183,10 +213,12 @@ export default function Create() {
         </div>
 
         <div>
-          {step === 1 ? <Step1 d={draft} set={set} errors={errors} onNext={next} router={router} /> : null}
-          {step === 2 ? <Step2 d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(1)} /> : null}
-          {step === 3 ? <Step3 d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(2)} /> : null}
-          {step === 4 ? <Step4 d={draft} publishing={publishing} onPublish={publish} onBack={() => goStep(3)} account={state.account} /> : null}
+          {step === 1 ? <Step1 d={draft} set={set} errors={errors} onNext={next} router={router} hasHours={hasHours} /> : null}
+          {step === 2 && !isTeam ? <Step2 d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(1)} /> : null}
+          {step === 2 && isTeam ? <Step2Team d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(1)} /> : null}
+          {step === 3 && !isTeam ? <Step3 d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(2)} /> : null}
+          {step === 3 && isTeam ? <Step3Team d={draft} set={set} errors={errors} onNext={next} onBack={() => goStep(2)} /> : null}
+          {step === 4 ? <Step4 d={draft} publishing={publishing} onPublish={publish} onBack={() => goStep(3)} account={state.account} isTeam={isTeam} /> : null}
         </div>
       </div>
     </div>
@@ -220,7 +252,7 @@ function BackBtn({ onClick }) {
   );
 }
 
-function Step1({ d, set, errors, onNext, router }) {
+function Step1({ d, set, errors, onNext, router, hasHours }) {
   function pickCover() {
     openModal({
       title: 'Cover photo',
@@ -254,7 +286,59 @@ function Step1({ d, set, errors, onNext, router }) {
     <Card>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Step 1 of 4</div>
       <h2 style={S('margin:14px 0 0;font:600 26px/1.1 Geist;letter-spacing:-0.035em')}>The basics</h2>
-      <div className="vu-2col-keep" style={S('margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
+
+      <div style={S(`margin-top:22px;font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>What kind of project is this?</div>
+      <div className="vu-2col-keep" style={S('margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px')}>
+        {ORG_TYPES.map((o) => {
+          const on = d.orgType === o.id;
+          return (
+            <Pressable
+              key={o.id}
+              label={`${o.label}: ${o.tagline}`}
+              onClick={() => set({ orgType: o.id })}
+              className={cx(H.card, H.press)}
+              style={s(
+                'text-align:left;padding:16px;border-radius:14px;cursor:pointer;transition:border-color .16s ease, background .16s ease',
+                `border:1.5px solid ${on ? '#C2603C' : '#E8E1D9'}`,
+                `background:${on ? '#FAF6F3' : '#fff'}`
+              )}
+            >
+              <div style={S('display:flex;align-items:center;gap:10px')}>
+                <div style={s('width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;font-size:17px', `background:${on ? '#C2603C' : '#F1EBE4'}`, `color:${on ? '#fff' : '#8A8179'}`)}>{o.icon}</div>
+                <div style={S('min-width:0')}>
+                  <div style={S('font:600 15px/1.2 Geist;letter-spacing:-0.02em;color:#1A1714')}>{o.label}</div>
+                  <div style={S(`margin-top:3px;font:500 11px/1.2 ${MONO};color:#C2603C`)}>{o.tagline}</div>
+                </div>
+                <div style={s('margin-left:auto;width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;font:600 11px/1 Geist', `border:1.5px solid ${on ? '#C2603C' : '#D8D0C7'}`, `background:${on ? '#C2603C' : '#fff'}`, 'color:#fff')}>{on ? '✓' : ''}</div>
+              </div>
+              <div style={S('margin-top:11px;font:450 12.5px/1.5 Geist;color:#57504A')}>{o.blurb}</div>
+              <div style={S('margin-top:8px;font:450 11px/1.4 Geist;color:#A9A097')}>e.g. {o.examples}</div>
+            </Pressable>
+          );
+        })}
+      </div>
+
+      <div style={S('margin-top:22px')}>
+        <TextArea
+          label="Your volunteering experience"
+          value={d.founderExperience}
+          onChange={(v) => set({ founderExperience: v })}
+          maxLength={280}
+          minHeight={64}
+          bg="#FCFAF8"
+          fs={14}
+          error={errors.founderExperience}
+          placeholder="A sentence or two — where you have volunteered and roughly how much."
+        />
+        <div className="vu-hint" style={S('margin-top:7px;font:450 12px/1.5 Geist;color:#8A8179')}>
+          {hasHours
+            ? 'We can see your verified hours in-app, so this is optional — but a line here helps sponsors trust a new project.'
+            : 'Founders do a little volunteering before leading. Just a sentence or two — nothing formal.'}
+        </div>
+      </div>
+
+      <div style={S('margin-top:24px;border-top:1px solid #F1EBE4;padding-top:22px')} />
+      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
         <Field label="Project name" value={d.name} onChange={(v) => set({ name: v })} bg="#FCFAF8" fs={14} maxLength={60} required error={errors.name} />
         <Select label="Cause area" value={d.cause} onChange={(v) => set({ cause: v })} options={CAUSE_OPTIONS} bg="#FCFAF8" fs={14} />
         <Field label="Site or location" value={d.site} onChange={(v) => set({ site: v })} bg="#FCFAF8" fs={14} maxLength={90} required error={errors.site} />
@@ -285,7 +369,7 @@ function Step1({ d, set, errors, onNext, router }) {
         <Select label="Visibility" value={d.visibility} onChange={(v) => set({ visibility: v })} options={VISIBILITY_OPTIONS} bg="#FCFAF8" fs={14} />
       </div>
       <div className="vu-stack vu-stack-gap" style={S('margin-top:24px;display:flex;align-items:center;gap:12px')}>
-        <NextBtn label="Continue to positions" onClick={onNext} />
+        <NextBtn label={d.orgType === 'team' ? 'Continue to roles' : 'Continue to positions'} onClick={onNext} />
         <Pressable
           label="Save and exit"
           onClick={() => {
@@ -537,6 +621,14 @@ function Step3({ d, set, errors, onNext, onBack }) {
         <Checkbox checked={d.safety.pair} onChange={(v) => set({ safety: { ...d.safety, pair: v } })} label="Never fewer than two volunteers on site" />
       </div>
       {errors.safety ? <div className="vu-err">{errors.safety}</div> : null}
+
+      <PipelineEditor
+        steps={d.pipeline}
+        onChange={(pipeline) => set({ pipeline })}
+        title="Before their first shift"
+        blurb="Quality control for new volunteers. Everyone you accept clears these steps before they can work a session — a briefing call, a consent form, role training. Reorder or remove any that do not apply."
+      />
+
       <div className="vu-stack vu-stack-gap" style={S('margin-top:24px;display:flex;align-items:center;gap:12px')}>
         <NextBtn label="Continue to review" onClick={onNext} />
         <BackBtn onClick={onBack} />
@@ -545,10 +637,88 @@ function Step3({ d, set, errors, onNext, onBack }) {
   );
 }
 
-function Step4({ d, publishing, onPublish, onBack, account }) {
+/* Shared pipeline editor: an ordered list of QC steps, edited inline. */
+function PipelineEditor({ steps, onChange, title, blurb }) {
+  const setStep = (i, patch) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const remove = (i) => onChange(steps.filter((_, j) => j !== i));
+  const move = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= steps.length) return;
+    const next = steps.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = () => onChange([...steps, { id: `pl-user-${steps.length}-${title.length}`, label: '', kind: 'check', required: true, note: '' }]);
+
+  return (
+    <div style={S('margin-top:24px')}>
+      <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>{title}</div>
+      <div style={S('margin-top:8px;font:450 13px/1.5 Geist;color:#6B635C;max-width:620px')}>{blurb}</div>
+      <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
+        {steps.map((s, i) => (
+          <div key={s.id || i} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+            <div style={S('display:flex;align-items:center;gap:10px')}>
+              <div style={S(`width:24px;height:24px;border-radius:8px;flex:none;display:grid;place-items:center;background:#F1EBE4;font:600 11px/1 ${MONO};color:#8A8179`)}>{i + 1}</div>
+              <div style={S('flex:1;min-width:0')}>
+                <Field label="" value={s.label} onChange={(v) => setStep(i, { label: v })} placeholder="e.g. Attend the Zoom briefing" bg="#fff" fs={14} maxLength={70} />
+              </div>
+              <div style={S('display:flex;gap:4px;flex:none')}>
+                <Pressable label="Move up" onClick={() => move(i, -1)} className={cx(H.secondary, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#8A8179;cursor:pointer')}>↑</Pressable>
+                <Pressable label="Move down" onClick={() => move(i, 1)} className={cx(H.secondary, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#8A8179;cursor:pointer')}>↓</Pressable>
+                <Pressable label="Remove step" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 12px/1 Geist;color:#A8482A;cursor:pointer')}>✕</Pressable>
+              </div>
+            </div>
+            <div className="vu-2col-keep" style={S('margin-top:10px;display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:center')}>
+              <Select label="" value={s.kind} options={TASK_KINDS.map((k) => ({ v: k, l: KIND_LABEL[k] }))} onChange={(v) => setStep(i, { kind: v })} bg="#fff" fs={13} />
+              <label style={S('display:flex;align-items:center;gap:8px;cursor:pointer;font:450 13px/1 Geist;color:#57504A')}>
+                <input type="checkbox" checked={s.required !== false} onChange={(e) => setStep(i, { required: e.target.checked })} style={S('width:15px;height:15px;accent-color:#C2603C;cursor:pointer')} />
+                Required to work a shift
+              </label>
+            </div>
+            <div style={S('margin-top:10px')}>
+              <Field label="" value={s.note || ''} onChange={(v) => setStep(i, { note: v })} placeholder="A short note the volunteer sees (optional)" bg="#fff" fs={13} maxLength={120} />
+            </div>
+          </div>
+        ))}
+        {!steps.length ? (
+          <div style={S('padding:16px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.5 Geist;color:#8A8179;text-align:center')}>
+            No steps yet. Accepted volunteers can work right away. Add a step to gate the first shift.
+          </div>
+        ) : null}
+      </div>
+      <Pressable
+        label="Add a pipeline step"
+        onClick={add}
+        className={cx(H.secondary, H.press)}
+        style={S('margin-top:12px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}
+      >
+        + Add a step
+      </Pressable>
+    </div>
+  );
+}
+
+function Step4({ d, publishing, onPublish, onBack, account, isTeam }) {
   const slots = totalSlots(d);
   const sessions = generatedSessions(d);
   const safe = safetyComplete(d);
+  const roles = (d.teamRoles || []).filter((r) => r.name && r.name.trim());
+  const starter = (d.starterTasks || []).filter((t) => t.title && t.title.trim());
+  const pipe = (d.pipeline || []).filter((s) => s.label && s.label.trim());
+  const rows = isTeam
+    ? [
+        ['Type', 'Project team · task board'],
+        ['Roles', `${roles.length} with briefings`],
+        ['Starter tasks', `${starter.length} on the board`],
+        ['Members', d.audience.length ? d.audience.join(', ') : 'Open to everyone'],
+      ]
+    : [
+        ['Type', 'Volunteer program · shifts'],
+        ['Positions', `${d.positions.length} defined, ${slots} slots`],
+        ['Sessions', `${sessions.length} ${/one time/i.test(d.repeats) ? 'one off' : 'weekly'}`],
+        ['Pipeline', pipe.length ? `${pipe.length} step${pipe.length === 1 ? '' : 's'} before first shift` : 'None — volunteers work right away'],
+        ['Applications', d.audience.length ? d.audience.join(', ') : 'Open to everyone'],
+      ];
   return (
     <Card>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Step 4 of 4</div>
@@ -562,28 +732,128 @@ function Step4({ d, publishing, onPublish, onBack, account }) {
           <div style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#8A8179')}>
             Led by {account.firstName} {account.lastName ? `${account.lastName[0]}.` : ''} · Grade {account.grade}
           </div>
-          <div style={S(`margin-top:10px;font:500 11px/1 ${MONO};color:#C2603C`)}>0 of {slots} crew</div>
+          <div style={S(`margin-top:10px;font:500 11px/1 ${MONO};color:#C2603C`)}>{isTeam ? `${roles.length} role${roles.length === 1 ? '' : 's'} · ${starter.length} task${starter.length === 1 ? '' : 's'}` : `0 of ${slots} crew`}</div>
         </div>
         <div style={S('border-radius:12px;border:1px solid #F1EBE4;overflow:hidden')}>
-          {[
-            ['Sponsor', 'Requests go out on publish'],
-            ['Positions', `${d.positions.length} defined, ${slots} slots`],
-            ['Sessions', `${sessions.length} ${/one time/i.test(d.repeats) ? 'one off' : 'weekly'}`],
-            ['Applications', d.audience.length ? d.audience.join(', ') : 'Open to everyone'],
-          ].map(([l, v]) => (
+          {rows.map(([l, v]) => (
             <div key={l} style={S('padding:13px 16px;border-bottom:1px solid #F1EBE4;display:flex;justify-content:space-between;gap:12px;font:450 13px/1 Geist;color:#57504A')}>
               <span>{l}</span>
-              <span style={S('color:#1A1714;font-weight:500')}>{v}</span>
+              <span style={S('color:#1A1714;font-weight:500;text-align:right')}>{v}</span>
             </div>
           ))}
           <div style={S('padding:13px 16px;display:flex;justify-content:space-between;gap:12px;font:450 13px/1 Geist;color:#57504A')}>
-            <span>Safety plan</span>
-            <span style={s('font-weight:500', `color:${safe ? '#3F6B4E' : '#8A5A20'}`)}>{safe ? 'Ready for sponsor' : 'Needs attention'}</span>
+            <span>{isTeam ? 'Ready to run' : 'Safety plan'}</span>
+            <span style={s('font-weight:500', `color:${isTeam || safe ? '#3F6B4E' : '#8A5A20'}`)}>{isTeam ? 'Yes' : safe ? 'Ready for sponsor' : 'Needs attention'}</span>
           </div>
         </div>
       </div>
       <div className="vu-stack vu-stack-gap" style={S('margin-top:22px;display:flex;align-items:center;gap:12px')}>
-        <NextBtn label="Publish and start recruiting" onClick={onPublish} busy={publishing} />
+        <NextBtn label={isTeam ? 'Publish and start assigning' : 'Publish and start recruiting'} onClick={onPublish} busy={publishing} />
+        <BackBtn onClick={onBack} />
+      </div>
+    </Card>
+  );
+}
+
+const ROLE_COLORS = ['#C2603C', '#3F6B4E', '#5B6BB0', '#8A5A20', '#9B4A6B', '#4A7C8A'];
+
+function Step2Team({ d, set, errors, onNext, onBack }) {
+  const roles = d.teamRoles || [];
+  const setRole = (i, patch) => set({ teamRoles: roles.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  const remove = (i) => {
+    const goneId = roles[i] && roles[i].id;
+    set({
+      teamRoles: roles.filter((_, j) => j !== i),
+      starterTasks: (d.starterTasks || []).map((t) => (t.roleId === goneId ? { ...t, roleId: '' } : t)),
+    });
+  };
+  const add = () => set({ teamRoles: [...roles, { id: `tr-user-${roles.length}-${Date.now().toString(36)}`, name: '', briefing: '', color: ROLE_COLORS[roles.length % ROLE_COLORS.length] }] });
+
+  return (
+    <Card>
+      <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Step 2 of 4</div>
+      <h2 style={S('margin:14px 0 0;font:600 26px/1.1 Geist;letter-spacing:-0.035em')}>Roles and briefings</h2>
+      <div style={S('margin-top:8px;font:450 14px/1.5 Geist;color:#6B635C;max-width:620px')}>
+        Every member joins a role. The briefing is what they read first — what the role owns, how you work, and where to look. Members confirm they read it before their tasks unlock.
+      </div>
+
+      <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:14px')}>
+        {roles.map((r, i) => (
+          <div key={r.id || i} style={S('padding:16px;border-radius:14px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+            <div style={S('display:flex;align-items:center;gap:10px')}>
+              <div style={s('width:10px;height:10px;border-radius:50%;flex:none', `background:${r.color || '#C2603C'}`)} />
+              <div style={S('flex:1;min-width:0')}>
+                <Field label="" value={r.name} onChange={(v) => setRole(i, { name: v })} placeholder="Role name — e.g. Outreach lead" bg="#fff" fs={14} maxLength={40} />
+              </div>
+              <Pressable label="Remove role" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:30px;height:30px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 13px/1 Geist;color:#A8482A;cursor:pointer;flex:none')}>✕</Pressable>
+            </div>
+            <div style={S('margin-top:10px;display:flex;gap:6px;flex-wrap:wrap')}>
+              {ROLE_COLORS.map((c) => (
+                <Pressable
+                  key={c}
+                  label="Set role color"
+                  onClick={() => setRole(i, { color: c })}
+                  style={s('width:22px;height:22px;border-radius:50%;cursor:pointer', `background:${c}`, `border:2px solid ${r.color === c ? '#1A1714' : 'transparent'}`)}
+                />
+              ))}
+            </div>
+            <div style={S('margin-top:12px')}>
+              <TextArea label="Briefing" value={r.briefing} onChange={(v) => setRole(i, { briefing: v })} maxLength={600} minHeight={80} bg="#fff" fs={13} placeholder="What this role owns, how the team works, and what to do first." />
+            </div>
+          </div>
+        ))}
+      </div>
+      {errors.teamRoles ? <div className="vu-err">{errors.teamRoles}</div> : null}
+
+      <Pressable label="Add a role" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+        + Add a role
+      </Pressable>
+
+      <div className="vu-stack vu-stack-gap" style={S('margin-top:24px;display:flex;align-items:center;gap:12px')}>
+        <NextBtn label="Continue to tasks" onClick={onNext} />
+        <BackBtn onClick={onBack} />
+      </div>
+    </Card>
+  );
+}
+
+function Step3Team({ d, set, errors, onNext, onBack }) {
+  const tasks = d.starterTasks || [];
+  const roles = (d.teamRoles || []).filter((r) => r.name && r.name.trim());
+  const roleOpts = [{ v: '', l: 'Unassigned role' }, ...roles.map((r) => ({ v: r.id, l: r.name }))];
+  const setTask = (i, patch) => set({ starterTasks: tasks.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  const remove = (i) => set({ starterTasks: tasks.filter((_, j) => j !== i) });
+  const add = () => set({ starterTasks: [...tasks, { id: `st-user-${tasks.length}-${Date.now().toString(36)}`, title: '', roleId: roles[0] ? roles[0].id : '' }] });
+
+  return (
+    <Card>
+      <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Step 3 of 4</div>
+      <h2 style={S('margin:14px 0 0;font:600 26px/1.1 Geist;letter-spacing:-0.035em')}>Starter tasks</h2>
+      <div style={S('margin-top:8px;font:450 14px/1.5 Geist;color:#6B635C;max-width:620px')}>
+        Seed the board so no one lands on an empty page. Tag each task to a role now; assign it to a person once your team fills in. You can add, move and reassign everything later.
+      </div>
+
+      <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:10px')}>
+        {tasks.map((t, i) => (
+          <div key={t.id || i} className="vu-2col-keep" style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;display:grid;grid-template-columns:1fr 200px 34px;gap:12px;align-items:center')}>
+            <Field label="" value={t.title} onChange={(v) => setTask(i, { title: v })} placeholder="Task — e.g. Draft the outreach email" bg="#fff" fs={14} maxLength={80} />
+            <Select label="" value={t.roleId || ''} options={roleOpts} onChange={(v) => setTask(i, { roleId: v })} bg="#fff" fs={13} />
+            <Pressable label="Remove task" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:30px;height:30px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>✕</Pressable>
+          </div>
+        ))}
+        {!tasks.length ? (
+          <div style={S('padding:16px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.5 Geist;color:#8A8179;text-align:center')}>
+            No starter tasks. That is fine — you can build the board once you publish.
+          </div>
+        ) : null}
+      </div>
+
+      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+        + Add a task
+      </Pressable>
+
+      <div className="vu-stack vu-stack-gap" style={S('margin-top:24px;display:flex;align-items:center;gap:12px')}>
+        <NextBtn label="Continue to review" onClick={onNext} />
         <BackBtn onClick={onBack} />
       </div>
     </Card>

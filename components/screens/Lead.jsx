@@ -12,12 +12,15 @@ import { ImageSlot, Pressable, EmptyState, Field, Select, Chip } from '../ui.jsx
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
 import CrossApplications from '../CrossApplications.jsx';
+import TasksTab from '../lead/TasksTab.jsx';
+import PipelineTab from '../lead/PipelineTab.jsx';
 import {
   getProject, taskProgress, toggleTask, pendingApplications, pendingHours,
   positionLabel, positionAppsLabel, sessionStatus, sessionTone, shortSessions, peopleStats, filterPeople,
   PERSON_TONE, tone, copyText, upsertPosition, duplicatePosition, deletePosition,
   upsertSession, deleteSession, repeatWeekly, regenerateCode, setReminder, addPerson, updatePerson,
   removePerson, addNote, rosterCSV, download, setActiveProject, projects as allProjects,
+  isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
 } from '../../lib/db.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
@@ -25,7 +28,7 @@ import {
 
 const MONO = "'Geist Mono',monospace";
 
-export const LEAD_TABS = [
+const VOL_TABS = [
   ['overview', 'Overview'],
   ['people', 'People'],
   ['positions', 'Positions'],
@@ -34,9 +37,25 @@ export const LEAD_TABS = [
   ['applications', 'Applications'],
   ['hours', 'Hours'],
   ['quality', 'Quality'],
+  ['pipeline', 'Pipeline'],
   ['messages', 'Messages'],
   ['settings', 'Settings'],
 ];
+
+const TEAM_TABS = [
+  ['overview', 'Overview'],
+  ['people', 'Team'],
+  ['tasks', 'Tasks'],
+  ['messages', 'Messages'],
+  ['settings', 'Settings'],
+];
+
+export function tabsFor(p) {
+  return isTeam(p) ? TEAM_TABS : VOL_TABS;
+}
+
+// Back-compat export (some tooling references it); the volunteer set is the default.
+export const LEAD_TABS = VOL_TABS;
 
 export default function Lead({ projectId, tab: tabParam }) {
   const router = useRouter();
@@ -45,7 +64,8 @@ export default function Lead({ projectId, tab: tabParam }) {
   const { state } = useSnapshot();
 
   const p = getProject(projectId || state.activeProjectId);
-  const tab = LEAD_TABS.some(([k]) => k === tabParam) ? tabParam : 'overview';
+  const TABS = tabsFor(p);
+  const tab = TABS.some(([k]) => k === tabParam) ? tabParam : 'overview';
 
   if (!p) {
     return (
@@ -159,7 +179,7 @@ export default function Lead({ projectId, tab: tabParam }) {
       </div>
 
       <div className="vu-scroll-x" role="tablist" aria-label="Project sections" style={S('margin-top:22px;border-bottom:1px solid #E8E1D9;display:flex;gap:2px')}>
-        {LEAD_TABS.map(([k, label]) => {
+        {TABS.map(([k, label]) => {
           const on = tab === k;
           return (
             <Pressable
@@ -185,8 +205,10 @@ export default function Lead({ projectId, tab: tabParam }) {
       </div>
 
       <div role="tabpanel" aria-label={tab}>
-        {tab === 'overview' ? <Overview p={p} goTab={goTab} /> : null}
+        {tab === 'overview' ? (isTeam(p) ? <TeamOverview p={p} goTab={goTab} /> : <Overview p={p} goTab={goTab} />) : null}
         {tab === 'people' ? <People p={p} params={params} setParam={setParam} /> : null}
+        {tab === 'tasks' ? <TasksTab p={p} /> : null}
+        {tab === 'pipeline' ? <PipelineTab p={p} /> : null}
         {tab === 'positions' ? <Positions p={p} /> : null}
         {tab === 'shifts' ? <Shifts p={p} /> : null}
         {tab === 'attendance' ? <AttendanceTab p={p} params={params} setParam={setParam} goTab={goTab} /> : null}
@@ -455,6 +477,129 @@ function SideRow({ l, v }) {
     <div style={S('display:flex;justify-content:space-between;gap:10px')}>
       <span>{l}</span>
       <span style={S('color:#1A1714;font-weight:500')}>{v}</span>
+    </div>
+  );
+}
+
+/* ---- team overview (orgType 'team') ------------------------------------- */
+
+function TeamOverview({ p, goTab }) {
+  const stats = taskStats(p);
+  const roles = taskRoles(p);
+  const tasks = tasksOf(p);
+  const inProgress = tasks.filter((t) => t.status === 'doing').slice(0, 4);
+  const unassigned = tasks.filter((t) => !t.assigneeId && t.status !== 'done');
+  const members = p.people.filter((x) => x.st === 'Active' || x.st === 'Onboarding');
+  const needsBriefing = members.filter((m) => m.teamRoleId && !(m.briefingAck && m.briefingAck[m.teamRoleId]));
+
+  return (
+    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
+      <div style={S('display:flex;flex-direction:column;gap:16px')}>
+        <CrossApplications />
+
+        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
+          <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
+            <div>
+              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Task board</div>
+              <div style={S('margin-top:12px;font:600 22px/1.15 Geist;letter-spacing:-0.03em')}>{stats.done} of {stats.total} done</div>
+              <div style={S('margin-top:7px;font:450 13px/1.45 Geist;color:#8A8179')}>{stats.doing} in progress · {stats.todo} to do · {stats.roles} role{stats.roles === 1 ? '' : 's'}</div>
+            </div>
+            <Pressable label="Open the board" onClick={() => goTab('tasks')} className={cx(H.primary, H.press)} style={S('flex:none;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
+              <span aria-hidden="true" style={S('font-size:10px;opacity:.9')}>▷</span>
+              Open board
+            </Pressable>
+          </div>
+          <div style={S('margin-top:16px;height:8px;border-radius:99px;background:#F1EBE4;overflow:hidden')}>
+            <div style={s('height:100%;border-radius:99px;background:linear-gradient(90deg,#D2775B,#C2603C);transition:width .3s ease', `width:${stats.pct}%`)} />
+          </div>
+        </div>
+
+        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
+          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
+            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>In progress now</div>
+              <Pressable label="Open the board" onClick={() => goTab('tasks')} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>Board</Pressable>
+            </div>
+            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
+              {inProgress.length ? inProgress.map((t) => {
+                const r = roleOf(p, t.roleId);
+                const who = p.people.find((x) => x.id === t.assigneeId);
+                return (
+                  <div key={t.id} style={S('padding:12px 14px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+                    <div style={S('font:500 13px/1.35 Geist;color:#1A1714')}>{t.title}</div>
+                    <div style={S('margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
+                      {r ? <span style={s('padding:2px 7px;border-radius:6px;font:500 10px/1 Geist', `background:${r.color}18`, `color:${r.color}`)}>{r.name}</span> : null}
+                      {who ? <span style={S('font:450 11px/1 Geist;color:#8A8179')}>{who.short || who.n}</span> : null}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>Nothing in progress. Move a task to In progress on the board.</div>
+              )}
+            </div>
+          </div>
+
+          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Activity</div>
+            <div style={S('margin-top:14px;display:flex;flex-direction:column')}>
+              {p.activity.length ? p.activity.slice(0, 5).map((a) => (
+                <div key={a.id} style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #F1EBE4')}>
+                  <div style={S('font:450 13px/1.45 Geist;color:#332D28')}>{a.t}</div>
+                  <div style={S(`font:500 11px/1 ${MONO};color:#A9A097;flex:none;margin-top:2px`)}>{a.w}</div>
+                </div>
+              )) : <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>Task moves and new members land here.</div>}
+            </div>
+          </div>
+        </div>
+
+        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
+          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Roles</div>
+            <Pressable label="Manage roles" onClick={() => goTab('tasks')} className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;cursor:pointer')}>Manage</Pressable>
+          </div>
+          <div className="vu-3col" style={S('margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px')}>
+            {roles.length ? roles.map((r) => {
+              const count = members.filter((m) => m.teamRoleId === r.id).length;
+              return (
+                <div key={r.id} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+                  <div style={S('display:flex;align-items:center;gap:8px')}>
+                    <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${r.color}`)} />
+                    <div style={S('font:600 13px/1.2 Geist')}>{r.name}</div>
+                  </div>
+                  <div style={S(`margin-top:9px;font:500 11px/1 ${MONO};color:#A9A097`)}>{count} member{count === 1 ? '' : 's'}</div>
+                </div>
+              );
+            }) : (
+              <div style={S('grid-column:1 / -1')}>
+                <EmptyState compact title="No roles yet" body="Add roles with briefings so members know what they own." cta="Set up roles" onCta={() => goTab('tasks')} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={S('display:flex;flex-direction:column;gap:14px')}>
+        <div style={S('padding:20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
+          <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Needs you</div>
+          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
+            {unassigned.length ? <NeedCard title={`${unassigned.length} task${unassigned.length === 1 ? '' : 's'} unassigned`} sub="Give each one an owner" onClick={() => goTab('tasks')} /> : null}
+            {needsBriefing.length ? <NeedCard title={`${needsBriefing.length} member${needsBriefing.length === 1 ? '' : 's'} not briefed`} sub="They confirm before tasks unlock" onClick={() => goTab('people')} /> : null}
+            {!unassigned.length && !needsBriefing.length ? (
+              <div style={S('padding:14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#6B635C')}>Everything is assigned and everyone is briefed. Nice.</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
+          <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Mission</div>
+          <div style={S('margin-top:10px;font:450 14px/1.55 Geist;color:#332D28')}>{p.mission}</div>
+          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
+            <SideRow l="Team size" v={members.length} />
+            <SideRow l="Cadence" v={p.cadence} />
+            <SideRow l="Term" v={`${p.termWeeks} weeks`} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
