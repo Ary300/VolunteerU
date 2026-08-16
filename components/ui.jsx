@@ -29,18 +29,21 @@ export function ImageSlot({ src, shape = 'rounded', radius = 12, placeholder = '
   const br =
     shape === 'circle' ? 'border-radius:50%' : shape === 'pill' ? 'border-radius:999px' : shape === 'rounded' ? `border-radius:${radius}px` : '';
 
+  const hasSrc = Boolean(src);
   return (
-    <div className="vu-slot" data-state={status} style={S(br)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        ref={ref}
-        src={src}
-        alt={alt}
-        loading="lazy"
-        decoding="async"
-        onLoad={() => setStatus('ready')}
-        onError={() => setStatus('failed')}
-      />
+    <div className="vu-slot" data-state={hasSrc ? status : 'failed'} style={S(br)}>
+      {hasSrc ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          ref={ref}
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setStatus('ready')}
+          onError={() => setStatus('failed')}
+        />
+      ) : null}
       <span className="vu-slot-ph" aria-hidden="true">
         <span style={S('font-size:13px')}>▨</span>
         {placeholder}

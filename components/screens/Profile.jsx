@@ -356,13 +356,28 @@ export default function Profile() {
                 })}
               </div>
             </div>
-            <div className="vu-stack vu-stack-gap" style={S('margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-              <div style={S('font:450 12px/1.4 Geist;color:#8A8179')}>
-                Show rate {st.showRate}% · on time {st.onTime}% · average score {st.averageScore}
+            <div style={S('margin-top:16px;padding:16px 18px;border-radius:14px;border:1px solid #E8E1D9;background:#FCFAF8')}>
+              <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Reliability</div>
+                <Pressable label="Request a review of a score" onClick={requestReview} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
+                  Request a review
+                </Pressable>
               </div>
-              <Pressable label="Request a review of a score" onClick={requestReview} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
-                Request a review
-              </Pressable>
+              <div style={S('margin-top:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px')}>
+                {[
+                  { l: 'Show rate', v: `${st.showRate}%` },
+                  { l: 'On time', v: `${st.onTime}%` },
+                  { l: 'Average score', v: st.averageScore },
+                ].map((k) => (
+                  <div key={k.l}>
+                    <div style={S('font:600 24px/1 Geist;letter-spacing:-0.03em;color:#1A1714')}>{k.v}</div>
+                    <div style={S('margin-top:5px;font:450 12px/1 Geist;color:#8A8179')}>{k.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={S('margin-top:12px;font:450 12px/1.5 Geist;color:#8A8179')}>
+                Organizations see this when you apply. A strong, consistent record helps you get picked and invited back.
+              </div>
             </div>
 
             <div style={S('height:1px;background:#F1EBE4;margin:26px 0')} />
