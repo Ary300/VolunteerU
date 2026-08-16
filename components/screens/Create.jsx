@@ -266,6 +266,14 @@ function Step1({ d, set, errors, onNext, router }) {
       <div style={S('margin-top:20px')}>
         <TextArea label="Short bio for the project page" value={d.bio} onChange={(v) => set({ bio: v })} maxLength={400} minHeight={70} bg="#FCFAF8" fs={14} placeholder="What a new volunteer should know before applying." />
       </div>
+      <div style={S('margin-top:20px')}>
+        <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Track record so far</div>
+        <div style={S('margin-top:6px;font:450 12px/1.5 Geist;color:#8A8179')}>Run this before? Log what you have already done so your page shows it from day one. Leave blank if you are just starting out.</div>
+        <div className="vu-2col-keep" style={S('margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
+          <Field label="Events hosted so far" value={d.eventsHosted} onChange={(v) => set({ eventsHosted: v.replace(/\D/g, '').slice(0, 5) })} placeholder="0" bg="#FCFAF8" fs={14} inputMode="numeric" />
+          <Field label="Volunteers reached, roughly" value={d.approxVolunteers} onChange={(v) => set({ approxVolunteers: v.replace(/\D/g, '').slice(0, 6) })} placeholder="0" bg="#FCFAF8" fs={14} inputMode="numeric" />
+        </div>
+      </div>
       <div className="vu-3col" style={S('margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px')}>
         <div>
           <div style={S('font:500 12px/1 Geist;color:#57504A')}>Cover photo</div>

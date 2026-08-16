@@ -418,6 +418,16 @@ function Overview({ p, goTab }) {
             <SideRow l="Recruiting" v={p.leadHours.recruiting.toFixed(1)} />
           </div>
         </div>
+
+        {(p.eventsHosted > 0 || p.approxVolunteers > 0) ? (
+          <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Track record</div>
+            <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
+              <SideRow l="Events hosted" v={p.eventsHosted} />
+              <SideRow l="Volunteers reached" v={p.approxVolunteers} />
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
