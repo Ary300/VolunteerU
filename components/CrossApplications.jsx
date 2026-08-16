@@ -10,7 +10,8 @@
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
 import { loadOwnerApplications, setApplicationStatus } from '../lib/listings.js';
-import { toast } from '../lib/overlays.js';
+import { toast, openModal } from '../lib/overlays.js';
+import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -71,6 +72,21 @@ export default function CrossApplications() {
               </div>
             </div>
             <div style={S('display:flex;gap:8px;flex:none')}>
+              <button
+                type="button"
+                onClick={() =>
+                  openModal({
+                    title: app.applicant_name,
+                    subtitle: app.listings && app.listings.name ? `About ${app.listings.name}` : 'Application',
+                    Body: () => (
+                      <MessageThread applicationId={app.id} recipientId={app.applicant_id} recipientName={app.applicant_name} />
+                    ),
+                  })
+                }
+                style={S('padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#57504A;cursor:pointer')}
+              >
+                Message
+              </button>
               <button
                 type="button"
                 onClick={() => decide(app, 'declined')}

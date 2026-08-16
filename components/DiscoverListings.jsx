@@ -10,21 +10,31 @@
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
 import { loadDiscoverListings, applyToListing, loadMyApplications } from '../lib/listings.js';
-import { toast } from '../lib/overlays.js';
+import { toast, openModal } from '../lib/overlays.js';
+import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
 export default function DiscoverListings() {
   const [listings, setListings] = useState(null);
-  const [applied, setApplied] = useState(new Set());
+  const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
+
+  async function refreshMine() {
+    try {
+      const mine = await loadMyApplications();
+      setApplied(new Map(mine.map((a) => [a.listing_id, a])));
+    } catch {
+      /* keep what we have */
+    }
+  }
 
   useEffect(() => {
     (async () => {
       try {
-        const [ls, mine] = await Promise.all([loadDiscoverListings(), loadMyApplications()]);
+        const ls = await loadDiscoverListings();
         setListings(ls);
-        setApplied(new Set(mine.map((a) => a.listing_id)));
+        await refreshMine();
       } catch {
         setListings([]);
       }
@@ -38,12 +48,22 @@ export default function DiscoverListings() {
     setBusy(listing.id);
     try {
       await applyToListing(listing, { note: '' });
-      setApplied((prev) => new Set([...prev, listing.id]));
+      await refreshMine();
       toast({ title: `Application sent to ${listing.name}`, message: 'The founder sees it in their workspace.', tone: 'ok' });
     } catch (e) {
       toast({ title: 'We could not send that', message: e.message, tone: 'danger' });
     }
     setBusy(null);
+  }
+
+  const STATUS = { pending: 'Under review', accepted: 'Accepted', declined: 'Not this time', withdrawn: 'Withdrawn' };
+
+  function message(listing, app) {
+    openModal({
+      title: listing.name,
+      subtitle: STATUS[app.status] || 'Application',
+      Body: () => <MessageThread applicationId={app.id} recipientId={listing.owner_id} recipientName={listing.name} />,
+    });
   }
 
   return (
@@ -53,7 +73,7 @@ export default function DiscoverListings() {
       </div>
       <div style={S('display:flex;flex-direction:column;gap:12px')}>
         {listings.map((l) => {
-          const has = applied.has(l.id);
+          const app = applied.get(l.id);
           return (
             <div
               key={l.id}
@@ -72,19 +92,29 @@ export default function DiscoverListings() {
                   <div style={S('margin-top:8px;font:450 13px/1.5 Geist;color:#57504A;max-width:560px')}>{l.mission}</div>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => apply(l)}
-                disabled={has || busy === l.id}
-                style={S(
-                  'flex:none;padding:0 16px;height:40px;border-radius:11px;font:600 13px/1 Geist;cursor:pointer;' +
-                    (has
-                      ? 'border:1px solid #E4DDD4;background:#FCFAF8;color:#57504A'
-                      : 'border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff'),
-                )}
-              >
-                {has ? '✓ Applied' : busy === l.id ? 'Sending…' : 'Apply'}
-              </button>
+              {app ? (
+                <div style={S('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px')}>
+                  <span style={S(`padding:5px 10px;border-radius:8px;font:500 11px/1 ${MONO};background:${app.status === 'accepted' ? '#EAF3EC' : app.status === 'declined' ? '#F5E7E0' : '#FDF3E7'};color:${app.status === 'accepted' ? '#3F6B4E' : app.status === 'declined' ? '#A8482A' : '#8A5A20'}`)}>
+                    {STATUS[app.status] || 'Applied'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => message(l, app)}
+                    style={S('padding:0 14px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}
+                  >
+                    Message
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => apply(l)}
+                  disabled={busy === l.id}
+                  style={S('flex:none;padding:0 16px;height:40px;border-radius:11px;font:600 13px/1 Geist;cursor:pointer;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff')}
+                >
+                  {busy === l.id ? 'Sending…' : 'Apply'}
+                </button>
+              )}
             </div>
           );
         })}
