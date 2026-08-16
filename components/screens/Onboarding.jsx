@@ -32,12 +32,12 @@ const RADIUS_OPTIONS = [
 ];
 
 const DEFAULT_START = {
-  name: 'Saturday Reading Circle',
+  name: '',
   cause: 'Education',
-  site: 'Library, north side',
+  site: '',
   crew: '8 to 12',
-  mission: 'Weekly reading practice for K-3 students, run by high schoolers who show up every Saturday.',
-  positions: ['Tutor', 'Check-in lead'],
+  mission: '',
+  positions: [],
   experience: 'First time',
 };
 

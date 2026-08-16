@@ -256,7 +256,7 @@ function Overview({ p, goTab }) {
               <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Next session</div>
               <div style={S('margin-top:12px;font:600 22px/1.15 Geist;letter-spacing:-0.03em')}>{p.nextSession.label}</div>
               <div style={S('margin-top:7px;font:450 13px/1.45 Geist;color:#8A8179')}>
-                {p.siteShort} · {p.nextSession.confirmed} of {p.nextSession.confirmed + p.nextSession.pending - 1 || p.nextSession.confirmed + 1} seats staffed · check-in code {p.checkinCode}
+                {p.siteShort} · {p.nextSession.confirmed} of {Math.max(p.nextSession.confirmed + p.nextSession.pending, p.crewTarget || (p.sessions[0] && p.sessions[0].cap) || p.nextSession.confirmed)} seats staffed · check-in code {p.checkinCode}
               </div>
             </div>
             <div style={S('display:flex;gap:9px;flex:none')}>
