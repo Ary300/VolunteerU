@@ -57,6 +57,7 @@ export default function Discover() {
   const sort = params.get('sort') || 'match';
   const savedOnly = params.get('saved') === '1';
   const tab = params.get('tab') === 'projects' ? 'projects' : 'openings';
+  const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
 
   const { state } = useSnapshot();
   const [draftQuery, setDraftQuery] = useState(q);
@@ -86,7 +87,7 @@ export default function Discover() {
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  const filters = { q, causes, windows, maxMiles, sort, savedOnly };
+  const filters = { q, causes, windows, maxMiles, sort, savedOnly, place };
   const rows = searchOpportunities(filters);
   const nFilters = causes.length + windows.length + (maxMiles != null ? 1 : 0) + (savedOnly ? 1 : 0);
   const withinRadius = state.opportunities.filter((o) => o.distance <= state.prefs.radius).length;
@@ -444,6 +445,33 @@ export default function Discover() {
           </div>
         ) : null}
       </div>
+
+      {tab === 'openings' ? (
+        <div role="group" aria-label="Where openings happen" style={S('margin-top:14px;display:flex;gap:6px')}>
+          {[{ k: 'all', t: 'All' }, { k: 'person', t: 'In person' }, { k: 'online', t: 'Online' }].map((o) => {
+            const on = place === o.k;
+            return (
+              <Pressable
+                key={o.k}
+                role="radio"
+                aria-checked={on}
+                label={o.t}
+                onClick={() => setParams({ place: o.k === 'all' ? null : o.k })}
+                className={cx(H.press)}
+                style={s(
+                  'padding:8px 14px;border-radius:9px',
+                  `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
+                  `background:${on ? '#1F1B18' : '#FFFFFF'}`,
+                  `color:${on ? '#FFFFFF' : '#57504A'}`,
+                  'font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
+                )}
+              >
+                {o.t}
+              </Pressable>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div role="group" aria-label="Quick filters" style={S('margin-top:14px;display:flex;flex-wrap:wrap;gap:8px')}>
         {CHIPS.map((c) => {
