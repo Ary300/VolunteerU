@@ -11,6 +11,7 @@ import { AddressMap } from '../MapPanel.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { getOpportunity, isSaved, toggleSaved, spotsLeft, applicationFor, withdrawApplication, copyText } from '../../lib/db.js';
+import { googleCalUrl } from '../../lib/calendar.js';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -225,6 +226,17 @@ export default function Detail({ id }) {
                     {app.st === 'Accepted' ? 'Check-in opens 15 minutes before start.' : `Sent ${app.when}. ${opp.replyTime}`}
                   </div>
                 </div>
+                {googleCalUrl(opp, selected) ? (
+                  <a
+                    href={googleCalUrl(opp, selected)}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className={cx(H.secondaryLift, H.press)}
+                    style={S('margin-top:12px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;text-decoration:none;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+                  >
+                    Add to calendar ↗
+                  </a>
+                ) : null}
                 <Pressable
                   label="Withdraw this application"
                   onClick={withdraw}
