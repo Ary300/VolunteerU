@@ -10,10 +10,50 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, Field } from '../ui.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
-import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount } from '../../lib/db.js';
+import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount, logHours } from '../../lib/db.js';
 import MyRatings from '../MyRatings.jsx';
 
 const MONO = "'Geist Mono',monospace";
+
+function LogHoursForm({ api }) {
+  const [f, setF] = useState({ org: '', activity: '', date: '', hrs: '', note: '' });
+  const [err, setErr] = useState({});
+  function save() {
+    const e = {};
+    if (!f.activity.trim()) e.activity = 'What did you do?';
+    const n = Number(f.hrs);
+    if (!n || n <= 0 || n > 24) e.hrs = 'Enter hours between 0 and 24.';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    logHours(f);
+    api.close();
+    toast({ title: 'Hours logged', message: 'Saved to your record as self-reported.', tone: 'ok' });
+  }
+  return (
+    <div>
+      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="Organization" value={f.org} onChange={(v) => setF((x) => ({ ...x, org: v }))} placeholder="Who you helped" maxLength={60} />
+        <Field label="Date" value={f.date} onChange={(v) => setF((x) => ({ ...x, date: v }))} placeholder="e.g. Aug 9" maxLength={20} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="What you did" value={f.activity} onChange={(v) => setF((x) => ({ ...x, activity: v }))} placeholder="e.g. Tutored reading, packed food boxes" maxLength={80} required error={err.activity} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="Hours" value={f.hrs} onChange={(v) => setF((x) => ({ ...x, hrs: v.replace(/[^\d.]/g, '').slice(0, 5) }))} placeholder="e.g. 2.5" inputMode="decimal" required error={err.hrs} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="Note (optional)" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} placeholder="Anything worth remembering" maxLength={140} />
+      </div>
+      <div style={S('margin-top:12px;padding:11px 13px;border-radius:11px;background:#FDF3E7;border:1px solid #F3E3CD;font:450 12px/1.5 Geist;color:#8A5A20')}>
+        Logged hours are self-reported until an organization confirms them. Confirmed hours count on your verified record.
+      </div>
+      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
+        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
+        <Pressable label="Log hours" onClick={save} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>Log hours</Pressable>
+      </div>
+    </div>
+  );
+}
 
 export default function Profile() {
   const router = useRouter();
@@ -46,6 +86,14 @@ export default function Profile() {
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
+
+  function logService() {
+    openModal({
+      title: 'Log your hours',
+      subtitle: 'Add service you have done. It saves to your account; an organization can confirm it later.',
+      Body: ({ api }) => <LogHoursForm api={api} />,
+    });
+  }
 
   function shareCard() {
     const link = typeof window !== 'undefined' ? window.location.origin : 'https://volunteeru.app';
@@ -412,31 +460,53 @@ export default function Profile() {
             </div>
 
             <div style={S('height:1px;background:#F1EBE4;margin:26px 0')} />
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Service history</div>
-            <div style={S('margin-top:12px;display:flex;flex-direction:column')}>
-              {history.map((r) => (
-                <div key={r.id} style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid #F1EBE4')}>
-                  <div style={S('min-width:0')}>
-                    <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{r.name}</div>
-                    <div className="vu-trunc" style={S('font:450 12px/1.2 Geist;color:#8A8179;margin-top:3px')}>
-                      {r.org} · {r.date}
+            <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Service history</div>
+              <Pressable
+                label="Log hours"
+                onClick={logService}
+                className={cx(H.secondary, H.press)}
+                style={S('flex:none;display:inline-flex;align-items:center;gap:7px;padding:0 13px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}
+              >
+                + Log hours
+              </Pressable>
+            </div>
+            {state.hoursLog.length === 0 ? (
+              <div style={S('margin-top:14px;padding:18px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.6 Geist;color:#8A8179')}>
+                No hours logged yet. Log service you have done — an organization can confirm it later, and confirmed hours count on your verified record.
+              </div>
+            ) : (
+              <div style={S('margin-top:12px;display:flex;flex-direction:column')}>
+                {history.map((r) => (
+                  <div key={r.id} style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid #F1EBE4')}>
+                    <div style={S('min-width:0')}>
+                      <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{r.name}</div>
+                      <div className="vu-trunc" style={S('font:450 12px/1.2 Geist;color:#8A8179;margin-top:3px')}>
+                        {[r.org, r.date].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <div style={S('display:flex;align-items:center;gap:8px;flex:none')}>
+                      <span style={S(`font:500 13px/1 ${MONO}`)}>{r.hrs} hrs</span>
+                      {r.verified ? (
+                        <span title="Verified by the organization" style={S('color:#3F6B4E;font-size:12px')}>✓</span>
+                      ) : (
+                        <span style={S(`padding:3px 7px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Self-reported</span>
+                      )}
                     </div>
                   </div>
-                  <div style={S('display:flex;align-items:center;gap:8px;flex:none')}>
-                    <span style={S(`font:500 13px/1 ${MONO}`)}>{r.hrs} hrs</span>
-                    <span title="Verified" style={S('color:#3F6B4E;font-size:12px')}>✓</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <Pressable
-              label={showAll ? 'Show fewer events' : `View all ${state.hoursLog.length} events`}
-              onClick={() => setParam('history', showAll ? '' : 'all')}
-              className={H.link}
-              style={S('margin-top:16px;font:500 13px/1 Geist;color:#C2603C;cursor:pointer;width:max-content')}
-            >
-              {showAll ? 'Show less' : `View all ${state.hoursLog.length} events`}
-            </Pressable>
+                ))}
+              </div>
+            )}
+            {state.hoursLog.length > 4 ? (
+              <Pressable
+                label={showAll ? 'Show fewer events' : `View all ${state.hoursLog.length} events`}
+                onClick={() => setParam('history', showAll ? '' : 'all')}
+                className={H.link}
+                style={S('margin-top:16px;font:500 13px/1 Geist;color:#C2603C;cursor:pointer;width:max-content')}
+              >
+                {showAll ? 'Show less' : `View all ${state.hoursLog.length} events`}
+              </Pressable>
+            ) : null}
           </div>
         </div>
 
