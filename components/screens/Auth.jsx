@@ -105,6 +105,14 @@ export default function Auth({ mode = 'signin' }) {
             firstName: form.firstName.trim(),
             lastName: form.lastName.trim(),
           });
+        } else if (mode === 'forgot') {
+          // Sends a real reset link when the email has an account. We never
+          // reveal whether it does, so the success copy stays the same either way.
+          if (supabase) {
+            await supabase.auth.resetPasswordForEmail(form.email.trim(), {
+              redirectTo: `${window.location.origin}/signin`,
+            });
+          }
         }
       });
 
