@@ -1,0 +1,201 @@
+'use client';
+
+/* ==========================================================================
+   MemberProjects.jsx — the volunteer/member side of a project they joined
+   Once a founder accepts you, this is where you see what's expected before you
+   start: the QC pipeline for a volunteer program, or your role briefing for a
+   task-based team. Progress is the member's own, saved on their application row
+   so the same view follows them across devices. Renders nothing until they have
+   been accepted somewhere real.
+   ========================================================================== */
+
+import { useEffect, useState } from 'react';
+import { S, s } from '../lib/style.js';
+import { loadMyMemberships, updateMemberState } from '../lib/listings.js';
+import { openModal, toast } from '../lib/overlays.js';
+import MessageThread from './MessageThread.jsx';
+
+const MONO = "'Geist Mono',monospace";
+const KIND = {
+  meeting: { icon: '◷', bg: '#EEF3FB', color: '#5B6BB0' },
+  form: { icon: '▤', bg: '#FDF3E7', color: '#8A5A20' },
+  training: { icon: '◈', bg: '#EAF3EC', color: '#3F6B4E' },
+  check: { icon: '✓', bg: '#F6F2EE', color: '#57504A' },
+};
+
+export default function MemberProjects() {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    loadMyMemberships().then(setRows).catch(() => setRows([]));
+  }, []);
+
+  if (rows === null || rows.length === 0) return null;
+
+  function patchLocal(appId, member_state) {
+    setRows((rs) => rs.map((r) => (r.id === appId ? { ...r, member_state } : r)));
+  }
+
+  async function toggleStep(app, stepId) {
+    if (busy) return;
+    setBusy(true);
+    const cur = (app.member_state && app.member_state.pipeline) || {};
+    const nextPipeline = { ...cur, [stepId]: !cur[stepId] };
+    const { ok, member_state } = await updateMemberState(app.id, { pipeline: nextPipeline });
+    if (ok) patchLocal(app.id, member_state);
+    else toast({ title: 'Could not save that', message: 'Check your connection and try again.', tone: 'danger' });
+    setBusy(false);
+  }
+
+  async function ackBriefing(app, roleId) {
+    if (busy) return;
+    setBusy(true);
+    const cur = (app.member_state && app.member_state.briefingAck) || {};
+    const { ok, member_state } = await updateMemberState(app.id, { briefingAck: { ...cur, [roleId]: true } });
+    if (ok) { patchLocal(app.id, member_state); toast({ title: 'Briefing confirmed', tone: 'ok', timeout: 2000 }); }
+    else toast({ title: 'Could not save that', tone: 'danger' });
+    setBusy(false);
+  }
+
+  function message(app) {
+    openModal({
+      title: app.listings.name,
+      subtitle: "You're a member",
+      Body: () => <MessageThread applicationId={app.id} recipientId={app.owner_id} recipientName={app.listings.name} />,
+    });
+  }
+
+  return (
+    <div style={S('padding:20px;border-radius:16px;border:1px solid #EFE3DC;background:#FAF6F3')}>
+      <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>You're in</div>
+      <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:14px')}>
+        {rows.map((app) => {
+          const l = app.listings;
+          const isTeam = l.org_type === 'team';
+          return (
+            <div key={app.id} style={S('padding:16px 18px;border-radius:14px;background:#fff;border:1px solid #F1EBE4')}>
+              <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+                <div style={S('min-width:0')}>
+                  <div style={S('font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</div>
+                  <div style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>
+                    {[l.cause, l.site].filter(Boolean).join(' · ') || 'Student-led project'}
+                    {app.position ? ` · ${app.position}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => message(app)}
+                  style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}
+                >
+                  Message organizer
+                </button>
+              </div>
+
+              {isTeam ? <TeamMember app={app} onAck={ackBriefing} /> : <VolunteerMember app={app} onToggle={toggleStep} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* Volunteer program: the QC pipeline the member works through before shift one. */
+function VolunteerMember({ app, onToggle }) {
+  const steps = (app.listings.pipeline || []).filter((x) => x && x.label);
+  const done = (app.member_state && app.member_state.pipeline) || {};
+  const required = steps.filter((x) => x.required !== false);
+  const cleared = required.filter((x) => done[x.id]).length;
+  const ready = required.length === 0 || cleared === required.length;
+
+  if (!steps.length) {
+    return (
+      <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#EAF3EC;font:450 13px/1.5 Geist;color:#3F6B4E')}>
+        You're all set — no steps to clear. Watch for your first shift details.
+      </div>
+    );
+  }
+
+  return (
+    <div style={S('margin-top:14px')}>
+      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Before your first shift</div>
+        <span style={s('padding:4px 9px;border-radius:7px;font:500 11px/1', 'font-family:' + MONO, ready ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20')}>
+          {ready ? 'Ready to start' : `${cleared}/${required.length} done`}
+        </span>
+      </div>
+      <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:8px')}>
+        {steps.map((step) => {
+          const k = KIND[step.kind] || KIND.check;
+          const on = !!done[step.id];
+          return (
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => onToggle(app, step.id)}
+              style={s(
+                'text-align:left;display:flex;align-items:flex-start;gap:11px;padding:12px 14px;border-radius:11px;cursor:pointer;transition:background .16s ease',
+                on ? 'background:#F3F8F4;border:1px solid #CFE4D5' : 'background:#FCFAF8;border:1px solid #F1EBE4'
+              )}
+            >
+              <span style={s('width:19px;height:19px;border-radius:6px;flex:none;margin-top:1px;display:grid;place-items:center;font:600 10px/1 Geist', on ? 'background:#3F6B4E;color:#fff' : 'background:#fff;border:1px solid #D8D0C7;color:transparent')}>✓</span>
+              <span style={S('min-width:0;flex:1')}>
+                <span style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
+                  <span style={s('font:600 13.5px/1.3 Geist', on ? 'color:#3F6B4E' : 'color:#1A1714')}>{step.label}</span>
+                  <span style={s('padding:2px 7px;border-radius:6px;font:500 10px/1 Geist', `background:${k.bg}`, `color:${k.color}`)}>{k.icon}</span>
+                  {step.required === false ? <span style={S('font:450 10px/1 Geist;color:#A9A097')}>optional</span> : null}
+                </span>
+                {step.note ? <span style={S('display:block;margin-top:4px;font:450 12px/1.45 Geist;color:#8A8179')}>{step.note}</span> : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* Task-based team: read the role briefing, then confirm you've read it. */
+function TeamMember({ app, onAck }) {
+  const roles = app.listings.task_roles || [];
+  // The role they applied to, else the first defined role.
+  const role = roles.find((r) => r.name && app.position && r.name.toLowerCase() === String(app.position).toLowerCase()) || roles[0] || null;
+  const acked = role && app.member_state && app.member_state.briefingAck && app.member_state.briefingAck[role.id];
+
+  if (!role) {
+    return (
+      <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#57504A')}>
+        You're on the team. Your organizer will set your role and share your briefing here.
+      </div>
+    );
+  }
+
+  return (
+    <div style={S('margin-top:14px')}>
+      <div style={S('display:flex;align-items:center;gap:8px')}>
+        <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${role.color}`)} />
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your role · {role.name}</div>
+      </div>
+      <div style={S('margin-top:10px;padding:14px 16px;border-radius:12px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13.5px/1.6 Geist;color:#332D28')}>
+        {role.briefing || 'Your organizer has not written this briefing yet.'}
+      </div>
+      <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px')}>
+        {acked ? (
+          <span style={S('display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;background:#EAF3EC;font:600 12px/1 Geist;color:#3F6B4E')}>
+            ✓ Briefing read
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onAck(app, role.id)}
+            style={S('padding:0 15px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}
+          >
+            I've read the briefing
+          </button>
+        )}
+        <span style={S('font:450 12px/1.5 Geist;color:#8A8179')}>Your organizer assigns tasks once you confirm.</span>
+      </div>
+    </div>
+  );
+}

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable } from '../ui.jsx';
 import VolunteerApplications from '../VolunteerApplications.jsx';
+import MemberProjects from '../MemberProjects.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
@@ -194,7 +195,8 @@ export default function Home() {
         })}
       </div>
 
-      <div style={S('margin-top:20px')}>
+      <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:16px')}>
+        <MemberProjects />
         <VolunteerApplications />
       </div>
 
