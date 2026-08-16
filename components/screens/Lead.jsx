@@ -120,11 +120,19 @@ export default function Lead({ projectId, tab: tabParam }) {
   }
 
   async function copyRecruit() {
-    const ok = await copyText(p.recruitLink);
+    // The real, openable link: a public join page backed by the shared listing.
+    // Falls back to the stored link only before the project has been published.
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const link = p.listingId ? `${origin}/join/${p.listingId}` : p.recruitLink;
+    if (!p.listingId) {
+      toast({ title: 'Almost ready', message: 'Your public link turns on once the project finishes publishing.', tone: 'warn' });
+      return;
+    }
+    const ok = await copyText(link);
     toast(
       ok
-        ? { title: 'Recruit link copied', message: 'Drop it in a group chat or a story.', tone: 'ok' }
-        : { title: 'Could not copy automatically', message: p.recruitLink, tone: 'warn' }
+        ? { title: 'Join link copied', message: 'Anyone with the link can view your project and apply.', tone: 'ok' }
+        : { title: 'Copy this link', message: link, tone: 'warn' }
     );
   }
 

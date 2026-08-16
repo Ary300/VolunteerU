@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { S, s } from '../lib/style.js';
-import { loadMyMemberships, updateMemberState } from '../lib/listings.js';
+import { loadMyMemberships, updateMemberState, setMyTaskStatus } from '../lib/listings.js';
 import { openModal, toast } from '../lib/overlays.js';
 import MessageThread from './MessageThread.jsx';
 
@@ -58,6 +58,17 @@ export default function MemberProjects() {
     setBusy(false);
   }
 
+  async function toggleTask(app, taskId) {
+    if (busy) return;
+    setBusy(true);
+    const cur = (app.member_state && app.member_state.tasks) || {};
+    const next = cur[taskId] === 'done' ? 'todo' : 'done';
+    const { ok, member_state } = await setMyTaskStatus(app.id, taskId, next);
+    if (ok) { patchLocal(app.id, member_state); if (next === 'done') toast({ title: 'Nice — marked done', tone: 'ok', timeout: 1600 }); }
+    else toast({ title: 'Could not save that', tone: 'danger' });
+    setBusy(false);
+  }
+
   function message(app) {
     openModal({
       title: app.listings.name,
@@ -92,7 +103,7 @@ export default function MemberProjects() {
                 </button>
               </div>
 
-              {isTeam ? <TeamMember app={app} onAck={ackBriefing} /> : <VolunteerMember app={app} onToggle={toggleStep} />}
+              {isTeam ? <TeamMember app={app} onAck={ackBriefing} onToggleTask={toggleTask} /> : <VolunteerMember app={app} onToggle={toggleStep} />}
             </div>
           );
         })}
@@ -156,46 +167,82 @@ function VolunteerMember({ app, onToggle }) {
   );
 }
 
-/* Task-based team: read the role briefing, then confirm you've read it. */
-function TeamMember({ app, onAck }) {
-  const roles = app.listings.task_roles || [];
-  // The role they applied to, else the first defined role.
-  const role = roles.find((r) => r.name && app.position && r.name.toLowerCase() === String(app.position).toLowerCase()) || roles[0] || null;
+/* Task-based team: your assigned role briefing + the tasks the organizer gave you. */
+function TeamMember({ app, onAck, onToggleTask }) {
+  const a = app.assignment || {};
+  // Prefer the role the organizer assigned to you; fall back to matching the
+  // role you applied for against the listing's roles.
+  const listingRoles = app.listings.task_roles || [];
+  const role = a.role
+    || listingRoles.find((r) => r.name && app.position && r.name.toLowerCase() === String(app.position).toLowerCase())
+    || null;
+  const tasks = a.tasks || [];
+  const doneMap = (app.member_state && app.member_state.tasks) || {};
   const acked = role && app.member_state && app.member_state.briefingAck && app.member_state.briefingAck[role.id];
+  const doneCount = tasks.filter((t) => doneMap[t.id] === 'done').length;
 
-  if (!role) {
+  if (!role && !tasks.length) {
     return (
       <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#57504A')}>
-        You're on the team. Your organizer will set your role and share your briefing here.
+        You're on the team. Your organizer will set your role and assign your first tasks — they'll appear here.
       </div>
     );
   }
 
   return (
-    <div style={S('margin-top:14px')}>
-      <div style={S('display:flex;align-items:center;gap:8px')}>
-        <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${role.color}`)} />
-        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your role · {role.name}</div>
-      </div>
-      <div style={S('margin-top:10px;padding:14px 16px;border-radius:12px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13.5px/1.6 Geist;color:#332D28')}>
-        {role.briefing || 'Your organizer has not written this briefing yet.'}
-      </div>
-      <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px')}>
-        {acked ? (
-          <span style={S('display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;background:#EAF3EC;font:600 12px/1 Geist;color:#3F6B4E')}>
-            ✓ Briefing read
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => onAck(app, role.id)}
-            style={S('padding:0 15px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}
-          >
-            I've read the briefing
-          </button>
-        )}
-        <span style={S('font:450 12px/1.5 Geist;color:#8A8179')}>Your organizer assigns tasks once you confirm.</span>
-      </div>
+    <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:14px')}>
+      {role ? (
+        <div>
+          <div style={S('display:flex;align-items:center;gap:8px')}>
+            <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${role.color || '#C2603C'}`)} />
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your role · {role.name}</div>
+          </div>
+          {role.briefing ? (
+            <div style={S('margin-top:10px;padding:14px 16px;border-radius:12px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13.5px/1.6 Geist;color:#332D28')}>
+              {role.briefing}
+            </div>
+          ) : null}
+          <div style={S('margin-top:12px')}>
+            {acked ? (
+              <span style={S('display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;background:#EAF3EC;font:600 12px/1 Geist;color:#3F6B4E')}>✓ Briefing read</span>
+            ) : (
+              <button type="button" onClick={() => onAck(app, role.id)} style={S('padding:0 15px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
+                I've read the briefing
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {tasks.length ? (
+        <div>
+          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your tasks</div>
+            <span style={s('padding:4px 9px;border-radius:7px;font:500 11px/1', 'font-family:' + MONO, doneCount === tasks.length ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20')}>{doneCount}/{tasks.length} done</span>
+          </div>
+          <div style={S('margin-top:10px;display:flex;flex-direction:column;gap:8px')}>
+            {tasks.map((t) => {
+              const on = doneMap[t.id] === 'done';
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onToggleTask(app, t.id)}
+                  style={s('text-align:left;display:flex;align-items:flex-start;gap:11px;padding:12px 14px;border-radius:11px;cursor:pointer;transition:background .16s ease', on ? 'background:#F3F8F4;border:1px solid #CFE4D5' : 'background:#FCFAF8;border:1px solid #F1EBE4')}
+                >
+                  <span style={s('width:19px;height:19px;border-radius:6px;flex:none;margin-top:1px;display:grid;place-items:center;font:600 10px/1 Geist', on ? 'background:#3F6B4E;color:#fff' : 'background:#fff;border:1px solid #D8D0C7;color:transparent')}>✓</span>
+                  <span style={S('min-width:0;flex:1')}>
+                    <span style={s('font:600 13.5px/1.3 Geist', on ? 'color:#3F6B4E;text-decoration:line-through' : 'color:#1A1714')}>{t.title}</span>
+                    {t.detail ? <span style={S('display:block;margin-top:4px;font:450 12px/1.45 Geist;color:#8A8179')}>{t.detail}</span> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : role && acked ? (
+        <div style={S('font:450 12px/1.5 Geist;color:#8A8179')}>No tasks yet — your organizer will assign them here.</div>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { openModal, confirmDialog, toast } from '../../lib/overlays.js';
 import {
   pipelineFor, pipelineProgress, addPipelineStep, updatePipelineStep, removePipelineStep, togglePipelineStep,
 } from '../../lib/db.js';
+import { PipelineMembers } from './CrossMembers.jsx';
 
 const MONO = "'Geist Mono',monospace";
 const KIND = { meeting: { l: 'Meeting', icon: '◷', bg: '#EEF3FB', color: '#5B6BB0' }, form: { l: 'Form', icon: '▤', bg: '#FDF3E7', color: '#8A5A20' }, training: { l: 'Training', icon: '◈', bg: '#EAF3EC', color: '#3F6B4E' }, check: { l: 'Check', icon: '✓', bg: '#F6F2EE', color: '#57504A' } };
@@ -130,11 +131,14 @@ export default function PipelineTab({ p }) {
             })
           ) : (
             <div style={S('padding:10px 20px 20px')}>
-              <EmptyState compact title="No volunteers in the pipeline yet" body="Accept an application and the volunteer shows here to work through the steps." />
+              <EmptyState compact title="No local volunteers in the pipeline yet" body="Volunteers you add to the roster directly show here to work through the steps." />
             </div>
           )}
         </div>
       ) : null}
+
+      {/* volunteers who joined through the public link (cross-user) */}
+      <PipelineMembers p={p} />
     </div>
   );
 }

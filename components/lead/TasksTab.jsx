@@ -15,6 +15,7 @@ import {
   addTaskRole, updateTaskRole, deleteTaskRole,
   addTask, updateTask, setTaskStatus, assignTask, deleteTask,
 } from '../../lib/db.js';
+import { TeamMembersManager } from './CrossMembers.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -165,6 +166,9 @@ export default function TasksTab({ p }) {
           </div>
         )}
       </div>
+
+      {/* members who joined through the public link */}
+      <TeamMembersManager p={p} />
 
       {/* board */}
       <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
