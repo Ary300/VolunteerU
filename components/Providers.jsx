@@ -11,12 +11,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { hydrate, useSnapshot, useHydrated } from '../lib/store.js';
 import { initAuth } from '../lib/auth.js';
+import { syncVolunteerDirectory } from '../lib/db.js';
 import OverlayHost from './OverlayHost.jsx';
 import ScreenNav from './ScreenNav.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 
 /* Routes that require a signed-in account. */
-const PROTECTED = ['/app', '/discover', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings'];
+const PROTECTED = ['/app', '/discover', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
 
@@ -30,6 +31,14 @@ export default function Providers({ children }) {
     hydrate();
     initAuth();
   }, []);
+
+  /* Keep this volunteer's public directory card in sync once signed in, so
+     founders can find them. Idempotent upsert; re-runs when identity/hours/causes
+     or the public-profile pref change. */
+  useEffect(() => {
+    if (!hydrated || !state.session.authed) return;
+    syncVolunteerDirectory();
+  }, [hydrated, state.session.authed, state.account.name, state.stats.verifiedHours, state.prefs.causes, state.prefs.privacy.publicProfile]);
 
   /* Mirror preferences onto <html> so CSS can act on them. */
   useEffect(() => {

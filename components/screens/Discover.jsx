@@ -332,6 +332,11 @@ export default function Discover() {
         </div>
       </div>
 
+      <div style={S('margin-top:18px;display:flex;gap:6px')}>
+        <span style={s('padding:8px 14px;border-radius:9px;font:600 13px/1 Geist', 'border:1px solid #C2603C;background:#FAF6F3;color:#A8482A')}>Find projects</span>
+        <Pressable label="Find volunteers" onClick={() => router.push('/volunteers')} className={cx(H.press)} style={s('padding:8px 14px;border-radius:9px;cursor:pointer;font:600 13px/1 Geist', 'border:1px solid #E8E1D9;background:#fff;color:#57504A')}>Find volunteers</Pressable>
+      </div>
+
       <div ref={searchWrap} style={S('position:relative')}>
         <div
           className={H.input}

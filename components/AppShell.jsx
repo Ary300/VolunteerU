@@ -24,7 +24,7 @@ const SIDE_NAV = [
 
 export function navKeyFor(pathname) {
   if (pathname === '/app') return 'home';
-  if (/^\/(discover|opportunity|apply|saved|friends|projects)/.test(pathname)) return 'discover';
+  if (/^\/(discover|volunteers|opportunity|apply|saved|friends|projects)/.test(pathname)) return 'discover';
   if (/^\/(lead|create)/.test(pathname)) return 'lead';
   if (/^\/(profile|settings|notifications)/.test(pathname)) return 'profile';
   return '';
