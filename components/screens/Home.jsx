@@ -145,7 +145,13 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px;align-items:start')}>
+      <div style={S('margin-top:26px;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Your snapshot</div>
+        <Pressable label="See your full record" onClick={() => router.push('/profile')} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
+          Full record →
+        </Pressable>
+      </div>
+      <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:12px;align-items:start')}>
         {tiles.map((t) => {
           const open = openCard === t.k;
           return (
