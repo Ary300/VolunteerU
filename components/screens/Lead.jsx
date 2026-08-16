@@ -14,6 +14,7 @@ import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overla
 import CrossApplications from '../CrossApplications.jsx';
 import TasksTab from '../lead/TasksTab.jsx';
 import PipelineTab from '../lead/PipelineTab.jsx';
+import AnnouncementBoard from '../AnnouncementBoard.jsx';
 import {
   getProject, taskProgress, toggleTask, pendingApplications, pendingHours,
   positionLabel, positionAppsLabel, sessionStatus, sessionTone, shortSessions, peopleStats, filterPeople,
@@ -223,7 +224,12 @@ export default function Lead({ projectId, tab: tabParam }) {
         {tab === 'applications' ? <ApplicationsTab p={p} params={params} setParam={setParam} goTab={goTab} onCopyLink={copyRecruit} /> : null}
         {tab === 'hours' ? <HoursTab p={p} /> : null}
         {tab === 'quality' ? <QualityTab p={p} params={params} setParam={setParam} /> : null}
-        {tab === 'messages' ? <MessagesTab p={p} params={params} setParam={setParam} /> : null}
+        {tab === 'messages' ? (
+          <div style={S('margin-top:22px;display:flex;flex-direction:column;gap:18px')}>
+            <AnnouncementBoard listingId={p.listingId} canPost title="Team announcements board" />
+            <MessagesTab p={p} params={params} setParam={setParam} embedded />
+          </div>
+        ) : null}
         {tab === 'settings' ? <SettingsTab p={p} /> : null}
       </div>
     </div>

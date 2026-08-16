@@ -104,6 +104,19 @@ export default function MemberProjects() {
               </div>
 
               {isTeam ? <TeamMember app={app} onAck={ackBriefing} onToggleTask={toggleTask} /> : <VolunteerMember app={app} onToggle={toggleStep} />}
+
+              {(l.announcements || []).length ? (
+                <div style={S('margin-top:14px')}>
+                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>From the organizer</div>
+                  <div style={S('margin-top:8px;display:flex;flex-direction:column;gap:8px')}>
+                    {l.announcements.slice(0, 3).map((an) => (
+                      <div key={an.id} style={S('padding:11px 13px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4')}>
+                        <div style={S('font:450 13px/1.55 Geist;color:#332D28;white-space:pre-wrap')}>{an.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           );
         })}

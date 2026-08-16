@@ -15,6 +15,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot } from '../ui.jsx';
 import { toast } from '../../lib/overlays.js';
 import { getListing, applyToListing, loadMyApplications, myId } from '../../lib/listings.js';
+import AnnouncementBoard from '../AnnouncementBoard.jsx';
 
 const MONO = "'Geist Mono',monospace";
 const KIND = { meeting: '◷ Briefing', form: '▤ Form', training: '◈ Training', check: '✓ Check' };
@@ -163,6 +164,12 @@ export default function JoinListing({ id }) {
                 </div>
               ))}
             </Section>
+          ) : null}
+
+          {(listing.announcements || []).length ? (
+            <div style={S('margin-top:24px')}>
+              <AnnouncementBoard listingId={listing.id} title="From the organizer" />
+            </div>
           ) : null}
 
           {listing.website ? (
