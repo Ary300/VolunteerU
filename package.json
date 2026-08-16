@@ -2,7 +2,7 @@
   "name": "volunteeru",
   "version": "1.0.0",
   "private": true,
-  "description": "VolunteerU \u2014 find verified volunteering near you, or run your own student organization under a verified sponsor.",
+  "description": "VolunteerU — find verified volunteering near you, or run your own student organization under a verified sponsor.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "next": "^15.5.23",
     "react": "19.1.1",
     "react-dom": "19.1.1"

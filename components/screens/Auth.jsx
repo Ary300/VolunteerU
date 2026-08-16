@@ -91,16 +91,21 @@ export default function Auth({ mode = 'signin' }) {
     }
     setBusy(true);
     try {
-      await perform(`auth.${mode}`, () => {
+      await perform(`auth.${mode}`, async () => {
         if (mode === 'signin') {
-          signIn(form.email.trim());
+          await signIn(form.email.trim(), form.password);
           // A returning account has already been through onboarding.
           update((st) => {
             st.onboarding.completed = true;
             st.session.remember = form.remember;
           });
         } else if (mode === 'signup') {
-          signUp({ email: form.email.trim(), firstName: form.firstName.trim(), lastName: form.lastName.trim() });
+          await signUp({
+            email: form.email.trim(),
+            password: form.password,
+            firstName: form.firstName.trim(),
+            lastName: form.lastName.trim(),
+          });
         }
       });
 
@@ -117,6 +122,8 @@ export default function Auth({ mode = 'signin' }) {
     } catch (err) {
       if (err && err.code === 'OFFLINE') {
         toast({ title: 'You are offline', message: 'Reconnect and try again — nothing was sent.', tone: 'danger' });
+      } else if (err && err.code === 'AUTH') {
+        toast({ title: mode === 'signup' ? 'Could not create your account' : 'Could not sign you in', message: err.message, tone: 'danger' });
       } else if (err && err.code !== 'DUPLICATE') {
         toast({ title: 'That did not go through', message: 'Try again in a moment.', tone: 'danger' });
       }
@@ -126,8 +133,11 @@ export default function Auth({ mode = 'signin' }) {
   }
 
   function demo() {
-    signIn(state.account.email);
+    // A local preview of the seeded record — no real account needed. It lasts
+    // for this browser session; the real backend takes over on next load.
     update((st) => {
+      st.session.authed = true;
+      st.session.signedInAt = Date.now();
       st.onboarding.completed = true;
     });
     toast({ title: `Signed in as ${state.account.name}`, message: 'Demo account with a seeded record and one live project.', tone: 'ok' });

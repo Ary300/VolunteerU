@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { hydrate, useSnapshot, useHydrated } from '../lib/store.js';
+import { initAuth } from '../lib/auth.js';
 import OverlayHost from './OverlayHost.jsx';
 import ScreenNav from './ScreenNav.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
@@ -27,6 +28,7 @@ export default function Providers({ children }) {
 
   useEffect(() => {
     hydrate();
+    initAuth();
   }, []);
 
   /* Mirror preferences onto <html> so CSS can act on them. */
