@@ -318,6 +318,37 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
         })}
       </div>
 
+      <div style={S('margin-top:20px')}>
+        <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Who runs it</div>
+        <div style={S('margin-top:10px;display:flex;gap:8px;flex-wrap:wrap')}>
+          {[
+            { k: 'student', t: 'Student-led', d: 'You and other students run it' },
+            { k: 'official', t: 'Registered nonprofit', d: 'An established organization' },
+          ].map((o) => {
+            const on = (d.orgClass || 'student') === o.k;
+            return (
+              <Pressable
+                key={o.k}
+                role="radio"
+                aria-checked={on}
+                label={o.t}
+                onClick={() => set({ orgClass: o.k })}
+                className={cx(H.press)}
+                style={s(
+                  'flex:1;min-width:200px;text-align:left;padding:12px 14px;border-radius:12px;cursor:pointer;transition:border-color .16s ease, background .16s ease',
+                  `border:1.5px solid ${on ? '#C2603C' : '#E8E1D9'}`,
+                  `background:${on ? '#FAF6F3' : '#fff'}`
+                )}
+              >
+                <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{o.t}</div>
+                <div style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>{o.d}</div>
+              </Pressable>
+            );
+          })}
+        </div>
+        <div className="vu-hint" style={S('margin-top:7px;font:450 12px/1.5 Geist;color:#8A8179')}>Volunteers can filter for student-led projects or registered nonprofits on Discover.</div>
+      </div>
+
       <div style={S('margin-top:22px')}>
         <TextArea
           label="Your volunteering experience"

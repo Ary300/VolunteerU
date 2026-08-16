@@ -15,7 +15,7 @@ import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function DiscoverListings() {
+export default function DiscoverListings({ kind = 'all' }) {
   const [listings, setListings] = useState(null);
   const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
@@ -41,7 +41,9 @@ export default function DiscoverListings() {
     })();
   }, []);
 
-  if (listings === null || listings.length === 0) return null;
+  if (listings === null) return null;
+  const shown = kind === 'all' ? listings : listings.filter((l) => (l.org_class || 'student') === kind);
+  if (shown.length === 0) return null;
 
   async function apply(listing) {
     if (busy) return;
@@ -131,10 +133,10 @@ export default function DiscoverListings() {
   return (
     <div style={S('margin-bottom:22px')}>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097;margin-bottom:12px`)}>
-        Student projects looking for volunteers
+        {kind === 'official' ? 'Nonprofits looking for volunteers' : kind === 'student' ? 'Student projects looking for volunteers' : 'Projects looking for volunteers'}
       </div>
       <div style={S('display:flex;flex-direction:column;gap:12px')}>
-        {listings.map((l) => {
+        {shown.map((l) => {
           const app = applied.get(l.id);
           return (
             <div
@@ -149,7 +151,11 @@ export default function DiscoverListings() {
               >
                 <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
                   <div style={S('font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</div>
-                  <span style={S(`padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Student-led</span>
+                  {(l.org_class || 'student') === 'official' ? (
+                    <span style={S(`padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>Nonprofit</span>
+                  ) : (
+                    <span style={S(`padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Student-led</span>
+                  )}
                 </div>
                 <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>
                   {[l.cause, l.site].filter(Boolean).join(' · ')}

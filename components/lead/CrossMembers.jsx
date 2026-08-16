@@ -19,6 +19,51 @@ import { loadProjectMembers, setMemberAssignment } from '../../lib/listings.js';
 
 const MONO = "'Geist Mono',monospace";
 
+const RELIABILITY = ['', 'At risk', 'Developing', 'Solid', 'Strong', 'Exceptional'];
+
+/** Open a star-rating modal for one cross-user member. The rating writes to the
+    application's owner-side assignment, so it lands on the volunteer's account. */
+export function openRating(app, onSaved) {
+  openModal({
+    title: `Rate ${app.applicant_name}`,
+    subtitle: 'This goes on their VolunteerU profile for future organizers to see.',
+    Body: ({ api }) => <RatingForm api={api} app={app} onSaved={onSaved} />,
+  });
+}
+
+function RatingForm({ api, app, onSaved }) {
+  const cur = (app.assignment && app.assignment.rating) || {};
+  const [stars, setStars] = useState(cur.stars || 0);
+  const [note, setNote] = useState(cur.note || '');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!stars) return;
+    setBusy(true);
+    const rating = { stars, reliability: RELIABILITY[stars], note: note.trim(), ratedAt: new Date().toISOString() };
+    const { ok } = await setMemberAssignment(app.id, { rating });
+    setBusy(false);
+    if (ok) { api.close(); toast({ title: 'Rating saved', message: `${app.applicant_name} sees it on their profile.`, tone: 'ok' }); onSaved && onSaved(); }
+    else toast({ title: 'Could not save', tone: 'danger' });
+  }
+  return (
+    <div>
+      <div style={S('display:flex;gap:6px')}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Pressable key={n} label={`${n} star${n === 1 ? '' : 's'}`} onClick={() => setStars(n)} className={cx(H.press)} style={S(`font-size:30px;line-height:1;cursor:pointer;color:${n <= stars ? '#C2603C' : '#E0D8CF'}`)}>★</Pressable>
+        ))}
+      </div>
+      <div style={S(`margin-top:8px;font:500 12px/1 ${MONO};color:#8A8179`)}>{stars ? RELIABILITY[stars] : 'Tap to rate'}</div>
+      <div style={S('margin-top:16px')}>
+        <TextArea label="A line of feedback (optional)" value={note} onChange={setNote} maxLength={280} minHeight={70} placeholder="What they did well, how they showed up." />
+      </div>
+      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
+        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
+        <Pressable label="Save rating" disabled={busy || !stars} onClick={save} className={cx(H.primary, H.press)} style={s('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer', !stars ? 'opacity:.5' : '')}>{busy ? 'Saving…' : 'Save rating'}</Pressable>
+      </div>
+    </div>
+  );
+}
+
 function joinLink(p) {
   if (!p.listingId) return null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -143,6 +188,9 @@ export function TeamMembersManager({ p }) {
                     <Pressable label={`Assign tasks to ${app.applicant_name}`} onClick={() => editTasks(app)} className={cx(H.primary, H.press)} style={S('padding:0 14px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 12px/1 Geist;cursor:pointer')}>
                       Tasks {tasks.length ? `· ${doneCount}/${tasks.length}` : ''}
                     </Pressable>
+                    <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('padding:0 12px;height:38px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}>
+                      {a.rating && a.rating.stars ? `★ ${a.rating.stars}` : 'Rate'}
+                    </Pressable>
                   </div>
                 </div>
                 {tasks.length ? (
@@ -216,7 +264,7 @@ function MemberTaskForm({ api, app, onSaved }) {
 /* -------- volunteering: online applicants' self-reported pipeline -------- */
 
 export function PipelineMembers({ p }) {
-  const [members] = useMembers(p);
+  const [members, reload] = useMembers(p);
   const steps = (p.pipeline || []).filter((x) => x && x.label);
 
   if (members === null) return null;
@@ -260,6 +308,9 @@ export function PipelineMembers({ p }) {
                   );
                 })}
               </div>
+              <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:34px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}>
+                {app.assignment && app.assignment.rating && app.assignment.rating.stars ? `★ ${app.assignment.rating.stars}` : 'Rate'}
+              </Pressable>
             </div>
           );
         })

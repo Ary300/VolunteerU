@@ -11,6 +11,7 @@ import { ImageSlot, Pressable, EmptyState, Field } from '../ui.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount } from '../../lib/db.js';
+import MyRatings from '../MyRatings.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -380,21 +381,29 @@ export default function Profile() {
               </div>
             </div>
 
-            <div style={S('height:1px;background:#F1EBE4;margin:26px 0')} />
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Notes from organizers</div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {state.leadFeedback.map((f) => (
-                <div key={f.id} style={S('padding:16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                  <div style={S('font:450 14px/1.55 Geist;color:#332D28')}>{f.t}</div>
-                  <div style={S('margin-top:10px;display:flex;align-items:center;gap:10px')}>
-                    <div style={S('width:24px;height:24px;border-radius:50%;overflow:hidden;flex:none')}>
-                      <ImageSlot src={`https://picsum.photos/seed/${f.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+            {state.leadFeedback.length ? (
+              <>
+                <div style={S('height:1px;background:#F1EBE4;margin:26px 0')} />
+                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Notes from organizers</div>
+                <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
+                  {state.leadFeedback.map((f) => (
+                    <div key={f.id} style={S('padding:16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+                      <div style={S('font:450 14px/1.55 Geist;color:#332D28')}>{f.t}</div>
+                      <div style={S('margin-top:10px;display:flex;align-items:center;gap:10px')}>
+                        <div style={S('width:24px;height:24px;border-radius:50%;overflow:hidden;flex:none')}>
+                          <ImageSlot src={`https://picsum.photos/seed/${f.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                        </div>
+                        <div style={S('font:500 12px/1.3 Geist;color:#57504A')}>{f.who}</div>
+                        <div style={S(`margin-left:auto;font:500 10px/1 ${MONO};color:#A9A097;flex:none`)}>{f.when}</div>
+                      </div>
                     </div>
-                    <div style={S('font:500 12px/1.3 Geist;color:#57504A')}>{f.who}</div>
-                    <div style={S(`margin-left:auto;font:500 10px/1 ${MONO};color:#A9A097;flex:none`)}>{f.when}</div>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              </>
+            ) : null}
+
+            <div style={S('margin-top:22px')}>
+              <MyRatings />
             </div>
 
             <div style={S('height:1px;background:#F1EBE4;margin:26px 0')} />

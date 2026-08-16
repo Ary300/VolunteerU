@@ -59,6 +59,7 @@ export default function Discover() {
   const savedOnly = params.get('saved') === '1';
   const tab = params.get('tab') === 'projects' ? 'projects' : 'openings';
   const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
+  const kind = ['student', 'official'].includes(params.get('kind')) ? params.get('kind') : 'all';
 
   const { state } = useSnapshot();
   const [draftQuery, setDraftQuery] = useState(q);
@@ -448,7 +449,34 @@ export default function Discover() {
       </div>
 
       {tab === 'openings' ? (
-        <div role="group" aria-label="Where openings happen" style={S('margin-top:14px;display:flex;gap:6px')}>
+        <div role="group" aria-label="Kind of organization" style={S('margin-top:16px;display:flex;gap:6px')}>
+          {[{ k: 'all', t: 'All projects' }, { k: 'student', t: 'Student-led' }, { k: 'official', t: 'Nonprofits' }].map((o) => {
+            const on = kind === o.k;
+            return (
+              <Pressable
+                key={o.k}
+                role="radio"
+                aria-checked={on}
+                label={o.t}
+                onClick={() => setParams({ kind: o.k === 'all' ? null : o.k })}
+                className={cx(H.press)}
+                style={s(
+                  'padding:8px 14px;border-radius:9px',
+                  `border:1px solid ${on ? '#C2603C' : '#E8E1D9'}`,
+                  `background:${on ? '#FAF6F3' : '#FFFFFF'}`,
+                  `color:${on ? '#A8482A' : '#57504A'}`,
+                  'font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
+                )}
+              >
+                {o.t}
+              </Pressable>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {tab === 'openings' ? (
+        <div role="group" aria-label="Where openings happen" style={S('margin-top:12px;display:flex;gap:6px')}>
           {[{ k: 'all', t: 'All' }, { k: 'person', t: 'In person' }, { k: 'online', t: 'Online' }].map((o) => {
             const on = place === o.k;
             return (
@@ -500,7 +528,7 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <DiscoverListings />
+          <DiscoverListings kind={kind} />
           {searching ? (
             <SkeletonRows n={3} h={168} />
           ) : rows.length ? (
