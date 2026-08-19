@@ -6,9 +6,10 @@
    inert CTAs are the only things that changed, and only to gain destinations.
    ========================================================================== */
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Pressable } from '../ui.jsx';
+import { ImageSlot, Avatar, Pressable } from '../ui.jsx';
 import { MarketingHeader, MarketingFooter } from '../Marketing.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import {
@@ -45,6 +46,35 @@ const SAMPLE_MATCHES = [
   { id: 's2', title: 'Shelter Meal Service', org: 'Downtown Shelter', meta: 'Homelessness · Weeknights', hrs: '2 hrs', score: 91, img: '' },
   { id: 's3', title: 'Beach Cleanup Crew', org: 'Coastkeepers', meta: 'Environment · Sun AM', hrs: '2.5 hrs', score: 88, img: '' },
 ];
+
+/* A plain, standard FAQ accordion. One row open at a time. */
+function Faq({ items }) {
+  const [open, setOpen] = useState(0);
+  return (
+    <div style={S('border-top:1px solid #E8E1D9')}>
+      {items.map((f, i) => {
+        const on = open === i;
+        return (
+          <div key={f.q} style={S('border-bottom:1px solid #E8E1D9')}>
+            <button
+              type="button"
+              aria-expanded={on}
+              onClick={() => setOpen(on ? -1 : i)}
+              className={H.press}
+              style={S('display:flex;width:100%;align-items:center;justify-content:space-between;gap:24px;padding:24px 6px;background:none;border:0;cursor:pointer;text-align:left')}
+            >
+              <span style={S('font:600 20px/1.3 Geist;letter-spacing:-0.025em;color:#1A1714')}>{f.q}</span>
+              <span aria-hidden="true" style={s('font:400 22px/1 Geist;color:#C2603C;flex:none;transition:transform .2s ease', on ? 'transform:rotate(45deg)' : '')}>+</span>
+            </button>
+            <div style={s('overflow:hidden;transition:max-height .24s ease', on ? 'max-height:260px' : 'max-height:0')}>
+              <div style={S('padding:0 6px 26px;font:450 16px/1.65 Geist;color:#57504A;max-width:720px;text-wrap:pretty')}>{f.a}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Landing() {
   const router = useRouter();
@@ -106,7 +136,6 @@ export default function Landing() {
                 </span>
                 Start a nonprofit
               </Pressable>
-              <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#8A8179')}>Set up your project in minutes</div>
             </div>
             <div>
               <Pressable
@@ -119,7 +148,6 @@ export default function Landing() {
               >
                 Join one
               </Pressable>
-              <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#8A8179')}>Find openings ranked to your time</div>
             </div>
           </div>
           {trustRow ? (
@@ -215,11 +243,12 @@ export default function Landing() {
         <div style={S('position:relative;overflow:hidden;padding:0')}>
           <div className="vu-4col vu-pad-32" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:1180px;margin:0 auto;padding:0 32px')}>
             {proofCards.map((p) => (
-              <div key={p.slot} style={S('padding:20px;border-radius:14px;border:1px solid #EDE6DE;background:#FCFAF8')}>
-                <div style={S('font:450 14px/1.5 Geist;color:#332D28;text-wrap:pretty')}>{p.quote}</div>
-                <div style={S('margin-top:14px;display:flex;align-items:center;gap:10px')}>
-                  <div style={S('width:28px;height:28px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <ImageSlot src={`https://picsum.photos/seed/${p.slot}/400/400?grayscale`} shape="circle" placeholder="face" />
+              <div key={p.slot} style={S('padding:24px 22px;border-radius:16px;border:1px solid #EDE6DE;background:#FCFAF8;display:flex;flex-direction:column')}>
+                <div aria-hidden="true" style={S('font:600 30px/0.7 Geist;color:#E0C4B6;height:16px')}>&ldquo;</div>
+                <div style={S('margin-top:10px;font:450 15px/1.55 Geist;color:#332D28;text-wrap:pretty;flex:1')}>{p.quote}</div>
+                <div style={S('margin-top:18px;display:flex;align-items:center;gap:10px')}>
+                  <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
+                    <Avatar name={String(p.who).split('·')[0]} fs={12} />
                   </div>
                   <div style={S('font:500 12px/1.3 Geist;color:#57504A')}>{p.who}</div>
                 </div>
@@ -341,21 +370,21 @@ export default function Landing() {
             ))}
           </div>
 
-          <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:72px;border-top:1px solid #E8E1D9')}>
+          <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:72px')}>
             {[
-              { n: '01', t: 'Verified or student led', b: 'A green check means we confirmed registration, insurance and a named staff contact. Student projects show the lead and the sponsor behind them.', pad: 'padding:36px 32px 0 0;border-right:1px solid #E8E1D9' },
-              { n: '02', t: 'One application', b: 'Your record, availability and causes are already attached. Pick a role, pick a shift, send.', pad: 'padding:36px 32px 0;border-right:1px solid #E8E1D9' },
-              { n: '03', t: 'Hours count themselves', b: 'Check in on arrival. The organizer confirms attendance and the hours post to your record that day.', pad: 'padding:36px 0 0 32px' },
+              { n: '01', t: 'Find your fit', b: 'Nonprofits and student projects in one feed, ranked to your causes, radius and free time.' },
+              { n: '02', t: 'One application', b: 'Your record, availability and causes are already attached. Pick a role, pick a shift, send.' },
+              { n: '03', t: 'Hours count themselves', b: 'Check in on arrival. The organizer confirms attendance and the hours post to your record that day.' },
             ].map((c) => (
-              <div key={c.n} style={S(c.pad)}>
+              <div key={c.n} style={S('padding:30px 28px;border-radius:18px;background:#FCFAF8;border:1px solid #F1EBE4')}>
                 <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;color:#C2603C`)}>{c.n}</div>
-                <div style={S('margin-top:20px;font:600 30px/1.08 Geist;letter-spacing:-0.04em')}>{c.t}</div>
-                <div style={S('margin-top:12px;max-width:300px;font:450 16px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{c.b}</div>
+                <div style={S('margin-top:18px;font:600 27px/1.08 Geist;letter-spacing:-0.04em')}>{c.t}</div>
+                <div style={S('margin-top:12px;font:450 16px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{c.b}</div>
               </div>
             ))}
           </div>
 
-          <div style={S('margin-top:56px')}>
+          <div style={S('margin-top:64px;display:flex;justify-content:center')}>
             <Pressable
               label="Browse openings near me"
               onClick={go('/discover')}
@@ -381,20 +410,18 @@ export default function Landing() {
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#A9A097`)}>Starting your own</div>
           </div>
           <h2 className="vu-h2-big" style={S('margin:28px 0 0;font:600 116px/.92 Geist;letter-spacing:-0.06em;max-width:940px')}>
-            Build the whole thing
+            Build your own
           </h2>
-          <p style={S('margin:28px 0 0;max-width:560px;font:400 20px/1.55 Geist;color:#57504A;text-wrap:pretty')}>
-            Set it up under a verified sponsor, open positions, recruit a crew from schools nearby, take attendance and post verified hours. The admin an
-            adult nonprofit needs, in one workspace built for a student.
+          <p style={S('margin:28px 0 0;max-width:600px;font:400 20px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+            You can also build, recruit and run your own nonprofit. Open positions, bring on a crew from schools nearby, take attendance, and post verified hours, all in one workspace built for a student.
           </p>
 
-          <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:64px;border-top:1px solid #E8E1D9')}>
+          <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:64px')}>
             {timeline.map((t) => (
-              <div key={t.d} style={S('padding:32px 28px 36px 0;border-right:1px solid #E8E1D9;position:relative')}>
-                <div aria-hidden="true" style={S('position:absolute;top:-6px;left:0;width:11px;height:11px;border-radius:50%;background:#C2603C')} />
+              <div key={t.d} style={S('padding:30px 26px;border-radius:18px;background:#FCFAF8;border:1px solid #F1EBE4')}>
                 <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#C2603C`)}>{t.d}</div>
-                <div style={S('margin-top:18px;font:600 26px/1.1 Geist;letter-spacing:-0.035em')}>{t.t}</div>
-                <div style={S('margin-top:12px;font:450 15px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{t.b}</div>
+                <div style={S('margin-top:16px;font:600 24px/1.12 Geist;letter-spacing:-0.035em')}>{t.t}</div>
+                <div style={S('margin-top:11px;font:450 15px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{t.b}</div>
               </div>
             ))}
           </div>
@@ -464,19 +491,15 @@ export default function Landing() {
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F6F2EE;font:500 11px/1 ${MONO};color:#57504A`)}>PHOTOS · 1 OPEN</span>
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F5E7E0;font:500 11px/1 ${MONO};color:#A8482A`)}>2 HRS WEEKLY</span>
                 </div>
-                <Pressable
-                  label="Browse openings like this"
-                  onClick={go('/discover')}
-                  className={cx(H.primary, H.press)}
+                <div
+                  aria-hidden="true"
                   style={S(
-                    'margin-top:18px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:44px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:background .16s ease'
+                    'margin-top:18px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:44px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist'
                   )}
                 >
-                  <span aria-hidden="true" style={S('font-size:11px;opacity:.9')}>
-                    ▷
-                  </span>
-                  Browse openings
-                </Pressable>
+                  <span style={S('font-size:11px;opacity:.9')}>▷</span>
+                  Apply to join
+                </div>
               </div>
             </div>
             <div>
@@ -497,9 +520,24 @@ export default function Landing() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* step three */}
-          <div style={S('margin-top:72px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden')}>
+      {/* ---- the workspace (distinct white band) ---- */}
+      <div style={S('background:#fff;border-top:1px solid #EFE9E2')}>
+        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:160px 32px 170px')}>
+          <div style={S('text-align:center;max-width:660px;margin:0 auto')}>
+            <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>The workspace</div>
+            <h2 className="vu-h2-big" style={S('margin:22px 0 0;font:600 60px/1.02 Geist;letter-spacing:-0.045em')}>
+              Fully manage everything
+            </h2>
+            <p style={S('margin:20px auto 0;max-width:520px;font:400 19px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+              Applications, roster, attendance and verified hours in one place. Accept a volunteer, take attendance, and their hours post to every record the same day.
+            </p>
+          </div>
+
+          {/* step three: applications + attendance */}
+          <div style={S('margin-top:64px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
             <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
               <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Step three · the workspace</div>
               <div style={S('display:flex;gap:8px')}>
@@ -554,6 +592,55 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* messaging + task board */}
+          <div style={S('margin-top:22px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+            <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
+              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Run the crew</div>
+              <div style={S('display:flex;gap:8px')}>
+                <span style={S('padding:7px 11px;border-radius:8px;background:#1F1B18;color:#fff;font:500 12px/1 Geist')}>Messages</span>
+                <span style={S('padding:7px 11px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;color:#57504A;font:500 12px/1 Geist')}>Tasks</span>
+              </div>
+            </div>
+            <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr')}>
+              <div style={S('border-right:1px solid #F1EBE4')}>
+                <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
+                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Announcements</div>
+                  <div style={S(`font:500 11px/1 ${MONO};color:#C2603C`)}>3 SENT</div>
+                </div>
+                {[
+                  { m: 'Bring gloves and a water bottle Saturday.', w: '2h ago' },
+                  { m: 'Ride share leaves the school lot at 9:30.', w: 'Yesterday' },
+                  { m: 'Great turnout last week, thank you all.', w: 'Sat' },
+                ].map((x) => (
+                  <div key={x.m} style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4')}>
+                    <div style={S('font:500 14px/1.4 Geist;color:#1A1714')}>{x.m}</div>
+                    <div style={S('margin-top:6px;font:450 12px/1.2 Geist;color:#8A8179')}>You · {x.w}</div>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
+                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Task board</div>
+                  <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>2 DONE</div>
+                </div>
+                {[
+                  { t: 'Book the room', who: 'Maya R.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
+                  { t: 'Confirm the supplies', who: 'Deven A.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
+                  { t: 'Post the sign-up link', who: 'You', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Collect guardian consent', who: 'Sofia K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                ].map((t) => (
+                  <div key={t.t} style={S('padding:15px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+                    <div style={S('min-width:0')}>
+                      <div style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{t.t}</div>
+                      <div style={S('margin-top:4px;font:450 11px/1 Geist;color:#8A8179')}>{t.who}</div>
+                    </div>
+                    <span style={S(`padding:4px 9px;border-radius:6px;background:${t.bg};font:500 10px/1 ${MONO};color:${t.c};flex:none`)}>{t.st}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:56px')}>
             {allInOne.map((a) => (
               <div key={a.k} style={S('padding:28px;border-radius:16px;background:#FCFAF8;border:1px solid #F1EBE4')}>
@@ -564,7 +651,7 @@ export default function Landing() {
             ))}
           </div>
 
-          <div style={S('margin-top:56px')}>
+          <div style={S('margin-top:64px;display:flex;justify-content:center')}>
             <Pressable
               label="Start an organization"
               onClick={go('/onboarding?intent=start')}
@@ -583,20 +670,11 @@ export default function Landing() {
       </div>
 
       {/* ---- questions ---- */}
-      <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:96px 32px 0')}>
-        <div className="vu-split" style={S('display:grid;grid-template-columns:300px 1fr;gap:56px')}>
-          <h2 className="vu-h2" style={S('margin:0;font:600 40px/1.02 Geist;letter-spacing:-0.05em')}>
-            Questions
-          </h2>
-          <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-            {faqs.map((f) => (
-              <div key={f.q} className={H.card} style={S('padding:24px;border-radius:14px;border:1px solid #E8E1D9;background:#fff;transition:border-color .16s ease')}>
-                <div style={S('font:600 17px/1.25 Geist;letter-spacing:-0.025em')}>{f.q}</div>
-                <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{f.a}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="vu-pad-32" style={S('max-width:860px;margin:0 auto;padding:130px 32px 0')}>
+        <h2 className="vu-h2" style={S('margin:0 0 32px;font:600 48px/1.02 Geist;letter-spacing:-0.05em;text-align:center')}>
+          Questions
+        </h2>
+        <Faq items={faqs} />
       </div>
 
       {/* ---- final CTA ---- */}
