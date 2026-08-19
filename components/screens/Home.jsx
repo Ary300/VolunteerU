@@ -10,6 +10,7 @@ import { ImageSlot, Pressable } from '../ui.jsx';
 import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
+import WebNonprofits from '../WebNonprofits.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
@@ -228,6 +229,13 @@ export default function Home() {
                 <span aria-hidden="true" style={S('font-size:10px;opacity:.9')}>▷</span>
                 Browse openings
               </Pressable>
+            </div>
+            <div style={S('margin-top:16px')}>
+              <WebNonprofits
+                near={[state.prefs.location || (state.account.city || ''), state.onboarding?.zip || ''].filter(Boolean).join(' ')}
+                causes={state.prefs.causes || []}
+                heading="Nonprofits suggested for you"
+              />
             </div>
           </div>
         </div>

@@ -66,6 +66,9 @@ export default function Discover() {
   const { state } = useSnapshot();
   const interest = (state.prefs && state.prefs.interest) || '';
   const matchNear = near || (state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '');
+  // For the IRS-registry cards: use the typed location as-is, else fall back to
+  // saved location + onboarding ZIP so tiny towns still resolve to a state.
+  const webNear = near || [(state.prefs && state.prefs.location) || (state.account.city || ''), state.onboarding?.zip || ''].filter(Boolean).join(' ');
   const [draftQuery, setDraftQuery] = useState(q);
   const [showSuggest, setShowSuggest] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -568,7 +571,7 @@ export default function Discover() {
             <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
           ) : null}
           <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
-          <WebNonprofits q={q} near={matchNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} />
+          <WebNonprofits q={q} near={webNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} />
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
