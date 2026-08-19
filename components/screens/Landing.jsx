@@ -11,7 +11,6 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable } from '../ui.jsx';
 import { MarketingHeader, MarketingFooter } from '../Marketing.jsx';
 import { useSnapshot } from '../../lib/store.js';
-import { searchOpportunities } from '../../lib/db.js';
 import {
   proofCards, paths, timeline, sponsorMatches, shareStats, allInOne,
   effortAlone, effortWith, aloneRows, faqs, PEXELS,
@@ -41,10 +40,19 @@ const ATTEND = [
 
 const MONO = "'Geist Mono',monospace";
 
+const SAMPLE_MATCHES = [
+  { id: 's1', title: 'Food Bank Sort', org: 'Community Food Bank', meta: 'Food & hunger · Sat AM', hrs: '3 hrs', score: 96, img: '' },
+  { id: 's2', title: 'Shelter Meal Service', org: 'Downtown Shelter', meta: 'Homelessness · Weeknights', hrs: '2 hrs', score: 91, img: '' },
+  { id: 's3', title: 'Beach Cleanup Crew', org: 'Coastkeepers', meta: 'Environment · Sun AM', hrs: '2.5 hrs', score: 88, img: '' },
+];
+
 export default function Landing() {
   const router = useRouter();
   const { state } = useSnapshot();
-  const matches = searchOpportunities({ sort: 'match' }).slice(0, 4);
+  // Illustrative preview rows for the marketing hero (the real feed lives behind
+  // sign-in at /discover). Clearly a product preview, so it never shows a blank
+  // panel to a logged-out visitor.
+  const matches = SAMPLE_MATCHES;
   const proofPill = state.ui.heroProofPill !== false;
   const trustRow = state.ui.showTrustRow !== false;
 
@@ -99,7 +107,7 @@ export default function Landing() {
                 </span>
                 Start a nonprofit
               </Pressable>
-              <div style={S('margin-top:11px;max-width:230px;font:450 13px/1.45 Geist;color:#8A8179')}>Live under a verified sponsor in minutes</div>
+              <div style={S('margin-top:11px;max-width:230px;font:450 13px/1.45 Geist;color:#8A8179')}>Set up your project and open positions in minutes</div>
             </div>
             <div>
               <Pressable
@@ -289,7 +297,7 @@ export default function Landing() {
 
           <div style={S('margin-top:64px;border-radius:20px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
             <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;background:#FCFAF8')}>
-              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Matches near {state.account.zip}</div>
+              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Matches near you</div>
               <div style={S('display:flex;gap:8px')}>
                 <span style={S('padding:7px 11px;border-radius:8px;background:#1F1B18;color:#fff;font:500 12px/1 Geist')}>All causes</span>
                 <span style={S('padding:7px 11px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;color:#57504A;font:500 12px/1 Geist')}>Sat afternoon</span>
@@ -300,7 +308,7 @@ export default function Landing() {
               <Pressable
                 key={m.id}
                 label={`${m.title} at ${m.org}`}
-                onClick={go(`/opportunity/${m.id}`)}
+                onClick={go('/signup')}
                 className={cx(H.row, H.press)}
                 style={S('padding:22px 26px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:24px;cursor:pointer;transition:background .16s ease')}
               >
@@ -397,11 +405,11 @@ export default function Landing() {
             <div>
               <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#C2603C`)}>Step one</div>
               <div className="vu-h2" style={S('margin-top:16px;font:600 36px/1.06 Geist;letter-spacing:-0.045em')}>
-                We find the sponsor
+                Run under a real sponsor
               </div>
               <p style={S('margin:14px 0 0;max-width:420px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-                You do not need a 501(c)(3) or a lawyer. Your plan goes to vetted organizations near your ZIP that already host student projects, and their
-                insurance and staff supervision cover you.
+                You do not need a 501(c)(3) or a lawyer. Name the organization that supervises your project — a school, library or nonprofit — use the safety
+                templates they already accept, and request a verified badge when you are set up.
               </p>
               <div style={S('margin-top:24px;display:flex;flex-direction:column;gap:11px')}>
                 {['Safety plan and waiver templates they already accept', 'A named staff contact on every session', 'Their verified badge on your project page'].map((t) => (
@@ -416,8 +424,8 @@ export default function Landing() {
             </div>
             <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#FCFAF8;overflow:hidden')}>
               <div style={S('padding:16px 22px;border-bottom:1px solid #F1EBE4;background:#fff;display:flex;align-items:center;justify-content:space-between')}>
-                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Sponsor requests</div>
-                <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>1 ACCEPTED</div>
+                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Verified organizations</div>
+                <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED</div>
               </div>
               {sponsorMatches.map((sp) => (
                 <div key={sp.slug} style={S('padding:18px 22px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff')}>
@@ -459,8 +467,8 @@ export default function Landing() {
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F5E7E0;font:500 11px/1 ${MONO};color:#A8482A`)}>2 HRS WEEKLY</span>
                 </div>
                 <Pressable
-                  label="Apply to join Saturday Reading Circle"
-                  onClick={go('/projects/pp1')}
+                  label="Browse openings like this"
+                  onClick={go('/discover')}
                   className={cx(H.primary, H.press)}
                   style={S(
                     'margin-top:18px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:44px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:background .16s ease'
@@ -469,7 +477,7 @@ export default function Landing() {
                   <span aria-hidden="true" style={S('font-size:11px;opacity:.9')}>
                     ▷
                   </span>
-                  Apply to join
+                  Browse openings
                 </Pressable>
               </div>
             </div>

@@ -37,6 +37,12 @@ const COPY = {
     sub: 'We send a reset link to the email on your account. It expires in an hour.',
     cta: 'Send reset link',
   },
+  reset: {
+    kicker: 'Almost done',
+    title: 'Choose a new password',
+    sub: 'Set a new password for your account. You opened this from your reset link.',
+    cta: 'Save new password',
+  },
 };
 
 export default function Auth({ mode = 'signin' }) {
@@ -68,15 +74,19 @@ export default function Auth({ mode = 'signin' }) {
 
   function validate() {
     const e = {};
-    const emailErr = validateEmail(form.email);
-    if (emailErr) e.email = emailErr;
+    if (mode !== 'reset') {
+      const emailErr = validateEmail(form.email);
+      if (emailErr) e.email = emailErr;
+    }
     if (mode !== 'forgot') {
       const pwErr = validatePassword(form.password);
       if (pwErr) e.password = pwErr;
     }
+    if (mode === 'signup' || mode === 'reset') {
+      if (form.confirm !== form.password) e.confirm = 'Those passwords do not match.';
+    }
     if (mode === 'signup') {
       if (!form.firstName.trim()) e.firstName = 'Enter your first name.';
-      if (form.confirm !== form.password) e.confirm = 'Those passwords do not match.';
       if (!form.agree) e.agree = 'You need to accept the terms to create an account.';
     }
     setErrors(e);
@@ -110,15 +120,24 @@ export default function Auth({ mode = 'signin' }) {
           // reveal whether it does, so the success copy stays the same either way.
           if (supabase) {
             await supabase.auth.resetPasswordForEmail(form.email.trim(), {
-              redirectTo: `${window.location.origin}/signin`,
+              redirectTo: `${window.location.origin}/reset`,
             });
           }
+        } else if (mode === 'reset') {
+          // The recovery link put us in a temporary session; set the new password
+          // against it. Fails clearly if the link expired or was already used.
+          if (!supabase) throw { code: 'AUTH', message: 'The backend is not configured.' };
+          const { error } = await supabase.auth.updateUser({ password: form.password });
+          if (error) throw { code: 'AUTH', message: error.message || 'This reset link has expired. Request a new one.' };
         }
       });
 
       if (mode === 'forgot') {
         setSent(true);
         toast({ title: 'Reset link sent', message: `Check ${form.email} for a link that expires in an hour.`, tone: 'ok' });
+      } else if (mode === 'reset') {
+        toast({ title: 'Password updated', message: 'You are signed in with your new password.', tone: 'ok' });
+        router.replace('/app');
       } else if (mode === 'signin') {
         toast({ title: `Welcome back, ${state.account.firstName}`, tone: 'ok' });
         router.replace(next);
@@ -202,19 +221,21 @@ export default function Auth({ mode = 'signin' }) {
                 </div>
               ) : null}
 
-              <div style={S(mode === 'signup' ? 'margin-top:14px' : '')}>
-                <Field
-                  label="Email"
-                  type="email"
-                  value={form.email}
-                  onChange={set('email')}
-                  placeholder="you@school.edu"
-                  autoComplete="email"
-                  inputMode="email"
-                  required
-                  error={errors.email}
-                />
-              </div>
+              {mode !== 'reset' ? (
+                <div style={S(mode === 'signup' ? 'margin-top:14px' : '')}>
+                  <Field
+                    label="Email"
+                    type="email"
+                    value={form.email}
+                    onChange={set('email')}
+                    placeholder="you@school.edu"
+                    autoComplete="email"
+                    inputMode="email"
+                    required
+                    error={errors.email}
+                  />
+                </div>
+              ) : null}
 
               {mode !== 'forgot' ? (
                 <div style={S('margin-top:14px')}>
@@ -223,7 +244,7 @@ export default function Auth({ mode = 'signin' }) {
                     type="password"
                     value={form.password}
                     onChange={set('password')}
-                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                    autoComplete={mode === 'signup' || mode === 'reset' ? 'new-password' : 'current-password'}
                     required
                     error={errors.password}
                     hint={mode === 'signup' && form.password && !errors.password ? `Strength: ${strength.label}` : undefined}
@@ -245,7 +266,7 @@ export default function Auth({ mode = 'signin' }) {
                 </div>
               ) : null}
 
-              {mode === 'signup' ? (
+              {mode === 'signup' || mode === 'reset' ? (
                 <div style={S('margin-top:14px')}>
                   <Field label="Confirm password" type="password" value={form.confirm} onChange={set('confirm')} autoComplete="new-password" required error={errors.confirm} />
                 </div>

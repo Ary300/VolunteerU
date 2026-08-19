@@ -58,12 +58,19 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
   }
   const shown = listings;
   if (shown.length === 0) {
-    // Match feed and a blank search stay silent; searches say "no matches".
-    if (mode === 'match' || !active) return null;
+    // The match feed stays silent — its mount points (Home, Discover) each carry
+    // their own forward CTA, so a blank match section is never a dead end.
+    if (mode === 'match') return null;
     return (
       <div style={S('margin-bottom:22px;padding:28px 22px;border-radius:14px;border:1px dashed #E0D8CF;background:#FCFAF8;text-align:center')}>
-        <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>No projects match that yet</div>
-        <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#8A8179')}>Try a broader search, clear a filter, or check back — new projects are published all the time.</div>
+        <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>
+          {active ? 'No projects match that yet' : 'No open projects yet'}
+        </div>
+        <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#8A8179')}>
+          {active
+            ? 'Try a broader search, clear a filter, or check back — new projects are published all the time.'
+            : 'Be the first wave — new student projects and nonprofits are posting openings now. Check back soon, or start your own.'}
+        </div>
       </div>
     );
   }
@@ -98,6 +105,11 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
       subtitle: [listing.cause, listing.site].filter(Boolean).join(' · ') || 'Student-led project',
       Body: () => (
         <div style={S('display:flex;flex-direction:column;gap:16px')}>
+          {listing.verified ? (
+            <div style={S(`display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:#EAF3EC;font:500 12px/1.3 Geist;color:#3F6B4E`)}>
+              <span aria-hidden="true">✓</span> Verified organization — a reviewer confirmed this group and a named staff contact.
+            </div>
+          ) : null}
           {(listing.events_hosted || listing.approx_volunteers) ? (
             <div style={S('display:flex;gap:10px')}>
               {listing.events_hosted ? (
@@ -179,6 +191,9 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
                   ) : (
                     <span style={S(`padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Student-led</span>
                   )}
+                  {l.verified ? (
+                    <span style={S(`padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ Verified</span>
+                  ) : null}
                 </div>
                 <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>
                   {[l.cause, l.site].filter(Boolean).join(' · ')}

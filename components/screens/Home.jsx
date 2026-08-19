@@ -33,7 +33,7 @@ function buildTiles(state) {
       big: String(st.verifiedHours),
       unit: 'hrs',
       sub: `${st.events} events · ${st.orgs} organizations`,
-      sign: `+${st.thisMonth} this month`,
+      sign: st.thisMonth ? `+${st.thisMonth} this month` : null,
       href: '/profile',
       rows: [
         { l: 'This month', v: `${st.thisMonth} hrs` },
@@ -63,7 +63,7 @@ function buildTiles(state) {
       big: String(leadTotal),
       unit: 'hrs',
       sub: `${liveProjects} ${plural(liveProjects, 'project')} · ${st.recruited} recruited`,
-      sign: '+2.5 this month',
+      sign: leadTotal ? `${leadTotal} hrs total` : null,
       href: '/lead',
       rows: [
         { l: 'Planning', v: `${lead.planning.toFixed(1)} hrs` },

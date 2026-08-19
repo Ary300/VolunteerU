@@ -52,6 +52,32 @@ export function ImageSlot({ src, shape = 'rounded', radius = 12, placeholder = '
   );
 }
 
+/* An identity avatar for REAL people. Shows their real photo if we have one,
+   otherwise their initials — never a stock face, so a real volunteer is never
+   represented by someone else's photo. Colors are drawn only from the design's
+   own warm token pairs (the same tints used for badges/slots), so it reads as a
+   native placeholder rather than an off-palette element. Fills its (already
+   sized, rounded, overflow-hidden) wrapper. */
+const AVATAR_TONES = [
+  { bg: '#EFE9E2', fg: '#8A8179' }, // warm neutral (the design's slot placeholder)
+  { bg: '#F5E7E0', fg: '#A8482A' }, // brand tint
+  { bg: '#EAF3EC', fg: '#3F6B4E' }, // ok tint
+  { bg: '#FDF3E7', fg: '#8A5A20' }, // warn tint
+];
+export function Avatar({ name = '', src = '', fs = 15 }) {
+  if (src) return <ImageSlot src={src} shape="circle" placeholder="face" />;
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  const initials = (parts.slice(0, 2).map((w) => w[0]).join('') || '·').toUpperCase();
+  let h = 0;
+  for (const c of String(name || 'x')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const tone = AVATAR_TONES[h % AVATAR_TONES.length];
+  return (
+    <div aria-hidden="true" style={S(`width:100%;height:100%;display:grid;place-items:center;background:${tone.bg};color:${tone.fg};font:600 ${fs}px/1 Geist`)}>
+      {initials}
+    </div>
+  );
+}
+
 /* ---- buttons ------------------------------------------------------------ */
 
 const flexBase = (o) =>

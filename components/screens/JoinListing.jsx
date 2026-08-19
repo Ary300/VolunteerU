@@ -89,7 +89,12 @@ export default function JoinListing({ id }) {
         </div>
         <div style={S('padding:24px 28px 28px')}>
           <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-            <span style={S(`padding:4px 9px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Student-led</span>
+            {listing.org_class === 'official' ? (
+              <span style={S(`padding:4px 9px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>Nonprofit</span>
+            ) : (
+              <span style={S(`padding:4px 9px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>Student-led</span>
+            )}
+            {listing.verified ? <span style={S(`padding:4px 9px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ Verified</span> : null}
             <span style={S(`padding:4px 9px;border-radius:6px;background:#F1EBE4;font:500 10px/1 ${MONO};color:#57504A`)}>{isTeam ? 'Project team' : 'Volunteer program'}</span>
             {listing.cause ? <span style={S(`padding:4px 9px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>{listing.cause}</span> : null}
           </div>

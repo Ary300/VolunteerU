@@ -86,7 +86,7 @@ export default function Create() {
     if (n === 3 && !isTeam) {
       if (!/[A-Za-z]{3}\s+\d{1,2}/.test(draft.firstSession)) e.firstSession = 'Use a date like “Aug 9”.';
       if (!/\d{1,2}:\d{2}\s*(?:to|-|–)\s*\d{1,2}:\d{2}/.test(draft.time)) e.time = 'Use a range like “10:00 to 12:00”.';
-      if (!safetyComplete(draft)) e.safety = 'All three safety commitments are required before a sponsor will take you.';
+      if (!safetyComplete(draft)) e.safety = 'All three safety commitments are required before you can publish.';
     }
     setErrors(e);
     return !Object.keys(e).length;
@@ -129,7 +129,7 @@ export default function Create() {
       const project = await perform('create.publish', () => createProject(payload));
       toast({
         title: `${project.name} is live`,
-        message: isTeam ? 'Share the join link and start assigning tasks.' : 'Sponsor requests are going out to vetted organizations near you.',
+        message: isTeam ? 'Share the join link and start assigning tasks.' : 'Share your join link to recruit volunteers — you can request verification anytime.',
         tone: 'ok',
       });
       router.replace(`/lead/${project.id}/overview`);
@@ -647,7 +647,7 @@ function Step3({ d, set, errors, onNext, onBack }) {
       </div>
       <div style={S(`margin-top:22px;font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Safety and consent</div>
       <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
-        <Checkbox checked={d.safety.staff} onChange={(v) => set({ safety: { ...d.safety, staff: v } })} label="A staff member from the sponsor is present at every session" />
+        <Checkbox checked={d.safety.staff} onChange={(v) => set({ safety: { ...d.safety, staff: v } })} label={(d.orgClass || 'student') === 'official' ? 'A staff supervisor from your organization is present at every session' : 'A staff member from the sponsor is present at every session'} />
         <Checkbox checked={d.safety.consent} onChange={(v) => set({ safety: { ...d.safety, consent: v } })} label="Guardian consent collected for anyone under 16" />
         <Checkbox checked={d.safety.pair} onChange={(v) => set({ safety: { ...d.safety, pair: v } })} label="Never fewer than two volunteers on site" />
       </div>

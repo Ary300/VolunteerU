@@ -12,7 +12,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, Field, Select, TextArea, EmptyState, ImageSlot } from '../ui.jsx';
+import { Pressable, Field, Select, TextArea, EmptyState, ImageSlot, Avatar } from '../ui.jsx';
 import { openModal, confirmDialog, toast } from '../../lib/overlays.js';
 import { copyText } from '../../lib/db.js';
 import { loadProjectMembers, setMemberAssignment, confirmMemberHour } from '../../lib/listings.js';
@@ -208,7 +208,7 @@ export function TeamMembersManager({ p }) {
                 <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:14px')}>
                   <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
                     <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
-                      <ImageSlot src={`https://picsum.photos/seed/${app.applicant_id}/200/200?grayscale`} shape="circle" placeholder="face" />
+                      <Avatar name={app.applicant_name} fs={16} />
                     </div>
                     <div style={S('min-width:0')}>
                       <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{app.applicant_name}</div>
@@ -336,7 +336,7 @@ export function PipelineMembers({ p }) {
               <div style={S('display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
               <div style={S('display:flex;align-items:center;gap:11px;min-width:180px;flex:none')}>
                 <div style={S('width:32px;height:32px;border-radius:50%;overflow:hidden;flex:none')}>
-                  <ImageSlot src={`https://picsum.photos/seed/${app.applicant_id}/200/200?grayscale`} shape="circle" placeholder="face" />
+                  <Avatar name={app.applicant_name} fs={16} />
                 </div>
                 <div style={S('min-width:0')}>
                   <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{app.applicant_name}</div>

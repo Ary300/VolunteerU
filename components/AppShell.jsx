@@ -11,7 +11,7 @@ import { S, s, cx, H } from '../lib/style.js';
 import { ImageSlot } from './ui.jsx';
 import { useSnapshot, updateEphemeral } from '../lib/store.js';
 import { menuFromEvent, confirmDialog, toast } from '../lib/overlays.js';
-import { signOut, unreadNotifications } from '../lib/db.js';
+import { signOut } from '../lib/db.js';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -37,7 +37,7 @@ export default function AppShell({ children }) {
   const activeKey = navKeyFor(pathname);
   const req = state.requirement;
   const pct = req.termGoal ? Math.round((req.termDone / req.termGoal) * 100) : 0;
-  const unread = unreadNotifications();
+  const unread = (state.ui && state.ui.unreadNotifs) || 0;
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {

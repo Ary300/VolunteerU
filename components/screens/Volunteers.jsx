@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Pressable, SkeletonRows } from '../ui.jsx';
+import { ImageSlot, Avatar, Pressable, SkeletonRows } from '../ui.jsx';
 import { openModal } from '../../lib/overlays.js';
 import { CAUSES } from '../../lib/seed.js';
 import { searchVolunteers } from '../../lib/listings.js';
@@ -50,7 +50,7 @@ export default function Volunteers() {
         <div style={S('display:flex;flex-direction:column;gap:16px')}>
           <div style={S('display:flex;align-items:center;gap:14px')}>
             <div style={S('width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none')}>
-              <ImageSlot src={`https://picsum.photos/seed/${v.user_id}/200/200?grayscale`} shape="circle" placeholder="face" />
+              <Avatar name={v.name} src={v.avatar} fs={20} />
             </div>
             <div>
               <div style={S('font:600 18px/1.2 Geist;letter-spacing:-0.02em')}>{v.name}</div>
@@ -138,7 +138,7 @@ export default function Volunteers() {
                 <Pressable key={v.user_id} label={`View ${v.name}`} onClick={() => view(v)} className={cx(H.card, H.press)} style={S('text-align:left;padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff;cursor:pointer;transition:border-color .16s ease')}>
                   <div style={S('display:flex;align-items:center;gap:12px')}>
                     <div style={S('width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none')}>
-                      <ImageSlot src={`https://picsum.photos/seed/${v.user_id}/200/200?grayscale`} shape="circle" placeholder="face" />
+                      <Avatar name={v.name} src={v.avatar} fs={16} />
                     </div>
                     <div style={S('min-width:0;flex:1')}>
                       <div className="vu-trunc" style={S('font:600 15px/1.2 Geist;color:#1A1714')}>{v.name}</div>

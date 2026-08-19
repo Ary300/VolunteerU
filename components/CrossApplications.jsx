@@ -15,7 +15,7 @@ import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function CrossApplications() {
+export default function CrossApplications({ emptyState = null }) {
   const [apps, setApps] = useState(null);
   const [busy, setBusy] = useState(null);
 
@@ -32,7 +32,9 @@ export default function CrossApplications() {
 
   if (apps === null) return null;
   const pending = apps.filter((a) => a.status === 'pending');
-  if (!pending.length) return null;
+  // As a banner (Overview) this stays silent when empty; as a tab's primary
+  // content it can render a caller-provided empty state instead.
+  if (!pending.length) return emptyState;
 
   async function decide(app, status) {
     if (busy) return;

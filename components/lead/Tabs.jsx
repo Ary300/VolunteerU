@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, Toggle, Field, Select } from '../ui.jsx';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
+import CrossApplications from '../CrossApplications.jsx';
 import {
   attendanceFor, attendanceStats, setAttendance, markAllPresent, postAttendance,
   pendingApplications, decideApplication, reopenApplication, updateScreeningQuestions,
@@ -385,27 +386,19 @@ function DebriefForm({ p }) {
       </div>
       <div style={S('margin-top:14px;display:flex;gap:8px;flex-wrap:wrap')}>
         <Pressable
-          label="Attach photos to the debrief"
-          onClick={() => toast({ title: 'Photos need a media release', message: 'Everyone in a photo must have a media release on file. Check the Quality tab.', tone: 'warn' })}
-          className={cx(H.secondary, H.press)}
-          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
-        >
-          Attach photos
-        </Pressable>
-        <Pressable
-          label="Send the debrief to the sponsor"
+          label="Save the debrief"
           onClick={() => {
             if (!worked.trim() && !fix.trim()) {
-              toast({ title: 'Nothing to send yet', message: 'Write at least one line before sending it on.', tone: 'warn' });
+              toast({ title: 'Nothing to save yet', message: 'Write at least one line first.', tone: 'warn' });
               return;
             }
             updateProject(p.id, { debrief: { worked, fix } });
-            toast({ title: 'Debrief saved', message: 'Kept on your project so you can share it when a sponsor is matched.', tone: 'ok' });
+            toast({ title: 'Debrief saved', message: 'Kept on your project record — share it with your organization anytime.', tone: 'ok' });
           }}
           className={cx(H.secondary, H.press)}
           style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
         >
-          Send to sponsor
+          Save debrief
         </Pressable>
       </div>
     </>
@@ -596,6 +589,19 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
   return (
     <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:22px;align-items:start')}>
       <div style={S('display:flex;flex-direction:column;gap:14px')}>
+        {/* Real cross-user applications from published listings show here first;
+            when none are pending it shows a helpful empty state (this is the tab
+            named "Applications", so it should never be blank). */}
+        <CrossApplications
+          emptyState={all.length ? null : (
+            <EmptyState
+              title="No applications waiting"
+              body="Share your join link to bring in volunteers. New applications land here the moment someone applies; accepted volunteers move to your roster."
+              cta="Copy join link"
+              onCta={() => onCopyLink()}
+            />
+          )}
+        />
         {all.length ? (
           <div className="vu-scroll-x" style={S('display:flex;gap:8px')}>
             {[
@@ -708,14 +714,14 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
               </div>
             </div>
           ))
-        ) : (
+        ) : all.length ? (
           <EmptyState
             title={filter === 'pending' ? 'Nothing waiting on you' : 'Nothing here'}
             body={filter === 'pending' ? 'Every application has a decision. New ones land here the moment a student applies.' : 'No applications with that status yet.'}
             cta={filter === 'pending' ? 'Copy recruit link' : 'Show all'}
             onCta={() => (filter === 'pending' ? onCopyLink() : setParam({ astatus: 'all' }))}
           />
-        )}
+        ) : null}
       </div>
 
       <div style={S('display:flex;flex-direction:column;gap:14px')}>
@@ -962,7 +968,7 @@ export function HoursTab({ p }) {
    Quality
    ========================================================================== */
 
-export function QualityTab({ p, params, setParam }) {
+export function QualityTab({ p, params, setParam, goTab }) {
   const compliance = recomputeCompliance(p);
   const auditAll = params.get('audit') === 'all';
   const reliability = p.people
@@ -1026,17 +1032,11 @@ export function QualityTab({ p, params, setParam }) {
                 <span style={S(`padding:5px 9px;border-radius:7px;background:${c.bg};font:500 11px/1 ${MONO};color:${c.color}`)}>{c.st}</span>
                 {c.st !== 'Clear' ? (
                   <Pressable
-                    label={`Fix ${c.t}`}
-                    onClick={() =>
-                      toast({
-                        title: c.t,
-                        message:
-                          c.id === 'cp1'
-                            ? 'Open People, then mark consent received on anyone still outstanding.'
-                            : 'Open People and mark training complete once each tutor finishes it.',
-                        tone: 'warn',
-                      })
-                    }
+                    label={`Fix ${c.t} in People`}
+                    onClick={() => {
+                      toast({ title: c.t, message: c.id === 'cp1' ? 'Mark consent received on anyone still outstanding.' : 'Mark training complete once each person finishes it.', tone: 'ok' });
+                      goTab && goTab('people');
+                    }}
                     className={cx(H.secondary, H.press)}
                     style={S('padding:5px 9px;border-radius:7px;border:1px solid #E8E1D9;background:#fff;font:500 11px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease')}
                   >

@@ -11,13 +11,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { hydrate, useSnapshot, useHydrated } from '../lib/store.js';
 import { initAuth } from '../lib/auth.js';
-import { syncVolunteerDirectory } from '../lib/db.js';
+import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours } from '../lib/db.js';
 import OverlayHost from './OverlayHost.jsx';
 import ScreenNav from './ScreenNav.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 
 /* Routes that require a signed-in account. */
-const PROTECTED = ['/app', '/discover', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings'];
+const PROTECTED = ['/app', '/discover', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
 
@@ -39,6 +39,27 @@ export default function Providers({ children }) {
     if (!hydrated || !state.session.authed) return;
     syncVolunteerDirectory();
   }, [hydrated, state.session.authed, state.account.name, state.stats.verifiedHours, state.prefs.causes, state.prefs.privacy.publicProfile]);
+
+  /* Reflect a reviewer's verification decision back onto the founder's projects. */
+  useEffect(() => {
+    if (!hydrated || !state.session.authed) return;
+    syncMyListingsVerification();
+  }, [hydrated, state.session.authed, state.projects.length]);
+
+  /* Pull org-confirmed service hours into the headline stat, so the profile
+     number and the public directory reflect real verified hours. Runs on load
+     and on route change; the directory-sync effect above re-publishes when the
+     resulting stats.verifiedHours changes. */
+  useEffect(() => {
+    if (!hydrated || !state.session.authed) return;
+    syncMyServiceHours();
+  }, [hydrated, state.session.authed, pathname]);
+
+  /* Recompute the notification badge on sign-in and each route change. */
+  useEffect(() => {
+    if (!hydrated || !state.session.authed) return;
+    refreshNotificationBadge();
+  }, [hydrated, state.session.authed, pathname]);
 
   /* Mirror preferences onto <html> so CSS can act on them. */
   useEffect(() => {

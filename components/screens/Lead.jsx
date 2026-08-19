@@ -22,6 +22,7 @@ import {
   upsertSession, deleteSession, repeatWeekly, regenerateCode, setReminder, addPerson, updatePerson,
   removePerson, addNote, rosterCSV, download, setActiveProject, projects as allProjects,
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
+  requestProjectVerification,
 } from '../../lib/db.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
@@ -145,9 +146,11 @@ export default function Lead({ projectId, tab: tabParam }) {
             <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Project workspace</div>
             <div style={s('padding:4px 8px;border-radius:6px', `background:${p.archived ? '#F6F2EE' : '#EAF3EC'}`, `font:500 10px/1 ${MONO}`, `color:${p.archived ? '#6B635C' : '#3F6B4E'}`)}>{p.status}</div>
             {p.sponsor.verified ? (
-              <div style={S(`padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED SPONSOR</div>
+              <div style={S(`padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED ORGANIZATION</div>
+            ) : p.sponsor.verificationRequestedAt ? (
+              <div style={S(`padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>VERIFICATION REQUESTED</div>
             ) : (
-              <div style={S(`padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 10px/1 ${MONO};color:#8A5A20`)}>SPONSOR PENDING</div>
+              <div style={S(`padding:4px 8px;border-radius:6px;background:#F6F2EE;font:500 10px/1 ${MONO};color:#8A8179`)}>SELF-REPORTED</div>
             )}
           </div>
           <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap')}>
@@ -223,7 +226,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         {tab === 'attendance' ? <AttendanceTab p={p} params={params} setParam={setParam} goTab={goTab} /> : null}
         {tab === 'applications' ? <ApplicationsTab p={p} params={params} setParam={setParam} goTab={goTab} onCopyLink={copyRecruit} /> : null}
         {tab === 'hours' ? <HoursTab p={p} /> : null}
-        {tab === 'quality' ? <QualityTab p={p} params={params} setParam={setParam} /> : null}
+        {tab === 'quality' ? <QualityTab p={p} params={params} setParam={setParam} goTab={goTab} /> : null}
         {tab === 'messages' ? (
           <div style={S('margin-top:22px;display:flex;flex-direction:column;gap:18px')}>
             <AnnouncementBoard listingId={p.listingId} canPost title="Team announcements board" />
@@ -422,28 +425,7 @@ function Overview({ p, goTab }) {
           </div>
         </div>
 
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Sponsor</div>
-          <div style={S('margin-top:14px;display:flex;align-items:center;gap:11px')}>
-            <div style={S('width:36px;height:36px;border-radius:10px;overflow:hidden;flex:none')}>
-              <ImageSlot src={`https://picsum.photos/seed/${p.sponsor.slug}/400/400?grayscale`} shape="rounded" radius={10} placeholder="logo" />
-            </div>
-            <div style={S('min-width:0')}>
-              <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>
-                {p.sponsor.name} {p.sponsor.verified ? <span aria-label="verified" style={S('color:#3F6B4E')}>✓</span> : null}
-              </div>
-              <div className="vu-trunc" style={S('margin-top:3px;font:450 11px/1.2 Geist;color:#8A8179')}>
-                {p.sponsor.verified ? 'Verified organization' : 'Awaiting match'}
-                {p.sponsor.since ? ` · ${p.sponsor.since}` : ''}
-              </div>
-            </div>
-          </div>
-          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
-            <SideRow l="Contact" v={p.sponsor.contact} />
-            <SideRow l="Room booked to" v={p.sponsor.roomBookedTo} />
-            <SideRow l="Insurance" v={p.sponsor.insurance} />
-          </div>
-        </div>
+        <SponsorCard p={p} />
 
         <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
           <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Your leadership record</div>
@@ -493,6 +475,84 @@ function SideRow({ l, v }) {
     <div style={S('display:flex;justify-content:space-between;gap:10px')}>
       <span>{l}</span>
       <span style={S('color:#1A1714;font-weight:500')}>{v}</span>
+    </div>
+  );
+}
+
+/* Sponsor / organization panel. Shows only honest status — self-reported until a
+   reviewer confirms — and offers a real, persisted "request verification" action.
+   Nothing here claims an automated match is happening in the background. */
+function SponsorCard({ p }) {
+  const sp = p.sponsor || {};
+  const named = sp.name && sp.name.trim();
+  const status = sp.verified ? 'Verified organization'
+    : sp.verificationRequestedAt ? 'Verification requested — under review'
+    : named ? 'Self-reported (not yet verified)'
+    : 'No organization added yet';
+
+  const openRequest = () => {
+    openModal({
+      title: 'Request verification',
+      subtitle: 'A reviewer confirms your registration and a named staff contact. This sends your details for review — free for students.',
+      Body: ({ api }) => <VerifyForm p={p} api={api} />,
+    });
+  };
+
+  return (
+    <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
+      <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Organization</div>
+      <div style={S('margin-top:14px;display:flex;align-items:center;gap:11px')}>
+        <div style={S('width:36px;height:36px;border-radius:10px;overflow:hidden;flex:none;background:#EFE9E2')}>
+          {named ? <ImageSlot src={`https://picsum.photos/seed/${sp.slug || 'org'}/400/400?grayscale`} shape="rounded" radius={10} placeholder="logo" /> : null}
+        </div>
+        <div style={S('min-width:0')}>
+          <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>
+            {named || 'Not set'} {sp.verified ? <span aria-label="verified" style={S('color:#3F6B4E')}>✓</span> : null}
+          </div>
+          <div className="vu-trunc" style={S('margin-top:3px;font:450 11px/1.2 Geist;color:#8A8179')}>{status}</div>
+        </div>
+      </div>
+      {sp.contact && sp.contact !== '—' ? (
+        <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
+          <SideRow l="Contact" v={sp.contact} />
+        </div>
+      ) : null}
+      {!sp.verified ? (
+        <button
+          type="button"
+          onClick={openRequest}
+          className={cx(H.press)}
+          style={S('margin-top:16px;width:100%;padding:10px;border-radius:10px;border:1px solid #E4DDD4;background:#FAF6F3;font:500 13px/1 Geist;color:#8A5A20;cursor:pointer')}
+        >
+          {sp.verificationRequestedAt ? 'Update verification request' : 'Request verification'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function VerifyForm({ p, api }) {
+  const [name, setName] = useState((p.sponsor && p.sponsor.name) || '');
+  const [contact, setContact] = useState((p.sponsor && p.sponsor.contact !== '—' && p.sponsor.contact) || '');
+  const [busy, setBusy] = useState(false);
+  const submit = () => {
+    if (!name.trim() || !contact.trim()) {
+      toast({ title: 'Add both fields', message: 'We need the organization name and a staff contact to review.', tone: 'warn' });
+      return;
+    }
+    setBusy(true);
+    requestProjectVerification(p.id, { name, contact });
+    toast({ title: 'Request received', message: 'A reviewer will confirm your organization. Status shows as “verification requested” until then.', tone: 'ok' });
+    api.close();
+  };
+  return (
+    <div style={S('display:flex;flex-direction:column;gap:14px')}>
+      <Field label="Organization name" value={name} onChange={setName} placeholder="Registered nonprofit or sponsoring school" />
+      <Field label="Staff contact (name + email)" value={contact} onChange={setContact} placeholder="Ms. Alvarez · alvarez@school.edu" />
+      <div style={S('display:flex;gap:10px;justify-content:flex-end')}>
+        <button type="button" onClick={() => api.close()} className={cx(H.press)} style={S('padding:10px 16px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:500 13px/1 Geist;cursor:pointer')}>Cancel</button>
+        <button type="button" onClick={submit} disabled={busy} className={cx(H.press)} style={S('padding:10px 16px;border-radius:10px;border:0;background:#C2603C;color:#fff;font:500 13px/1 Geist;cursor:pointer')}>Send for review</button>
+      </div>
     </div>
   );
 }

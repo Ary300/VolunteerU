@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { S } from '../lib/style.js';
+import { toast } from '../lib/overlays.js';
 import { loadMessages, sendMessage, myId as getMyId } from '../lib/listings.js';
 
 export default function MessageThread({ applicationId, recipientId, recipientName = 'them' }) {
@@ -47,7 +48,8 @@ export default function MessageThread({ applicationId, recipientId, recipientNam
       setText('');
       await load();
     } catch {
-      /* the compose box keeps the text so nothing is lost */
+      // Keep the text in the box and tell the sender it did not go through.
+      toast({ title: 'Message not sent', message: 'Check your connection and try again.', tone: 'danger' });
     }
     setBusy(false);
   }

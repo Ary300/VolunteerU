@@ -4,26 +4,53 @@
    Misc.jsx — notification centre, shortlist, friends going, peer project page
    ========================================================================== */
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState } from '../ui.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { confirmDialog, toast } from '../../lib/overlays.js';
 import {
-  markNotificationRead, markAllNotificationsRead, clearNotifications, unreadNotifications,
+  markNotificationRead, markAllNotificationsRead, clearNotifications, unreadNotifications, markNotificationsSeen, getNotificationsSeenAt,
   getOpportunity, isSaved, toggleSaved, spotsLeft, spotsLabel, claimSpot,
 } from '../../lib/db.js';
+import { loadMyNotifications } from '../../lib/listings.js';
 
 const MONO = "'Geist Mono',monospace";
 
-const TONE_DOT = { ok: '#3F6B4E', warn: '#8A5A20', danger: '#A8482A', brand: '#C2603C' };
+const TONE_DOT = { ok: '#3F6B4E', warn: '#8A5A20', danger: '#A8482A', brand: '#C2603C', accepted: '#3F6B4E', declined: '#A8482A', rating: '#C2603C', announcement: '#5B6BB0' };
+
+function notifWhen(at) {
+  if (!at) return '';
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 /* ---- notification centre -------------------------------------------------- */
 
 export function Notifications() {
   const router = useRouter();
-  const { state } = useSnapshot();
-  const unread = unreadNotifications();
+  const [notifs, setNotifs] = useState(null);
+  // Snapshot the prior "seen" time on mount so items that arrived since then
+  // keep their fresh highlight, even though we mark everything seen below.
+  const [seenAt, setSeenAt] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    setSeenAt(getNotificationsSeenAt());
+    loadMyNotifications().then((n) => { if (alive) setNotifs(n); }).catch(() => { if (alive) setNotifs([]); });
+    // Opening the page marks everything seen (clears the unread badge).
+    markNotificationsSeen();
+    return () => { alive = false; };
+  }, []);
+
+  const list = notifs || [];
 
   return (
     <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px;max-width:860px')}>
@@ -31,69 +58,39 @@ export function Notifications() {
         <div>
           <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Notifications</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
-            {unread ? `${unread} unread.` : 'You are all caught up.'} Shift reminders, decisions and anything waiting on you as a lead.
+            Application decisions, ratings from organizers, and updates from the organizations you've joined.
           </p>
-        </div>
-        <div style={S('display:flex;gap:10px')}>
-          <Pressable
-            label="Mark everything read"
-            disabled={!unread}
-            onClick={() => {
-              const n = markAllNotificationsRead();
-              toast({ title: n ? `${n} marked read` : 'Nothing unread', tone: 'ok', timeout: 2200 });
-            }}
-            className={cx(H.secondaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;white-space:nowrap;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}
-          >
-            Mark all read
-          </Pressable>
-          <Pressable
-            label="Clear all notifications"
-            disabled={!state.notifications.length}
-            onClick={async () => {
-              const ok = await confirmDialog({
-                title: 'Clear every notification?',
-                body: 'They are removed from this list. Anything still waiting on you stays on the relevant screen.',
-                confirmLabel: 'Clear all',
-              });
-              if (!ok) return;
-              const n = clearNotifications();
-              toast({ title: `${n} cleared`, tone: 'ok' });
-            }}
-            className={cx(H.danger, H.press)}
-            style={S('display:inline-flex;align-items:center;white-space:nowrap;padding:0 16px;height:40px;border-radius:11px;border:1px solid #EBD3C8;background:#fff;font:600 14px/1 Geist;color:#A8482A;cursor:pointer')}
-          >
-            Clear all
-          </Pressable>
         </div>
       </div>
 
       <div style={S('margin-top:26px;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-        {state.notifications.length ? (
-          state.notifications.map((n) => (
-            <Pressable
-              key={n.id}
-              label={n.t}
-              onClick={() => {
-                markNotificationRead(n.id);
-                if (n.to && n.to.path) router.push(n.to.path);
-              }}
-              className={cx(H.row, H.press)}
-              style={s('display:flex;gap:13px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #F1EBE4;cursor:pointer;transition:background .16s ease', n.read ? '' : 'background:#FCFAF8')}
-            >
-              <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px', `background:${n.read ? '#E0D8CF' : TONE_DOT[n.tone] || '#C2603C'}`)} />
-              <div style={S('flex:1;min-width:0')}>
-                <div style={s('font:600 14px/1.35 Geist', n.read ? 'color:#57504A' : 'color:#1A1714')}>{n.t}</div>
-                <div style={S('margin-top:5px;font:450 13px/1.5 Geist;color:#8A8179')}>{n.b}</div>
-              </div>
-              <div style={S(`font:500 10px/1 ${MONO};color:#A9A097;flex:none;margin-top:4px`)}>{n.when}</div>
-            </Pressable>
-          ))
+        {notifs === null ? (
+          <div style={S('padding:26px 20px;font:450 14px/1.5 Geist;color:#8A8179')}>Loading…</div>
+        ) : list.length ? (
+          list.map((n) => {
+            const fresh = n.at && new Date(n.at).getTime() > seenAt;
+            return (
+              <Pressable
+                key={n.id}
+                label={n.title}
+                onClick={() => { if (n.href) router.push(n.href); }}
+                className={cx(H.row, H.press)}
+                style={s('display:flex;gap:13px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #F1EBE4;cursor:pointer;transition:background .16s ease', fresh ? 'background:#FCFAF8' : '')}
+              >
+                <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px', `background:${TONE_DOT[n.type] || '#C2603C'}`)} />
+                <div style={S('flex:1;min-width:0')}>
+                  <div style={S('font:600 14px/1.35 Geist;color:#1A1714')}>{n.title}</div>
+                  {n.body ? <div style={S('margin-top:5px;font:450 13px/1.5 Geist;color:#8A8179')}>{n.body}</div> : null}
+                </div>
+                <div style={S(`font:500 10px/1 ${MONO};color:#A9A097;flex:none;margin-top:4px`)}>{notifWhen(n.at)}</div>
+              </Pressable>
+            );
+          })
         ) : (
           <EmptyState
             icon="☰"
-            title="Nothing here"
-            body="Shift reminders, application decisions and anything waiting on you as a lead show up here."
+            title="Nothing yet"
+            body="When an organization accepts your application, rates you, or posts an update, it shows up here."
             cta="Find openings"
             onCta={() => router.push('/discover')}
           />

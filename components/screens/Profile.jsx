@@ -110,7 +110,7 @@ export default function Profile() {
               <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#7C726A`)}>VolunteerU record</div>
               <div style={S('margin-top:14px;font:600 34px/1 Geist;letter-spacing:-0.04em;color:#fff')}>{st.verifiedHours} verified hours</div>
               <div style={S('margin-top:8px;font:450 14px/1.5 Geist;color:#A79E96')}>
-                {a.name} · Grade {a.grade} · {st.orgs} organizations · {st.causes} causes
+                {[a.name, a.grade ? `Grade ${a.grade}` : null, `${st.orgs} organizations`, `${st.causes} causes`].filter(Boolean).join(' · ')}
               </div>
             </div>
           </div>
@@ -276,7 +276,7 @@ export default function Profile() {
             <div style={S('flex:1;min-width:0')}>
               <div className="vu-break" style={S('font:600 28px/1.1 Geist;letter-spacing:-0.035em')}>{a.name}</div>
               <div style={S('margin-top:7px;font:450 14px/1.35 Geist;color:#8A8179')}>
-                {a.city} · Grade {a.grade} · {a.school}
+                {[a.city, a.grade ? `Grade ${a.grade}` : null, a.school].filter(Boolean).join(' · ') || 'Add your school and grade in settings'}
               </div>
             </div>
             <div style={S('text-align:right;flex:none')}>
@@ -350,7 +350,7 @@ export default function Profile() {
                 <div style={S(`display:grid;grid-template-columns:.7fr 1.6fr 1fr .6fr 1fr;gap:12px;padding:11px 16px;background:#FCFAF8;border-bottom:1px solid #F1EBE4;font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>
                   <div>Date</div><div>Project</div><div>Arrival</div><div>Hours</div><div>Score</div>
                 </div>
-                {state.myAttendance.map((x) => {
+                {state.myAttendance.length ? state.myAttendance.map((x) => {
                   const g = GRADE_TONE[x.grade] || GRADE_TONE['Not scored'];
                   return (
                     <div key={x.id} style={S('display:grid;grid-template-columns:.7fr 1.6fr 1fr .6fr 1fr;gap:12px;padding:13px 16px;border-bottom:1px solid #F1EBE4;align-items:center')}>
@@ -363,15 +363,21 @@ export default function Profile() {
                       </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <div style={S('padding:22px 16px;text-align:center;font:450 13px/1.5 Geist;color:#8A8179')}>
+                    No sessions scored yet. After you attend and an organizer confirms your hours, each session shows up here with its score.
+                  </div>
+                )}
               </div>
             </div>
             <div style={S('margin-top:16px;padding:16px 18px;border-radius:14px;border:1px solid #E8E1D9;background:#FCFAF8')}>
               <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
                 <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Reliability</div>
-                <Pressable label="Request a review of a score" onClick={requestReview} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
-                  Request a review
-                </Pressable>
+                {state.myAttendance && state.myAttendance.length ? (
+                  <Pressable label="Request a review of a score" onClick={requestReview} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
+                    Request a review
+                  </Pressable>
+                ) : null}
               </div>
               <div style={S('margin-top:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px')}>
                 {[
@@ -477,7 +483,7 @@ export default function Profile() {
               <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#7C726A`)}>Shareable card</div>
               <div style={S('margin-top:14px;font:600 30px/1 Geist;letter-spacing:-0.04em;color:#fff')}>{st.verifiedHours} hours</div>
               <div style={S('margin-top:8px;font:450 14px/1.5 Geist;color:#A79E96')}>
-                {st.causes} causes · {st.orgs} organizations · Grade {a.grade}
+                {[`${st.causes} causes`, `${st.orgs} organizations`, a.grade ? `Grade ${a.grade}` : null].filter(Boolean).join(' · ')}
               </div>
               <div style={S('margin-top:18px;display:flex;gap:8px')}>
                 {['Instagram', 'TikTok', 'Link'].map((k) => (

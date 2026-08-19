@@ -306,14 +306,14 @@ function NotificationsSection({ state }) {
   const n = state.prefs.notifications;
   return (
     <>
-      <Panel title="What we send you">
+      <Panel title="What we send you" sub="Application updates and crew messages appear in your in-app notification center now. Reminders and the digest are delivered once email and text channels are switched on.">
         <ToggleRow label="Shift reminders" hint="24 hours before, and again when check-in opens." on={n.shiftReminders} onChange={(v) => setPref('notifications.shiftReminders', v)} />
-        <ToggleRow label="Application updates" hint="When an organization accepts, waitlists or declines you." on={n.applicationUpdates} onChange={(v) => setPref('notifications.applicationUpdates', v)} />
-        <ToggleRow label="Crew messages" hint="Announcements from projects you are on." on={n.crewMessages} onChange={(v) => setPref('notifications.crewMessages', v)} />
+        <ToggleRow label="Application updates" hint="When an organization accepts, waitlists or declines you. Shows in your notifications." on={n.applicationUpdates} onChange={(v) => setPref('notifications.applicationUpdates', v)} />
+        <ToggleRow label="Crew messages" hint="Announcements from projects you are on. Shows in your notifications." on={n.crewMessages} onChange={(v) => setPref('notifications.crewMessages', v)} />
         <ToggleRow label="Weekly digest" hint="Monday summary of hours, upcoming shifts and new matches." on={n.weeklyDigest} onChange={(v) => setPref('notifications.weeklyDigest', v)} />
         <ToggleRow label="Product news" hint="Occasional updates about new features. Off by default." on={n.productNews} onChange={(v) => setPref('notifications.productNews', v)} />
       </Panel>
-      <Panel title="How we send it">
+      <Panel title="How we send it" sub="In-app notifications are always on. Email and text delivery are rolling out — your choices here are saved and take effect when they do.">
         <ToggleRow label="Push notifications" on={n.channel.push} onChange={(v) => setPref('notifications.channel.push', v)} />
         <ToggleRow label="Email" on={n.channel.email} onChange={(v) => setPref('notifications.channel.email', v)} />
         <ToggleRow label="Text message" hint="Only for shift reminders and cancellations." on={n.channel.sms} onChange={(v) => setPref('notifications.channel.sms', v)} />
@@ -517,13 +517,13 @@ function DataSection({ state, router }) {
         </Pressable>
       </Panel>
 
-      <Panel title="Reset" sub="Puts the app back to the demo dataset. Useful if you have been trying things out.">
+      <Panel title="Reset this device" sub="Clears the local copy of your workspace on this device and starts empty. Your cloud account and record are not deleted — sign in again to reload them.">
         <Pressable
-          label="Reset to the demo dataset"
+          label="Reset this device"
           onClick={async () => {
             const ok = await confirmDialog({
-              title: 'Reset to the demo dataset?',
-              body: 'Every change you have made on this device is discarded and the seeded record comes back.',
+              title: 'Reset this device?',
+              body: 'The local copy of your workspace on this device is cleared and the app starts empty. Your account still exists — sign in to reload your record.',
               confirmLabel: 'Reset',
               requireText: 'RESET',
             });

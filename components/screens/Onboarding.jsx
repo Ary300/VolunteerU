@@ -104,7 +104,7 @@ export default function Onboarding() {
       if (!start.positions.length) e.positions = 'Pick at least one position you need.';
     } else {
       if (!join.interest.trim() || join.interest.trim().length < 8) e.interest = 'A sentence about what you want to do helps us match you.';
-      else if (join.interest.length > INTEREST_MAX) e.interest = `Keep it under ${INTEREST_MAX} characters.`;
+      else if (join.interest.trim().length > INTEREST_MAX) e.interest = `Keep it under ${INTEREST_MAX} characters.`;
       if (!join.location.trim()) e.location = 'Where are you based? A city or area is enough.';
     }
     setErrors(e);
@@ -136,7 +136,6 @@ export default function Onboarding() {
           st.account.zip = identity.zip.trim();
           st.onboarding.completed = true;
           st.onboarding.intent = intent;
-          st.session.authed = true;
           if (!isStart) {
             st.prefs.interest = join.interest.trim();
             st.prefs.location = join.location.trim();
@@ -172,7 +171,7 @@ export default function Onboarding() {
       });
 
       if (isStart) {
-        toast({ title: 'Workspace created', message: 'Sponsor requests are going out to vetted organizations near you.', tone: 'ok' });
+        toast({ title: 'Workspace created', message: 'Add your organization and open positions — you can request verification anytime.', tone: 'ok' });
         router.replace('/lead');
       } else {
         toast({ title: 'Matches ready', message: 'Ranked to your causes, radius and free time.', tone: 'ok' });
@@ -189,7 +188,6 @@ export default function Onboarding() {
   function skip() {
     update((st) => {
       st.onboarding.completed = true;
-      st.session.authed = true;
     });
     toast({ title: 'Skipped for now', message: 'You can set your causes any time in Settings.', actionLabel: 'Open settings', onAction: () => router.push('/settings/preferences') });
     router.replace('/app');
@@ -350,10 +348,10 @@ export default function Onboarding() {
                       ))}
                     </div>
                     <div style={S('margin-top:10px;font:450 13px/1.5 Geist;color:#8A8179')}>
-                      First time is the common answer. We pick a sponsor used to new leads and hand you the checklist.
+                      First time is the common answer. You get the setup checklist and can request verification for your organization when you are ready.
                     </div>
                   </div>
-                  <FinishRow label="Create my workspace" note="We request sponsors as soon as you land" busy={busy} onFinish={finish} onBack={() => setStep(1)} onSkip={skip} />
+                  <FinishRow label="Create my workspace" note="Verification is optional and requested from your workspace" busy={busy} onFinish={finish} onBack={() => setStep(1)} onSkip={skip} />
                 </>
               ) : (
                 <>
