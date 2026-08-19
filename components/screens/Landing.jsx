@@ -592,52 +592,101 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* messaging + task board */}
-          <div style={S('margin-top:22px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+          {/* task board */}
+          <div style={S('max-width:620px;margin:120px auto 0;text-align:center')}>
+            <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>Task board</div>
+            <h3 style={S('margin:16px 0 0;font:600 44px/1.04 Geist;letter-spacing:-0.04em')}>Assign the work</h3>
+            <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+              Set roles with a short briefing, then drop tasks on people. Everyone sees what they own and what is left.
+            </p>
+          </div>
+          <div style={S('margin-top:48px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
             <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
-              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Run the crew</div>
-              <div style={S('display:flex;gap:8px')}>
-                <span style={S('padding:7px 11px;border-radius:8px;background:#1F1B18;color:#fff;font:500 12px/1 Geist')}>Messages</span>
-                <span style={S('padding:7px 11px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;color:#57504A;font:500 12px/1 Geist')}>Tasks</span>
-              </div>
+              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Fall Fundraiser · task board</div>
+              <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>6 tasks · 3 roles</div>
             </div>
-            <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr')}>
-              <div style={S('border-right:1px solid #F1EBE4')}>
-                <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
-                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Announcements</div>
-                  <div style={S(`font:500 11px/1 ${MONO};color:#C2603C`)}>3 SENT</div>
-                </div>
-                {[
-                  { m: 'Bring gloves and a water bottle Saturday.', w: '2h ago' },
-                  { m: 'Ride share leaves the school lot at 9:30.', w: 'Yesterday' },
-                  { m: 'Great turnout last week, thank you all.', w: 'Sat' },
-                ].map((x) => (
-                  <div key={x.m} style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4')}>
-                    <div style={S('font:500 14px/1.4 Geist;color:#1A1714')}>{x.m}</div>
-                    <div style={S('margin-top:6px;font:450 12px/1.2 Geist;color:#8A8179')}>You · {x.w}</div>
+            <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr)')}>
+              {[
+                { name: 'Tutoring', color: '#5B6BB0', brief: 'Run the reading sessions', tasks: [
+                  { t: 'Prep the week 3 worksheets', who: 'Maya R.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Pair up the new tutors', who: 'You', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
+                ] },
+                { name: 'Outreach', color: '#C2603C', brief: 'Recruit and post', tasks: [
+                  { t: 'Post to three school pages', who: 'Deven A.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Email the library contact', who: 'Sofia K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                ] },
+                { name: 'Photos', color: '#3F6B4E', brief: 'Capture the day', tasks: [
+                  { t: 'Shoot Saturday session', who: 'Theo M.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                  { t: 'Upload to the shared drive', who: 'Theo M.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
+                ] },
+              ].map((role, i) => (
+                <div key={role.name} style={S(`padding:22px 20px 26px${i < 2 ? ';border-right:1px solid #F1EBE4' : ''}`)}>
+                  <div style={S('display:flex;align-items:center;gap:9px')}>
+                    <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${role.color}`)} />
+                    <div style={S('font:600 15px/1 Geist')}>{role.name}</div>
+                    <div style={S(`margin-left:auto;font:500 11px/1 ${MONO};color:#A9A097`)}>{role.tasks.length}</div>
                   </div>
-                ))}
-              </div>
-              <div>
-                <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
-                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Task board</div>
-                  <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>2 DONE</div>
-                </div>
-                {[
-                  { t: 'Book the room', who: 'Maya R.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
-                  { t: 'Confirm the supplies', who: 'Deven A.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
-                  { t: 'Post the sign-up link', who: 'You', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
-                  { t: 'Collect guardian consent', who: 'Sofia K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
-                ].map((t) => (
-                  <div key={t.t} style={S('padding:15px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-                    <div style={S('min-width:0')}>
-                      <div style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{t.t}</div>
-                      <div style={S('margin-top:4px;font:450 11px/1 Geist;color:#8A8179')}>{t.who}</div>
-                    </div>
-                    <span style={S(`padding:4px 9px;border-radius:6px;background:${t.bg};font:500 10px/1 ${MONO};color:${t.c};flex:none`)}>{t.st}</span>
+                  <div style={S('margin-top:8px;font:450 12px/1.4 Geist;color:#8A8179')}>{role.brief}</div>
+                  <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:10px')}>
+                    {role.tasks.map((t) => (
+                      <div key={t.t} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+                        <div style={S('font:500 13px/1.35 Geist;color:#1A1714')}>{t.t}</div>
+                        <div style={S('margin-top:11px;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
+                          <div style={S('display:flex;align-items:center;gap:7px;min-width:0')}>
+                            <div style={S('width:20px;height:20px;border-radius:50%;overflow:hidden;flex:none')}>
+                              <Avatar name={t.who} fs={9} />
+                            </div>
+                            <div className="vu-trunc" style={S('font:450 11px/1 Geist;color:#8A8179')}>{t.who}</div>
+                          </div>
+                          <span style={S(`padding:3px 8px;border-radius:6px;background:${t.bg};font:500 10px/1 ${MONO};color:${t.c};flex:none`)}>{t.st}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* messaging */}
+          <div style={S('max-width:620px;margin:120px auto 0;text-align:center')}>
+            <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>Messaging</div>
+            <h3 style={S('margin:16px 0 0;font:600 44px/1.04 Geist;letter-spacing:-0.04em')}>Keep everyone in the loop</h3>
+            <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+              One thread for the whole crew, plus a direct message with any applicant. No group chats to wrangle.
+            </p>
+          </div>
+          <div style={S('margin-top:48px;max-width:760px;margin-left:auto;margin-right:auto;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+            <div style={S('padding:18px 24px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
+              <div style={S('font:600 15px/1 Geist')}>Crew announcements</div>
+              <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>12 members</div>
+            </div>
+            <div style={S('padding:26px 24px;display:flex;flex-direction:column;gap:16px;background:#FCFAF8')}>
+              {[
+                { who: 'Maya R.', text: 'Rooms are booked for all four Saturdays.', w: '9:14 AM' },
+                { you: true, text: 'Amazing. I just posted the sign-up link under Outreach.', w: '9:16 AM' },
+                { who: 'Deven A.', text: 'Two new tutors applied overnight. Want me to accept them?', w: '9:20 AM' },
+                { you: true, text: 'Yes, accept both and add them to the Tutoring role.', w: '9:21 AM' },
+              ].map((m, i) => (m.you ? (
+                <div key={i} style={S('align-self:flex-end;max-width:74%')}>
+                  <div style={S('padding:12px 16px;border-radius:16px 16px 4px 16px;background:linear-gradient(180deg,#D2775B,#C2603C);color:#fff;font:450 14px/1.45 Geist')}>{m.text}</div>
+                  <div style={S('margin-top:5px;text-align:right;font:450 11px/1 Geist;color:#A9A097')}>You · {m.w}</div>
+                </div>
+              ) : (
+                <div key={i} style={S('align-self:flex-start;max-width:74%;display:flex;gap:10px')}>
+                  <div style={S('width:28px;height:28px;border-radius:50%;overflow:hidden;flex:none')}>
+                    <Avatar name={m.who} fs={11} />
+                  </div>
+                  <div>
+                    <div style={S('padding:12px 16px;border-radius:16px 16px 16px 4px;background:#fff;border:1px solid #EDE6DE;font:450 14px/1.45 Geist;color:#332D28')}>{m.text}</div>
+                    <div style={S('margin-top:5px;font:450 11px/1 Geist;color:#A9A097')}>{m.who} · {m.w}</div>
+                  </div>
+                </div>
+              )))}
+            </div>
+            <div style={S('padding:14px 18px;border-top:1px solid #F1EBE4;display:flex;align-items:center;gap:10px;background:#fff')}>
+              <div style={S('flex:1;padding:11px 14px;border-radius:10px;border:1px solid #E4DDD4;font:450 14px/1 Geist;color:#A9A097')}>Message the crew</div>
+              <div aria-hidden="true" style={S('display:flex;align-items:center;padding:0 18px;height:40px;border-radius:10px;background:linear-gradient(180deg,#D2775B,#C2603C);color:#fff;font:600 13px/1 Geist')}>Send</div>
             </div>
           </div>
 
