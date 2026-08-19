@@ -242,13 +242,13 @@ export default function Landing() {
         </div>
         <div style={S('position:relative;overflow:hidden;padding:0')}>
           <div className="vu-4col vu-pad-32" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:1180px;margin:0 auto;padding:0 32px')}>
-            {proofCards.map((p) => (
+            {proofCards.map((p, i) => (
               <div key={p.slot} style={S('padding:24px 22px;border-radius:16px;border:1px solid #EDE6DE;background:#FCFAF8;display:flex;flex-direction:column')}>
                 <div aria-hidden="true" style={S('font:600 30px/0.7 Geist;color:#E0C4B6;height:16px')}>&ldquo;</div>
                 <div style={S('margin-top:10px;font:450 15px/1.55 Geist;color:#332D28;text-wrap:pretty;flex:1')}>{p.quote}</div>
                 <div style={S('margin-top:18px;display:flex;align-items:center;gap:10px')}>
                   <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <Avatar name={String(p.who).split('·')[0]} fs={12} />
+                    <ImageSlot src={`https://i.pravatar.cc/120?img=${[13, 32, 45, 5][i] || 1}`} shape="circle" placeholder="face" />
                   </div>
                   <div style={S('font:500 12px/1.3 Geist;color:#57504A')}>{p.who}</div>
                 </div>
@@ -260,14 +260,12 @@ export default function Landing() {
 
       {/* ---- two ways in ---- */}
       <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:150px 32px 0')}>
-        <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-end;justify-content:space-between;gap:48px')}>
-          <div>
-            <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#C2603C`)}>Two ways in</div>
-            <h2 className="vu-h2-big" style={S('margin:16px 0 0;font:600 56px/1 Geist;letter-spacing:-0.05em;max-width:640px')}>
-              Build one or join one
-            </h2>
-          </div>
-          <p style={S('margin:0;max-width:320px;font:400 15px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>
+        <div style={S('text-align:center;max-width:680px;margin:0 auto')}>
+          <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#C2603C`)}>Two ways in</div>
+          <h2 className="vu-h2-big" style={S('margin:16px 0 0;font:600 56px/1 Geist;letter-spacing:-0.05em')}>
+            Build one or join one
+          </h2>
+          <p style={S('margin:16px auto 0;max-width:440px;font:400 17px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>
             Same hub, same verified hours. The only question is how much you want to run.
           </p>
         </div>
@@ -591,16 +589,26 @@ export default function Landing() {
               </div>
             </div>
           </div>
+          <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:56px')}>
+            {allInOne.map((a) => (
+              <div key={a.k} style={S('padding:28px;border-radius:16px;background:#FCFAF8;border:1px solid #F1EBE4')}>
+                <div style={S(`font:500 11px/1 ${MONO};color:#C2603C`)}>{a.k}</div>
+                <div style={S('margin-top:20px;font:600 22px/1.12 Geist;letter-spacing:-0.032em')}>{a.t}</div>
+                <div style={S('margin-top:11px;font:450 15px/1.55 Geist;color:#6B635C;text-wrap:pretty')}>{a.b}</div>
+              </div>
+            ))}
+          </div>
+
 
           {/* task board */}
-          <div style={S('max-width:620px;margin:120px auto 0;text-align:center')}>
+          <div style={S('max-width:620px;margin:190px auto 0;text-align:center')}>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>Task board</div>
             <h3 style={S('margin:16px 0 0;font:600 44px/1.04 Geist;letter-spacing:-0.04em')}>Assign the work</h3>
             <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
               Set roles with a short briefing, then drop tasks on people. Everyone sees what they own and what is left.
             </p>
           </div>
-          <div style={S('margin-top:48px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+          <div style={S('margin-top:60px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
             <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
               <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Fall Fundraiser · task board</div>
               <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>6 tasks · 3 roles</div>
@@ -649,14 +657,14 @@ export default function Landing() {
           </div>
 
           {/* messaging */}
-          <div style={S('max-width:620px;margin:120px auto 0;text-align:center')}>
+          <div style={S('max-width:620px;margin:190px auto 0;text-align:center')}>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>Messaging</div>
             <h3 style={S('margin:16px 0 0;font:600 44px/1.04 Geist;letter-spacing:-0.04em')}>Keep everyone in the loop</h3>
             <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
               One thread for the whole crew, plus a direct message with any applicant. No group chats to wrangle.
             </p>
           </div>
-          <div style={S('margin-top:48px;max-width:760px;margin-left:auto;margin-right:auto;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+          <div style={S('margin-top:60px;max-width:760px;margin-left:auto;margin-right:auto;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
             <div style={S('padding:18px 24px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
               <div style={S('font:600 15px/1 Geist')}>Crew announcements</div>
               <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>12 members</div>
@@ -688,16 +696,6 @@ export default function Landing() {
               <div style={S('flex:1;padding:11px 14px;border-radius:10px;border:1px solid #E4DDD4;font:450 14px/1 Geist;color:#A9A097')}>Message the crew</div>
               <div aria-hidden="true" style={S('display:flex;align-items:center;padding:0 18px;height:40px;border-radius:10px;background:linear-gradient(180deg,#D2775B,#C2603C);color:#fff;font:600 13px/1 Geist')}>Send</div>
             </div>
-          </div>
-
-          <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:56px')}>
-            {allInOne.map((a) => (
-              <div key={a.k} style={S('padding:28px;border-radius:16px;background:#FCFAF8;border:1px solid #F1EBE4')}>
-                <div style={S(`font:500 11px/1 ${MONO};color:#C2603C`)}>{a.k}</div>
-                <div style={S('margin-top:20px;font:600 22px/1.12 Geist;letter-spacing:-0.032em')}>{a.t}</div>
-                <div style={S('margin-top:11px;font:450 15px/1.55 Geist;color:#6B635C;text-wrap:pretty')}>{a.b}</div>
-              </div>
-            ))}
           </div>
 
           <div style={S('margin-top:64px;display:flex;justify-content:center')}>
@@ -748,27 +746,17 @@ export default function Landing() {
             </p>
             <div style={S('display:flex;gap:12px;justify-content:center;margin-top:30px')}>
               <Pressable
-                label="Create my profile"
+                label="Get started"
                 onClick={go('/onboarding')}
                 className={cx(H.primaryLift, H.press)}
                 style={S(
-                  'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 26px;height:46px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 15px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(80,30,12,.22), 0 10px 20px -8px rgba(150,60,30,.55);transition:transform .16s ease, box-shadow .16s ease, background .16s ease'
+                  'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 28px;height:48px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 15px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(80,30,12,.22), 0 10px 20px -8px rgba(150,60,30,.55);transition:transform .16s ease, box-shadow .16s ease, background .16s ease'
                 )}
               >
                 <span aria-hidden="true" style={S('font-size:12px;opacity:.9')}>
                   ▷
                 </span>
-                Create my profile
-              </Pressable>
-              <Pressable
-                label="For counselors"
-                onClick={go('/schools?for=counselors')}
-                className={cx(H.secondaryLift, H.press)}
-                style={S(
-                  'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 22px;height:46px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 15px/1 Geist;cursor:pointer;box-shadow:0 1px 2px rgba(30,20,10,.06);transition:background .16s ease, border-color .16s ease, transform .16s ease'
-                )}
-              >
-                For counselors
+                Get started
               </Pressable>
             </div>
           </div>
