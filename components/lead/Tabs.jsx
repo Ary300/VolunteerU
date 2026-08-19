@@ -400,7 +400,7 @@ function DebriefForm({ p }) {
               return;
             }
             updateProject(p.id, { debrief: { worked, fix } });
-            toast({ title: 'Debrief sent to the sponsor', message: `${p.sponsor.contact} gets it in the Monday digest.`, tone: 'ok' });
+            toast({ title: 'Debrief saved', message: 'Kept on your project so you can share it when a sponsor is matched.', tone: 'ok' });
           }}
           className={cx(H.secondary, H.press)}
           style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
@@ -1321,7 +1321,7 @@ export function MessagesTab({ p, params, setParam }) {
     }
     sendMessage(p.id, th.id, body);
     setDraft('');
-    toast({ title: 'Message sent', message: `${th.members} ${th.members === 1 ? 'person gets' : 'people get'} it now.`, tone: 'ok', timeout: 2600 });
+    toast({ title: 'Posted to the thread', message: 'For updates that reach members who joined online, use the announcements board.', tone: 'ok', timeout: 2600 });
   }
 
   function templates(e) {

@@ -12,6 +12,7 @@ import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount, logHours } from '../../lib/db.js';
 import MyRatings from '../MyRatings.jsx';
+import VolunteerApplications from '../VolunteerApplications.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -298,53 +299,7 @@ export default function Profile() {
           </div>
 
           <div id="vu-applications" style={S('padding:26px 30px;border-bottom:1px solid #F1EBE4')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Applications and projects</div>
-              <Pressable label="Find more openings" onClick={() => router.push('/discover')} className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;cursor:pointer')}>
-                Find more
-              </Pressable>
-            </div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {apps.length ? (
-                apps.map((x) => {
-                  const t = tone(APP_TONE, x.st);
-                  return (
-                    <div key={x.id} style={S('padding:14px 16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-                      <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
-                        <div style={S('width:34px;height:34px;border-radius:9px;overflow:hidden;flex:none')}>
-                          <ImageSlot src={`https://picsum.photos/seed/${x.slug}/400/400?grayscale`} shape="rounded" radius={9} placeholder="logo" />
-                        </div>
-                        <div style={S('min-width:0')}>
-                          <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{x.n}</div>
-                          <div className="vu-trunc" style={S('margin-top:4px;font:450 12px/1.3 Geist;color:#8A8179')}>
-                            {x.role} · sent {x.when}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={S('display:flex;align-items:center;gap:10px;flex:none')}>
-                        <span style={S(`padding:5px 9px;border-radius:7px;background:${t.stBg || t.bg};font:500 11px/1 ${MONO};color:${t.stColor || t.color}`)}>{x.st}</span>
-                        <Pressable
-                          label={`View application to ${x.n}`}
-                          onClick={() => viewApplication(x)}
-                          className={cx(H.secondary, H.press)}
-                          style={S('padding:6px 10px;border-radius:8px;border:1px solid #E4DDD4;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
-                        >
-                          View
-                        </Pressable>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <EmptyState
-                  compact
-                  title="No applications yet"
-                  body="Apply to a shift and it will track here from submitted through accepted."
-                  cta="Find openings"
-                  onCta={() => router.push('/discover')}
-                />
-              )}
-            </div>
+            <VolunteerApplications showEmpty />
           </div>
 
           <div style={S('padding:26px 30px')}>

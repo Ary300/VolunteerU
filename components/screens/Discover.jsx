@@ -63,6 +63,8 @@ export default function Discover() {
   const near = params.get('near') || '';
 
   const { state } = useSnapshot();
+  const interest = (state.prefs && state.prefs.interest) || '';
+  const matchNear = near || (state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '');
   const [draftQuery, setDraftQuery] = useState(q);
   const [showSuggest, setShowSuggest] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -561,114 +563,23 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
+          {interest && !q && kind === 'all' && place === 'all' && !causes.length ? (
+            <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
+          ) : null}
           <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
-          {searching ? (
-            <SkeletonRows n={3} h={168} />
-          ) : rows.length ? (
-            rows.map((m) => <ResultCard key={m.id} m={m} onOpen={() => router.push(`/opportunity/${m.id}`)} onClaim={() => claim(m.id)} />)
-          ) : (
-            <EmptyState
-              title={q || nFilters ? 'No openings match that' : 'No openings right now'}
-              body={
-                q || nFilters
-                  ? 'Try a wider radius, a different cause, or clear the search and start from the full list.'
-                  : 'New shifts post most mornings. Check back after school.'
-              }
-              cta={q || nFilters ? 'Clear filters' : undefined}
-              onCta={() => {
-                setDraftQuery('');
-                setParams({ q: null, causes: null, windows: null, mi: null, saved: null, sort: null });
-              }}
-            />
-          )}
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <div style={S('padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Student projects</div>
-              <Pressable
-                label={tab === 'projects' ? 'Show the top five' : `Show all ${state.peerProjects.length} student projects`}
-                onClick={() => setParams({ tab: tab === 'projects' ? null : 'projects' })}
-                className={H.link}
-                style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}
-              >
-                {tab === 'projects' ? 'Show less' : `All ${state.peerProjects.length}`}
-              </Pressable>
-            </div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {peerRows.map((p) => (
-                <Pressable
-                  key={p.id}
-                  label={`${p.t}, ${p.lead}`}
-                  onClick={() => router.push(p.mine ? `/lead/${p.projectId}/overview` : `/projects/${p.id}`)}
-                  className={cx(H.cardSoft, H.press)}
-                  style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;cursor:pointer;transition:border-color .16s ease')}
-                >
-                  <div style={S('display:flex;align-items:center;gap:11px')}>
-                    <div style={S('width:34px;height:34px;border-radius:9px;overflow:hidden;flex:none')}>
-                      <ImageSlot src={p.img} shape="rounded" radius={9} placeholder="photo" />
-                    </div>
-                    <div style={S('flex:1;min-width:0')}>
-                      <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{p.t}</div>
-                      <div className="vu-trunc" style={S('margin-top:4px;font:450 11px/1.2 Geist;color:#8A8179')}>{p.lead}</div>
-                    </div>
-                  </div>
-                  <div style={S('margin-top:11px;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
-                    <div className="vu-trunc" style={S('font:450 11px/1 Geist;color:#57504A')}>{p.next}</div>
-                    <div style={S(`font:500 10px/1 ${MONO};color:#C2603C;flex:none`)}>
-                      {p.crewFilled} of {p.crewCap} crew
-                    </div>
-                  </div>
-                </Pressable>
-              ))}
-            </div>
-          </div>
-
-          <div style={S('border-radius:14px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-            <MapPanel height={220} top={-46} left={-42} interactive />
-            <div style={S('padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-              <div style={S('font:450 13px/1.4 Geist;color:#6B635C')}>
-                {withinRadius} openings within {state.prefs.radius} mi of {state.account.zip}
-              </div>
-              <Pressable label="Expand the map" onClick={expandMap} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
-                Expand
-              </Pressable>
-            </div>
-          </div>
-
-          <div style={S('padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>This week</div>
-            <div style={S('margin-top:12px;display:flex;align-items:baseline;gap:8px')}>
-              <div style={S('font:600 30px/1 Geist;letter-spacing:-0.035em')}>{weekHours}</div>
-              <div style={S('font:450 14px/1 Geist;color:#8A8179')}>hours booked</div>
-            </div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {weekBookings.length ? (
-                weekBookings.map((b) => {
-                  const opp = state.opportunities.find((o) => o.id === b.oppId);
-                  if (!opp) return null;
-                  const shift = opp.shifts.find((x) => x.id === b.shiftId) || opp.shifts[0];
-                  return (
-                    <Pressable
-                      key={b.id}
-                      label={`${opp.title}, ${opp.hours} hours`}
-                      onClick={() => router.push(`/opportunity/${opp.id}`)}
-                      className={cx(H.toBrand, H.press)}
-                      style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;font:450 13px/1 Geist;color:#332D28;cursor:pointer;transition:color .16s ease')}
-                    >
-                      <span className="vu-trunc">
-                        {shift.d.split(',')[0]} · {opp.title.replace(/^Saturday |^Weekend |^Evening |^School Break /, '')}
-                      </span>
-                      <span style={S('color:#8A8179;flex:none')}>{opp.hours}h</span>
-                    </Pressable>
-                  );
-                })
-              ) : (
-                <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>Nothing booked. Claim a spot and it lands here.</div>
-              )}
-            </div>
-          </div>
+          <Pressable
+            label="Find volunteers"
+            onClick={() => router.push('/volunteers')}
+            className={cx(H.card, H.press)}
+            style={S('text-align:left;padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff;cursor:pointer;transition:border-color .16s ease')}
+          >
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Directory</div>
+            <div style={S('margin-top:9px;font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>Looking for people, not projects?</div>
+            <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>Search every volunteer by cause and city. →</div>
+          </Pressable>
 
           <div style={S('padding:18px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
             <div style={S('font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>What verified means</div>
@@ -679,7 +590,7 @@ export default function Discover() {
               label="How we verify organizations"
               onClick={verifyInfo}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              style={S('margin-top:14px;display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
             >
               How we verify
             </Pressable>

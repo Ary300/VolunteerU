@@ -174,9 +174,6 @@ export default function AppShell({ children }) {
             <Link href="/saved" className={H.nav} style={S('padding:10px;border-radius:9px;cursor:pointer;color:inherit;transition:background .16s ease')}>
               Shortlist · {state.saved.length}
             </Link>
-            <Link href="/friends" className={H.nav} style={S('padding:10px;border-radius:9px;cursor:pointer;color:inherit;transition:background .16s ease')}>
-              Friends going · {state.friendsGoing.length}
-            </Link>
           </div>
         </div>
 

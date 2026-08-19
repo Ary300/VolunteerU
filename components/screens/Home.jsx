@@ -9,6 +9,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable } from '../ui.jsx';
 import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
+import DiscoverListings from '../DiscoverListings.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
@@ -211,61 +212,23 @@ export default function Home() {
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:20px;align-items:start')}>
         <div style={S('padding:24px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
           <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Picked for you</div>
-            <Pressable label={`See all ${state.opportunities.length} openings`} onClick={() => router.push('/discover')} className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;cursor:pointer')}>
-              See all {state.opportunities.length}
+            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Openings for you</div>
+            <Pressable label="See all openings" onClick={() => router.push('/discover')} className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;cursor:pointer')}>
+              See all →
             </Pressable>
           </div>
-          <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px')}>
-            {suggested.map((m) => (
-              <Pressable
-                key={m.id}
-                label={`${m.title}, ${m.score}% match`}
-                onClick={() => router.push(`/opportunity/${m.id}`)}
-                className={cx(H.cardSoft, H.press)}
-                style={S('border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;overflow:hidden;cursor:pointer;transition:border-color .16s ease')}
-              >
-                <div style={S('padding:12px 12px 0')}>
-                  <div style={S('height:96px;border-radius:9px;overflow:hidden')}>
-                    <ImageSlot src={m.homeImg || m.img} shape="rounded" radius={9} placeholder="photo" />
-                  </div>
-                </div>
-                <div style={S('padding:14px')}>
-                  <div style={S('display:flex;align-items:center;justify-content:space-between;gap:8px')}>
-                    <div style={S(`font:500 11px/1 ${MONO};color:#A8482A`)}>{m.score}%</div>
-                    <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>{m.hrs}</div>
-                  </div>
-                  <div style={S('margin-top:9px;font:600 14px/1.3 Geist;letter-spacing:-0.02em')}>{m.title}</div>
-                  <div style={S('margin-top:5px;font:450 12px/1.4 Geist;color:#8A8179')}>{m.homeMeta || `${m.org} · ${m.meta}`}</div>
-                </div>
+          <div style={S('margin-top:16px')}>
+            {state.prefs && state.prefs.interest ? (
+              <DiscoverListings mode="match" interest={state.prefs.interest} causes={state.prefs.causes || []} near={state.prefs.location || (state.account.city ? String(state.account.city).split(',')[0] : '')} />
+            ) : null}
+            <div style={S('padding:18px;border-radius:12px;border:1px dashed #E4DDD4;background:#FCFAF8;text-align:center')}>
+              <div style={S('font:500 14px/1.3 Geist;color:#332D28')}>Find your next opportunity</div>
+              <div style={S('margin-top:6px;font:450 12px/1.5 Geist;color:#8A8179')}>Search real student projects and nonprofits by cause, kind and location — remote or in person.</div>
+              <Pressable label="Browse openings" onClick={() => router.push('/discover')} className={cx(H.primary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 16px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
+                <span aria-hidden="true" style={S('font-size:10px;opacity:.9')}>▷</span>
+                Browse openings
               </Pressable>
-            ))}
-          </div>
-
-          <div style={S('height:1px;background:#F1EBE4;margin:22px 0')} />
-          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Student projects near you</div>
-            <Pressable label="Browse all student projects" onClick={() => router.push('/discover?tab=projects')} className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;cursor:pointer')}>
-              Browse all
-            </Pressable>
-          </div>
-          <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px')}>
-            {peers.map((p) => (
-              <Pressable
-                key={p.id}
-                label={`${p.t}, ${p.lead}`}
-                onClick={() => router.push(`/projects/${p.id}`)}
-                className={cx(H.cardSoft, H.press)}
-                style={S('padding:16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;cursor:pointer;transition:border-color .16s ease')}
-              >
-                <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>{p.cause}</div>
-                <div style={S('margin-top:10px;font:600 14px/1.3 Geist;letter-spacing:-0.02em')}>{p.t}</div>
-                <div style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#8A8179')}>{p.lead}</div>
-                <div style={S(`margin-top:12px;font:500 11px/1 ${MONO};color:#C2603C`)}>
-                  {p.crewFilled} of {p.crewCap} crew
-                </div>
-              </Pressable>
-            ))}
+            </div>
           </div>
         </div>
 

@@ -21,7 +21,7 @@ const STATUS = {
   withdrawn: { label: 'Withdrawn', bg: '#F6F2EE', color: '#8A8179' },
 };
 
-export default function VolunteerApplications() {
+export default function VolunteerApplications({ showEmpty = false }) {
   const [apps, setApps] = useState(null);
 
   useEffect(() => {
@@ -30,7 +30,18 @@ export default function VolunteerApplications() {
       .catch(() => setApps([]));
   }, []);
 
-  if (apps === null || apps.length === 0) return null;
+  if (apps === null) return null;
+  if (apps.length === 0) {
+    if (!showEmpty) return null;
+    return (
+      <div style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Your applications</div>
+        <div style={S('margin-top:12px;padding:14px;border-radius:11px;border:1px dashed #E4DDD4;background:#FCFAF8;font:450 13px/1.55 Geist;color:#8A8179')}>
+          No applications yet. Apply to a project and it tracks here — under review, accepted, or not this time.
+        </div>
+      </div>
+    );
+  }
 
   function openThread(app) {
     const name = (app.listings && app.listings.name) || 'the founder';
