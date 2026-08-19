@@ -229,7 +229,7 @@ export default function Auth({ mode = 'signin' }) {
                     type="email"
                     value={form.email}
                     onChange={set('email')}
-                    placeholder="you@school.edu"
+                    placeholder="you@email.com"
                     autoComplete="email"
                     inputMode="email"
                     required

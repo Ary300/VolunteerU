@@ -2,16 +2,18 @@
 
 /* ==========================================================================
    Logo.jsx — the VolunteerU mark.
-   A custom glyph, not a font letter: an upward "V" whose right arm rises past
-   the left, reading at once as the V of VolunteerU and as a check — the
-   verified hour the product is built around. One reusable component so the mark
-   is identical everywhere (header, sidebar, auth, onboarding, share pages).
+   A rounded "squircle" badge in the brand gradient with a soft top-left sheen,
+   carrying a confident white check — the verified hour the whole product is
+   built around. One reusable component so the mark is identical everywhere
+   (header, sidebar, auth, onboarding, share pages).
    ========================================================================== */
 
 import { useId } from 'react';
 
 export function Logo({ size = 26, title = 'VolunteerU' }) {
-  const gid = useId();
+  const uid = useId();
+  const g = `${uid}g`;
+  const h = `${uid}h`;
   return (
     <svg
       width={size}
@@ -22,22 +24,26 @@ export function Logo({ size = 26, title = 'VolunteerU' }) {
       style={{ display: 'block', flex: 'none' }}
     >
       <defs>
-        <linearGradient id={gid} x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#D8805F" />
+        <linearGradient id={g} x1="3" y1="1" x2="29" y2="31" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#E28A65" />
+          <stop offset="0.55" stopColor="#C2603C" />
           <stop offset="1" stopColor="#A8482A" />
         </linearGradient>
+        <radialGradient id={h} cx="0.28" cy="0.22" r="0.9">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.42" />
+          <stop offset="0.55" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
       </defs>
-      {/* badge */}
-      <rect x="0.5" y="0.5" width="31" height="31" rx="9" fill={`url(#${gid})`} />
-      {/* soft top highlight for depth */}
-      <path d="M9 2.4 H23" stroke="rgba(255,255,255,0.45)" strokeWidth="1" strokeLinecap="round" />
-      <rect x="0.5" y="0.5" width="31" height="31" rx="9" fill="none" stroke="rgba(60,20,8,0.12)" strokeWidth="1" />
-      {/* the mark: an upward, verified V */}
+      {/* squircle badge */}
+      <rect x="0.5" y="0.5" width="31" height="31" rx="10.5" fill={`url(#${g})`} />
+      <rect x="0.5" y="0.5" width="31" height="31" rx="10.5" fill={`url(#${h})`} />
+      <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="10.25" fill="none" stroke="rgba(60,20,8,0.14)" strokeWidth="1" />
+      {/* the check */}
       <path
-        d="M8 10.5 L15 22 L24 7.5"
+        d="M8.6 16.4 L13.7 21.6 L23.6 9.8"
         fill="none"
         stroke="#fff"
-        strokeWidth="3.1"
+        strokeWidth="3.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

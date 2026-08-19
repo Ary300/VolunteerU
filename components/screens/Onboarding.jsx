@@ -50,7 +50,7 @@ const DEFAULT_JOIN = {
   causes: [],
   windows: [],
   radius: '5',
-  hoursGoal: '40 by June',
+  hoursGoal: '',
   volunteered: 'Never',
 };
 
@@ -389,7 +389,7 @@ export default function Onboarding() {
                   </div>
                   {errors.windows ? <div className="vu-err">{errors.windows}</div> : null}
                   <div style={S('margin-top:22px;max-width:260px')}>
-                    <Field label="Hours you need" value={join.hoursGoal} onChange={(v) => setJoin((f) => ({ ...f, hoursGoal: v }))} maxLength={30} />
+                    <Field label="Hours you need (optional)" value={join.hoursGoal} onChange={(v) => setJoin((f) => ({ ...f, hoursGoal: v.replace(/[^0-9]/g, '').slice(0, 4) }))} inputMode="numeric" placeholder="e.g. 40" maxLength={4} />
                   </div>
                   <div style={S('margin-top:22px')}>
                     <div id="ob-vol" style={S('font:500 12px/1 Geist;color:#57504A')}>Volunteered before</div>
