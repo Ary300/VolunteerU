@@ -9,14 +9,14 @@
 
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
-import { searchListings, applyToListing, loadMyApplications } from '../lib/listings.js';
+import { searchListings, matchListings, applyToListing, loadMyApplications } from '../lib/listings.js';
 import { toast, openModal } from '../lib/overlays.js';
 import { SkeletonRows } from './ui.jsx';
 import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function DiscoverListings({ q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent' }) {
+export default function DiscoverListings({ mode = 'search', interest = '', q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent' }) {
   const [listings, setListings] = useState(null);
   const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
@@ -36,7 +36,9 @@ export default function DiscoverListings({ q = '', causes = [], kind = 'all', pl
     let alive = true;
     const run = async () => {
       try {
-        const ls = await searchListings({ q, causes, kind, place, near, sort });
+        const ls = mode === 'match'
+          ? await matchListings({ interest, causes, near })
+          : await searchListings({ q, causes, kind, place, near, sort });
         if (!alive) return;
         setListings(ls);
         refreshMine();
@@ -44,20 +46,20 @@ export default function DiscoverListings({ q = '', causes = [], kind = 'all', pl
         if (alive) setListings([]);
       }
     };
-    const t = setTimeout(run, (q || near) ? 280 : 0);
+    const t = setTimeout(run, (mode !== 'match' && (q || near)) ? 280 : 0);
     return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, causeKey, kind, place, near, sort]);
+  }, [mode, interest, q, causeKey, kind, place, near, sort]);
 
   const active = Boolean(q || (causes || []).length || kind !== 'all' || place !== 'all' || near);
 
   if (listings === null) {
-    return <div style={S('margin-bottom:22px')}><SkeletonRows n={2} h={96} /></div>;
+    return mode === 'match' ? null : <div style={S('margin-bottom:22px')}><SkeletonRows n={2} h={96} /></div>;
   }
   const shown = listings;
   if (shown.length === 0) {
-    // Silent on a blank, unfiltered feed; explicit "no matches" once searching.
-    if (!active) return null;
+    // Match feed and a blank search stay silent; searches say "no matches".
+    if (mode === 'match' || !active) return null;
     return (
       <div style={S('margin-bottom:22px;padding:28px 22px;border-radius:14px;border:1px dashed #E0D8CF;background:#FCFAF8;text-align:center')}>
         <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>No projects match that yet</div>
@@ -154,7 +156,7 @@ export default function DiscoverListings({ q = '', causes = [], kind = 'all', pl
   return (
     <div style={S('margin-bottom:22px')}>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097;margin-bottom:12px`)}>
-        {kind === 'official' ? 'Nonprofits looking for volunteers' : kind === 'student' ? 'Student projects looking for volunteers' : 'Projects looking for volunteers'}
+        {mode === 'match' ? 'Matched to what you told us' : kind === 'official' ? 'Nonprofits looking for volunteers' : kind === 'student' ? 'Student projects looking for volunteers' : 'Projects looking for volunteers'}
       </div>
       <div style={S('display:flex;flex-direction:column;gap:12px')}>
         {shown.map((l) => {

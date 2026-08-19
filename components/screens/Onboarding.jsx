@@ -41,7 +41,11 @@ const DEFAULT_START = {
   experience: 'First time',
 };
 
+const INTEREST_MAX = 150;
+
 const DEFAULT_JOIN = {
+  interest: '',
+  location: '',
   causes: [],
   windows: [],
   radius: '5',
@@ -99,8 +103,9 @@ export default function Onboarding() {
       else if (start.mission.length > MISSION_MAX) e.mission = `Trim it to ${MISSION_MAX} characters.`;
       if (!start.positions.length) e.positions = 'Pick at least one position you need.';
     } else {
-      if (!join.causes.length) e.causes = 'Pick at least one cause so we can rank openings.';
-      if (!join.windows.length) e.windows = 'Tell us when you are free.';
+      if (!join.interest.trim() || join.interest.trim().length < 8) e.interest = 'A sentence about what you want to do helps us match you.';
+      else if (join.interest.length > INTEREST_MAX) e.interest = `Keep it under ${INTEREST_MAX} characters.`;
+      if (!join.location.trim()) e.location = 'Where are you based? A city or area is enough.';
     }
     setErrors(e);
     return !Object.keys(e).length;
@@ -133,6 +138,9 @@ export default function Onboarding() {
           st.onboarding.intent = intent;
           st.session.authed = true;
           if (!isStart) {
+            st.prefs.interest = join.interest.trim();
+            st.prefs.location = join.location.trim();
+            st.account.city = join.location.trim() || st.account.city;
             st.prefs.causes = join.causes.slice();
             st.prefs.windows = join.windows.slice();
             st.prefs.radius = Number(join.radius) || 5;
@@ -349,23 +357,39 @@ export default function Onboarding() {
                 </>
               ) : (
                 <>
-                  <h1 style={S('margin:14px 0 0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>What do you want to join</h1>
-                  <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Pick as many causes as you want. We rank openings against this.</p>
-                  <div role="group" aria-label="Cause areas" style={S('margin-top:22px;display:flex;flex-wrap:wrap;gap:8px')}>
+                  <h1 style={S('margin:14px 0 0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>What do you want to do</h1>
+                  <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Tell us in your own words and where you are. We match you to real openings — remote and in person — by cross-referencing what you wrote.</p>
+                  <div style={S('margin-top:22px')}>
+                    <TextArea
+                      label="In a sentence or two, what do you want to do?"
+                      value={join.interest}
+                      onChange={(v) => setJoin((f) => ({ ...f, interest: v }))}
+                      maxLength={INTEREST_MAX}
+                      counter
+                      minHeight={84}
+                      placeholder="e.g. Tutor kids in reading, help at a food bank on weekends, or anything with animals."
+                      error={errors.interest}
+                    />
+                  </div>
+                  <div className="vu-2col-keep" style={S('margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+                    <Field label="Where are you?" value={join.location} onChange={(v) => setJoin((f) => ({ ...f, location: v }))} placeholder="City or area — e.g. San Diego" maxLength={60} required error={errors.location} />
+                    <Select label="How far can you travel" value={join.radius} onChange={(v) => setJoin((f) => ({ ...f, radius: v }))} options={RADIUS_OPTIONS} />
+                  </div>
+
+                  <div id="ob-cause" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>Causes you care about <span style={S('color:#A9A097;font-weight:400')}>(optional — sharpens your matches)</span></div>
+                  <div role="group" aria-labelledby="ob-cause" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
                     {CAUSES.map((c) => (
                       <Chip key={c} label={c} on={join.causes.includes(c)} onClick={() => toggleCause(c)} py={10} px={14} fs={14} role="checkbox" />
                     ))}
                   </div>
-                  {errors.causes ? <div className="vu-err">{errors.causes}</div> : null}
-                  <div id="ob-win" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>When are you free</div>
+                  <div id="ob-win" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>When are you free <span style={S('color:#A9A097;font-weight:400')}>(optional)</span></div>
                   <div role="group" aria-labelledby="ob-win" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
                     {WINDOWS.map((w) => (
                       <Chip key={w} label={w} on={join.windows.includes(w)} onClick={() => toggleWindow(w)} py={10} px={14} fs={14} role="checkbox" />
                     ))}
                   </div>
                   {errors.windows ? <div className="vu-err">{errors.windows}</div> : null}
-                  <div className="vu-2col-keep" style={S('margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-                    <Select label="How far can you travel" value={join.radius} onChange={(v) => setJoin((f) => ({ ...f, radius: v }))} options={RADIUS_OPTIONS} />
+                  <div style={S('margin-top:22px;max-width:260px')}>
                     <Field label="Hours you need" value={join.hoursGoal} onChange={(v) => setJoin((f) => ({ ...f, hoursGoal: v }))} maxLength={30} />
                   </div>
                   <div style={S('margin-top:22px')}>
