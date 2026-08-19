@@ -10,6 +10,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, SkeletonRows, Chip, Select, Checkbox, PrimaryButton, SecondaryButton } from '../ui.jsx';
 import MapPanel from '../MapPanel.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
+import WebNonprofits from '../WebNonprofits.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, toast } from '../../lib/overlays.js';
 import {
@@ -567,6 +568,7 @@ export default function Discover() {
             <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
           ) : null}
           <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
+          <WebNonprofits q={q} near={matchNear} causes={causes.length ? causes : (state.prefs.causes || [])} />
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
