@@ -15,7 +15,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { Pressable, Field, Select, TextArea, EmptyState, ImageSlot } from '../ui.jsx';
 import { openModal, confirmDialog, toast } from '../../lib/overlays.js';
 import { copyText } from '../../lib/db.js';
-import { loadProjectMembers, setMemberAssignment } from '../../lib/listings.js';
+import { loadProjectMembers, setMemberAssignment, confirmMemberHour } from '../../lib/listings.js';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -107,6 +107,50 @@ export function ShareLink({ p, tone = 'soft' }) {
       <Pressable label="Copy the join link" onClick={copy} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
         Copy link
       </Pressable>
+    </div>
+  );
+}
+
+/* A member's self-logged hours, with a Confirm toggle. Confirmed hours count on
+   the volunteer's verified record. Shared by the team + pipeline managers. */
+function MemberHoursConfirm({ app, onDone }) {
+  const log = (app.member_state && app.member_state.hoursLog) || [];
+  const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
+  const [busy, setBusy] = useState(null);
+  if (!log.length) return null;
+  const verified = log.filter((h) => confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  const pending = log.filter((h) => !confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  async function toggle(h) {
+    if (busy) return;
+    setBusy(h.id);
+    const { ok } = await confirmMemberHour(app.id, h.id, !confirmed[h.id]);
+    setBusy(null);
+    if (ok) { toast({ title: confirmed[h.id] ? 'Confirmation removed' : 'Hours confirmed', message: confirmed[h.id] ? '' : 'Now verified on their record.', tone: 'ok', timeout: 1800 }); onDone && onDone(); }
+    else toast({ title: 'Could not save', tone: 'danger' });
+  }
+  return (
+    <div style={S('margin-top:12px;padding:12px;border-radius:11px;background:#fff;border:1px solid #F1EBE4')}>
+      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Hours to confirm</div>
+        <div style={S('display:flex;gap:6px')}>
+          <span style={s('padding:3px 8px;border-radius:6px;font:500 10px/1', 'font-family:' + MONO, 'background:#EAF3EC;color:#3F6B4E')}>{Math.round(verified * 10) / 10} verified</span>
+          {pending > 0 ? <span style={s('padding:3px 8px;border-radius:6px;font:500 10px/1', 'font-family:' + MONO, 'background:#FDF3E7;color:#8A5A20')}>{Math.round(pending * 10) / 10} pending</span> : null}
+        </div>
+      </div>
+      <div style={S('margin-top:9px;display:flex;flex-direction:column;gap:6px')}>
+        {log.map((h) => {
+          const on = !!confirmed[h.id];
+          return (
+            <div key={h.id} style={S('display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:9px;background:#FCFAF8;border:1px solid #F1EBE4')}>
+              <span style={S('font:450 13px/1.3 Geist;flex:1;min-width:0;color:#332D28')}>{h.activity} · {h.date}</span>
+              <span style={s('font:500 12px/1', 'font-family:' + MONO, 'color:#57504A')}>{h.hrs} hrs</span>
+              <Pressable label={on ? 'Unconfirm' : 'Confirm'} disabled={busy === h.id} onClick={() => toggle(h)} className={cx(H.press)} style={s('flex:none;padding:0 11px;height:30px;border-radius:8px;font:600 12px/1 Geist;cursor:pointer', on ? 'background:#EAF3EC;border:1px solid #CFE4D5;color:#3F6B4E' : 'background:#fff;border:1px solid #A8482A;color:#A8482A')}>
+                {on ? '✓ Confirmed' : 'Confirm'}
+              </Pressable>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -207,6 +251,7 @@ export function TeamMembersManager({ p }) {
                     })}
                   </div>
                 ) : null}
+                <MemberHoursConfirm app={app} onDone={reload} />
               </div>
             );
           })}
@@ -287,7 +332,8 @@ export function PipelineMembers({ p }) {
           const cleared = required.filter((x) => doneMap[x.id]).length;
           const ready = required.length === 0 || cleared === required.length;
           return (
-            <div key={app.id} style={S('padding:14px 20px;border-top:1px solid #F1EBE4;display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
+            <div key={app.id} style={S('padding:14px 20px;border-top:1px solid #F1EBE4')}>
+              <div style={S('display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
               <div style={S('display:flex;align-items:center;gap:11px;min-width:180px;flex:none')}>
                 <div style={S('width:32px;height:32px;border-radius:50%;overflow:hidden;flex:none')}>
                   <ImageSlot src={`https://picsum.photos/seed/${app.applicant_id}/200/200?grayscale`} shape="circle" placeholder="face" />
@@ -311,6 +357,8 @@ export function PipelineMembers({ p }) {
               <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:34px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}>
                 {app.assignment && app.assignment.rating && app.assignment.rating.stars ? `★ ${app.assignment.rating.stars}` : 'Rate'}
               </Pressable>
+              </div>
+              <MemberHoursConfirm app={app} onDone={reload} />
             </div>
           );
         })

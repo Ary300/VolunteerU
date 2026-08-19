@@ -12,6 +12,7 @@ import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount, logHours } from '../../lib/db.js';
 import MyRatings from '../MyRatings.jsx';
+import MyServiceHours from '../MyServiceHours.jsx';
 import VolunteerApplications from '../VolunteerApplications.jsx';
 
 const MONO = "'Geist Mono',monospace";
@@ -409,6 +410,10 @@ export default function Profile() {
                 </div>
               </>
             ) : null}
+
+            <div style={S('margin-top:22px')}>
+              <MyServiceHours />
+            </div>
 
             <div style={S('margin-top:22px')}>
               <MyRatings />

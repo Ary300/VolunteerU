@@ -10,9 +10,10 @@
    ========================================================================== */
 
 import { useEffect, useState } from 'react';
-import { S, s } from '../lib/style.js';
-import { loadMyMemberships, updateMemberState, setMyTaskStatus } from '../lib/listings.js';
-import { openModal, toast } from '../lib/overlays.js';
+import { S, s, cx, H } from '../lib/style.js';
+import { loadMyMemberships, updateMemberState, setMyTaskStatus, logMemberHours, removeMemberHours } from '../lib/listings.js';
+import { openModal, toast, confirmDialog } from '../lib/overlays.js';
+import { Field, Pressable } from './ui.jsx';
 import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
@@ -77,6 +78,30 @@ export default function MemberProjects() {
     });
   }
 
+  function logHoursFor(app) {
+    openModal({
+      title: `Log hours · ${app.listings.name}`,
+      subtitle: 'The organizer confirms these, and confirmed hours count on your verified record.',
+      Body: ({ api }) => (
+        <MemberHoursForm
+          onSave={async (entry) => {
+            const { ok, member_state } = await logMemberHours(app.id, entry);
+            if (ok) { patchLocal(app.id, member_state); toast({ title: 'Hours logged', message: 'Waiting on the organizer to confirm.', tone: 'ok' }); api.close(); }
+            else toast({ title: 'Could not log that', tone: 'danger' });
+          }}
+          onCancel={() => api.close()}
+        />
+      ),
+    });
+  }
+
+  async function removeHour(app, hourId) {
+    const ok = await confirmDialog({ title: 'Remove this entry?', body: 'It disappears from your log.', confirmLabel: 'Remove' });
+    if (!ok) return;
+    const res = await removeMemberHours(app.id, hourId);
+    if (res.ok) patchLocal(app.id, res.member_state);
+  }
+
   return (
     <div style={S('padding:20px;border-radius:16px;border:1px solid #EFE3DC;background:#FAF6F3')}>
       <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>You're in</div>
@@ -117,9 +142,82 @@ export default function MemberProjects() {
                   </div>
                 </div>
               ) : null}
+
+              <MemberHours app={app} onLog={() => logHoursFor(app)} onRemove={(hid) => removeHour(app, hid)} />
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function MemberHours({ app, onLog, onRemove }) {
+  const log = (app.member_state && app.member_state.hoursLog) || [];
+  const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
+  const verified = log.filter((h) => confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  const pending = log.filter((h) => !confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  return (
+    <div style={S('margin-top:14px')}>
+      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+        <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your hours here</div>
+        <button type="button" onClick={onLog} style={S('flex:none;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}>+ Log hours</button>
+      </div>
+      {log.length ? (
+        <>
+          <div style={S('margin-top:8px;display:flex;gap:8px;flex-wrap:wrap')}>
+            <span style={s('padding:4px 9px;border-radius:7px;font:500 11px/1', 'font-family:' + MONO, 'background:#EAF3EC;color:#3F6B4E')}>{Math.round(verified * 10) / 10} verified</span>
+            {pending > 0 ? <span style={s('padding:4px 9px;border-radius:7px;font:500 11px/1', 'font-family:' + MONO, 'background:#FDF3E7;color:#8A5A20')}>{Math.round(pending * 10) / 10} awaiting</span> : null}
+          </div>
+          <div style={S('margin-top:10px;display:flex;flex-direction:column;gap:6px')}>
+            {log.slice(0, 5).map((h) => {
+              const v = !!confirmed[h.id];
+              return (
+                <div key={h.id} style={S('display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:9px;background:#FCFAF8;border:1px solid #F1EBE4')}>
+                  <span style={s('font:450 13px/1.3 Geist;flex:1;min-width:0', v ? 'color:#57504A' : 'color:#332D28')}>{h.activity} · {h.date}</span>
+                  <span style={s('font:500 12px/1', 'font-family:' + MONO)}>{h.hrs} hrs</span>
+                  {v ? (
+                    <span title="Confirmed by the organization" style={S('color:#3F6B4E;font-size:12px')}>✓</span>
+                  ) : (
+                    <button type="button" aria-label="Remove entry" onClick={() => onRemove(h.id)} style={S('border:0;background:none;color:#A9A097;font-size:12px;cursor:pointer;padding:0 2px')}>✕</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div style={S('margin-top:8px;font:450 12px/1.5 Geist;color:#8A8179')}>Log time you put in here. The organizer confirms it, and confirmed hours become verified on your record.</div>
+      )}
+    </div>
+  );
+}
+
+function MemberHoursForm({ onSave, onCancel }) {
+  const [f, setF] = useState({ activity: '', date: '', hrs: '' });
+  const [err, setErr] = useState({});
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    const e = {};
+    if (!f.activity.trim()) e.activity = 'What did you do?';
+    const n = Number(f.hrs);
+    if (!n || n <= 0 || n > 24) e.hrs = 'Enter hours between 0 and 24.';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    await onSave(f);
+    setBusy(false);
+  }
+  return (
+    <div>
+      <Field label="What you did" value={f.activity} onChange={(v) => setF((x) => ({ ...x, activity: v }))} placeholder="e.g. Sorted donations, tutored reading" maxLength={80} required error={err.activity} />
+      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="Date" value={f.date} onChange={(v) => setF((x) => ({ ...x, date: v }))} placeholder="e.g. Aug 9" maxLength={20} />
+        <Field label="Hours" value={f.hrs} onChange={(v) => setF((x) => ({ ...x, hrs: v.replace(/[^\d.]/g, '').slice(0, 5) }))} placeholder="e.g. 2.5" inputMode="decimal" required error={err.hrs} />
+      </div>
+      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
+        <Pressable label="Cancel" onClick={onCancel} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
+        <Pressable label="Log hours" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>{busy ? 'Saving…' : 'Log hours'}</Pressable>
       </div>
     </div>
   );
