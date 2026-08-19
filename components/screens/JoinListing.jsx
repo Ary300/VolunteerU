@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot } from '../ui.jsx';
+import { Logo } from '../Logo.jsx';
 import { toast } from '../../lib/overlays.js';
 import { getListing, applyToListing, loadMyApplications, myId } from '../../lib/listings.js';
 import AnnouncementBoard from '../AnnouncementBoard.jsx';
@@ -193,7 +194,7 @@ function Shell({ children }) {
     <div style={S('min-height:100vh;padding:32px 24px 80px')}>
       <div style={S('max-width:720px;margin:0 auto')}>
         <Link href="/" style={S('display:inline-flex;align-items:center;gap:9px;text-decoration:none;margin-bottom:22px')}>
-          <span style={S('width:30px;height:30px;border-radius:9px;background:linear-gradient(180deg,#D2775B,#C2603C);color:#fff;font:700 15px/30px Geist;text-align:center')}>V</span>
+          <Logo size={30} />
           <span style={S('font:600 17px/1 Geist;letter-spacing:-0.02em;color:#1A1714')}>VolunteerU</span>
         </Link>
         {children}

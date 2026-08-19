@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { Field, PrimaryButton, SecondaryButton, ImageSlot, Checkbox } from '../ui.jsx';
+import { Logo } from '../Logo.jsx';
 import { toast } from '../../lib/overlays.js';
 import { useSnapshot, update } from '../../lib/store.js';
 import { supabase } from '../../lib/supabase.js';
@@ -166,7 +167,7 @@ export default function Auth({ mode = 'signin' }) {
       >
         <div aria-hidden="true" style={S('position:absolute;top:-120px;left:-120px;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(210,119,91,.3),rgba(210,119,91,0) 62%)')} />
         <Link href="/" style={S('position:relative;display:flex;align-items:center;gap:9px;width:max-content;color:inherit')}>
-          <div aria-hidden="true" style={S('width:24px;height:24px;border-radius:7px;background:linear-gradient(150deg,#D2775B,#B14E2C);display:grid;place-items:center;color:#fff;font:700 12px/1 Geist')}>V</div>
+          <Logo size={24} />
           <div style={S('font:600 16px/1 Geist;letter-spacing:-0.03em;color:#fff')}>VolunteerU</div>
         </Link>
         <div style={S('position:relative;max-width:400px')}>

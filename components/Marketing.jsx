@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../lib/style.js';
 import { useSnapshot } from '../lib/store.js';
+import { Logo } from './Logo.jsx';
 
 const NAV = [
   { key: 'lead', label: 'Lead a project', href: '/lead' },
@@ -45,14 +46,7 @@ export function MarketingHeader({ active = '' }) {
       >
         <div style={S('display:flex;align-items:center;gap:40px')}>
           <Link href="/" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:9px;cursor:pointer;color:inherit')}>
-            <div
-              aria-hidden="true"
-              style={S(
-                'width:26px;height:26px;border-radius:8px;background:linear-gradient(150deg,#D2775B,#B14E2C);box-shadow:inset 0 1px 0 rgba(255,255,255,.35);display:grid;place-items:center;color:#fff;font:700 13px/1 Geist'
-              )}
-            >
-              V
-            </div>
+            <Logo size={27} />
             <div style={S('font:600 17px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
           </Link>
           <nav aria-label="Primary" className="vu-hide-mobile" style={S('display:flex;gap:26px;font:450 14px/1 Geist;color:#57504A')}>
@@ -101,12 +95,7 @@ export function MarketingFooter() {
         style={S('max-width:1180px;margin:0 auto;padding:52px 32px;display:flex;align-items:center;justify-content:space-between')}
       >
         <Link href="/" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:9px;cursor:pointer;color:inherit')}>
-          <div
-            aria-hidden="true"
-            style={S('width:22px;height:22px;border-radius:7px;background:linear-gradient(150deg,#D2775B,#B14E2C);display:grid;place-items:center;color:#fff;font:700 11px/1 Geist')}
-          >
-            V
-          </div>
+          <Logo size={22} />
           <div style={S('font:600 15px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
         </Link>
         <nav aria-label="Footer" style={S('display:flex;gap:26px;font:450 13px/1 Geist;color:#8A8179')}>

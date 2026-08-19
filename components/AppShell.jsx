@@ -12,6 +12,7 @@ import { ImageSlot } from './ui.jsx';
 import { useSnapshot, updateEphemeral } from '../lib/store.js';
 import { menuFromEvent, confirmDialog, toast } from '../lib/overlays.js';
 import { signOut } from '../lib/db.js';
+import { Logo } from './Logo.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -86,7 +87,7 @@ export default function AppShell({ children }) {
           <i /><i /><i />
         </button>
         <div style={S('display:flex;align-items:center;gap:8px')}>
-          <div aria-hidden="true" style={S('width:22px;height:22px;border-radius:7px;background:linear-gradient(150deg,#D2775B,#B14E2C);display:grid;place-items:center;color:#fff;font:700 11px/1 Geist')}>V</div>
+          <Logo size={22} />
           <div style={S('font:600 15px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
         </div>
         <Link
@@ -108,7 +109,7 @@ export default function AppShell({ children }) {
       >
         <div>
           <Link href="/" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:9px;padding:0 8px 22px;cursor:pointer;color:inherit')}>
-            <div aria-hidden="true" style={S('width:24px;height:24px;border-radius:7px;background:linear-gradient(150deg,#D2775B,#B14E2C);display:grid;place-items:center;color:#fff;font:700 12px/1 Geist')}>V</div>
+            <Logo size={24} />
             <div style={S('font:600 16px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
           </Link>
           <nav aria-label="Sections" style={S('display:flex;flex-direction:column;gap:2px')}>

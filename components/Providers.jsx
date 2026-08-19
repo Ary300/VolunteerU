@@ -13,7 +13,6 @@ import { hydrate, useSnapshot, useHydrated } from '../lib/store.js';
 import { initAuth } from '../lib/auth.js';
 import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours } from '../lib/db.js';
 import OverlayHost from './OverlayHost.jsx';
-import ScreenNav from './ScreenNav.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 
 /* Routes that require a signed-in account. */
@@ -98,7 +97,6 @@ export default function Providers({ children }) {
       )}
     >
       <OfflineBanner />
-      <ScreenNav />
       {children}
       <OverlayHost />
     </div>

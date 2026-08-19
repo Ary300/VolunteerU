@@ -66,7 +66,7 @@ export default function Landing() {
       <div
         id="vu-main"
         className="vu-hero vu-pad-32"
-        style={S('position:relative;max-width:1180px;min-width:1180px;margin:0 auto;padding:96px 32px 80px;display:grid;grid-template-columns:600px 516px;gap:0;align-items:center')}
+        style={S('position:relative;max-width:1180px;min-width:1180px;margin:0 auto;padding:132px 32px 128px;display:grid;grid-template-columns:600px 516px;gap:0;align-items:center')}
       >
         <div
           aria-hidden="true"
@@ -92,14 +92,14 @@ export default function Landing() {
             Tell us who you are and we find real openings near you, or hand you everything you need to run your own organization. Either way the hours
             verify themselves and land on a record colleges can check.
           </p>
-          <div style={S('display:grid;grid-template-columns:auto auto;gap:14px;margin-top:32px;justify-content:start')}>
+          <div style={S('display:grid;grid-template-columns:repeat(2,minmax(0,215px));gap:16px;margin-top:36px;justify-content:start')}>
             <div>
               <Pressable
                 label="Start a nonprofit"
                 onClick={go('/onboarding?intent=start')}
                 className={H.press}
                 style={S(
-                  'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 24px;height:50px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 16px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(80,30,12,.22), 0 10px 20px -8px rgba(150,60,30,.55);transition:background .16s ease, transform .16s ease'
+                  'display:flex;width:100%;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 20px;height:52px;border-radius:13px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 16px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(80,30,12,.22), 0 10px 20px -8px rgba(150,60,30,.55);transition:background .16s ease, transform .16s ease'
                 )}
               >
                 <span aria-hidden="true" style={S('font-size:12px;opacity:.9')}>
@@ -107,7 +107,7 @@ export default function Landing() {
                 </span>
                 Start a nonprofit
               </Pressable>
-              <div style={S('margin-top:11px;max-width:230px;font:450 13px/1.45 Geist;color:#8A8179')}>Set up your project and open positions in minutes</div>
+              <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#8A8179')}>Set up your project in minutes</div>
             </div>
             <div>
               <Pressable
@@ -115,12 +115,12 @@ export default function Landing() {
                 onClick={go('/onboarding?intent=join')}
                 className={cx(H.secondaryLift, H.press)}
                 style={S(
-                  'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 22px;height:50px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 16px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:0 1px 2px rgba(30,20,10,.06);transition:background .16s ease, border-color .16s ease, transform .16s ease'
+                  'display:flex;width:100%;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 20px;height:52px;border-radius:13px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 16px/1 Geist;letter-spacing:-0.01em;cursor:pointer;box-shadow:0 1px 2px rgba(30,20,10,.06);transition:background .16s ease, border-color .16s ease, transform .16s ease'
                 )}
               >
                 Join one
               </Pressable>
-              <div style={S('margin-top:11px;max-width:230px;font:450 13px/1.45 Geist;color:#8A8179')}>Accredited or student led, ranked to your time</div>
+              <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#8A8179')}>Find openings ranked to your time</div>
             </div>
           </div>
           {trustRow ? (
@@ -231,7 +231,7 @@ export default function Landing() {
       </div>
 
       {/* ---- two ways in ---- */}
-      <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:92px 32px 0')}>
+      <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:150px 32px 0')}>
         <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-end;justify-content:space-between;gap:48px')}>
           <div>
             <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#C2603C`)}>Two ways in</div>
@@ -281,8 +281,8 @@ export default function Landing() {
       </div>
 
       {/* ---- 01 volunteering ---- */}
-      <div id="how-it-works" style={S('border-top:1px solid #EFE9E2;margin-top:120px')}>
-        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:130px 32px 140px')}>
+      <div id="how-it-works" style={S('border-top:1px solid #EFE9E2;margin-top:150px')}>
+        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:190px 32px 200px')}>
           <div style={S('display:flex;align-items:baseline;gap:18px')}>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>01</div>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#A9A097`)}>Volunteering</div>
@@ -376,7 +376,7 @@ export default function Landing() {
 
       {/* ---- 02 starting your own ---- */}
       <div style={S('border-top:1px solid #EFE9E2;background:#fff')}>
-        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:130px 32px 140px')}>
+        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:190px 32px 200px')}>
           <div style={S('display:flex;align-items:baseline;gap:18px')}>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>02</div>
             <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#A9A097`)}>Starting your own</div>
@@ -585,8 +585,8 @@ export default function Landing() {
       </div>
 
       {/* ---- the painful part ---- */}
-      <div style={S('border-top:1px solid #EFE9E2;margin-top:96px')}>
-        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:80px 32px 0')}>
+      <div style={S('border-top:1px solid #EFE9E2;margin-top:130px')}>
+        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:130px 32px 0')}>
           <div style={S('text-align:center')}>
             <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>The painful part</div>
             <h2 className="vu-h2-big" style={S('margin:16px auto 0;max-width:640px;font:600 52px/1.02 Geist;letter-spacing:-0.05em')}>
