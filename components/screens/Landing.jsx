@@ -382,6 +382,61 @@ export default function Landing() {
             ))}
           </div>
 
+          {/* volunteer record demo */}
+          <div style={S('max-width:620px;margin:150px auto 0;text-align:center')}>
+            <div style={S(`font:500 12px/1 ${MONO};letter-spacing:.14em;text-transform:uppercase;color:#C2603C`)}>Your record</div>
+            <h3 style={S('margin:16px 0 0;font:600 44px/1.04 Geist;letter-spacing:-0.04em')}>Watch it add up</h3>
+            <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+              Every verified hour lands on one record that builds over the year, ready the moment a college or scholarship asks.
+            </p>
+          </div>
+          <div style={S('margin-top:60px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
+            <div style={S('padding:20px 26px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between')}>
+              <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Verified record · 2025 to 26</div>
+              <div style={S(`font:500 11px/1 ${MONO};color:#3F6B4E`)}>✓ CONFIRMED BY ORGS</div>
+            </div>
+            <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1.2fr 1fr')}>
+              <div style={S('padding:28px 30px;border-right:1px solid #F1EBE4')}>
+                <div style={S('display:flex;align-items:baseline;gap:10px')}>
+                  <div style={S('font:600 46px/1 Geist;letter-spacing:-0.04em')}>54</div>
+                  <div style={S('font:450 14px/1 Geist;color:#8A8179')}>verified hours</div>
+                  <div style={S(`margin-left:auto;font:500 11px/1 ${MONO};color:#3F6B4E`)}>+8 this month</div>
+                </div>
+                <div style={S('margin-top:26px;display:flex;align-items:flex-end;gap:14px;height:150px')}>
+                  {[{ m: 'Sep', h: 34 }, { m: 'Oct', h: 55 }, { m: 'Nov', h: 44 }, { m: 'Dec', h: 72 }, { m: 'Jan', h: 64 }, { m: 'Feb', h: 92 }].map((b, i, arr) => (
+                    <div key={b.m} style={S('flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end')}>
+                      <div style={s('width:100%;border-radius:7px 7px 3px 3px', `height:${b.h}%`, `background:${i === arr.length - 1 ? 'linear-gradient(180deg,#D2775B,#C2603C)' : '#EFE3DC'}`)} />
+                      <div style={S(`font:500 10px/1 ${MONO};color:#A9A097`)}>{b.m}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
+                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Recent</div>
+                  <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>THIS TERM</div>
+                </div>
+                {[
+                  { org: 'San Diego Food Bank', d: 'Feb 8', hrs: '3.0' },
+                  { org: 'Ocean Beach Cleanup', d: 'Feb 1', hrs: '2.5' },
+                  { org: 'Senior Tech Buddies', d: 'Jan 25', hrs: '1.5' },
+                  { org: 'Little Library Helpers', d: 'Jan 18', hrs: '2.0' },
+                ].map((e) => (
+                  <div key={e.org} style={S('padding:14px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+                    <div style={S('min-width:0')}>
+                      <div className="vu-trunc" style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{e.org}</div>
+                      <div style={S('margin-top:3px;font:450 11px/1 Geist;color:#8A8179')}>{e.d}</div>
+                    </div>
+                    <div style={S('display:flex;align-items:center;gap:8px;flex:none')}>
+                      <span style={S(`font:600 14px/1 ${MONO};color:#1A1714`)}>{e.hrs}</span>
+                      <span aria-hidden="true" style={S('color:#3F6B4E;font-size:12px')}>✓</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div style={S('margin-top:64px;display:flex;justify-content:center')}>
             <Pressable
               label="Browse openings near me"
@@ -628,18 +683,18 @@ export default function Landing() {
                   { t: 'Upload to the shared drive', who: 'Theo M.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
                 ] },
               ].map((role, i) => (
-                <div key={role.name} style={S(`padding:22px 20px 26px${i < 2 ? ';border-right:1px solid #F1EBE4' : ''}`)}>
+                <div key={role.name} style={S(`padding:28px 22px 44px${i < 2 ? ';border-right:1px solid #F1EBE4' : ''}`)}>
                   <div style={S('display:flex;align-items:center;gap:9px')}>
                     <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${role.color}`)} />
                     <div style={S('font:600 15px/1 Geist')}>{role.name}</div>
                     <div style={S(`margin-left:auto;font:500 11px/1 ${MONO};color:#A9A097`)}>{role.tasks.length}</div>
                   </div>
                   <div style={S('margin-top:8px;font:450 12px/1.4 Geist;color:#8A8179')}>{role.brief}</div>
-                  <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:10px')}>
+                  <div style={S('margin-top:18px;display:flex;flex-direction:column;gap:14px')}>
                     {role.tasks.map((t) => (
-                      <div key={t.t} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                        <div style={S('font:500 13px/1.35 Geist;color:#1A1714')}>{t.t}</div>
-                        <div style={S('margin-top:11px;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
+                      <div key={t.t} style={S('padding:20px 18px;border-radius:14px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+                        <div style={S('font:500 14px/1.35 Geist;color:#1A1714')}>{t.t}</div>
+                        <div style={S('margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
                           <div style={S('display:flex;align-items:center;gap:7px;min-width:0')}>
                             <div style={S('width:20px;height:20px;border-radius:50%;overflow:hidden;flex:none')}>
                               <Avatar name={t.who} fs={9} />
