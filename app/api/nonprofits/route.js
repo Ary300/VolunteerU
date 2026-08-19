@@ -24,8 +24,45 @@ function causeFromNtee(code) {
   return NTEE_CAUSE[String(code)[0].toUpperCase()] || 'Nonprofit';
 }
 
+async function orgDetail(ein) {
+  const u = `https://projects.propublica.org/nonprofits/api/v2/organizations/${ein}.json`;
+  try {
+    const res = await fetch(u, {
+      headers: { 'User-Agent': 'VolunteerU (nonprofit discovery)' },
+      next: { revalidate: 86400 },
+    });
+    if (!res.ok) return Response.json({ error: 'upstream' }, { status: 200 });
+    const data = await res.json();
+    const o = data.organization || {};
+    const f = (data.filings_with_data || [])[0] || {};
+    return Response.json({
+      organization: {
+        ein: o.ein,
+        name: o.name,
+        cause: causeFromNtee(o.ntee_code),
+        nteeCode: o.ntee_code || '',
+        address: o.address || '',
+        city: o.city || '',
+        state: o.state || '',
+        zip: o.zipcode || '',
+        is501c3: String(o.subsection_code) === '3',
+        rulingYear: o.ruling_date ? String(o.ruling_date).slice(0, 4) : '',
+        filingYear: f.tax_prd_yr || null,
+        revenue: f.totrevenue ?? null,
+        assets: f.totassetsend ?? null,
+        url: `https://projects.propublica.org/nonprofits/organizations/${o.ein}`,
+      },
+    });
+  } catch {
+    return Response.json({ error: 'fetch_failed' }, { status: 200 });
+  }
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+  const ein = (searchParams.get('ein') || '').trim().replace(/\D/g, '');
+  if (/^\d{6,9}$/.test(ein)) return orgDetail(ein);
+
   const q = (searchParams.get('q') || '').trim().slice(0, 120);
   const state = (searchParams.get('state') || '').trim().toUpperCase();
   const ntee = (searchParams.get('ntee') || '').trim();

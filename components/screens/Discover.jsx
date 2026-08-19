@@ -568,7 +568,7 @@ export default function Discover() {
             <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
           ) : null}
           <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
-          <WebNonprofits q={q} near={matchNear} causes={causes.length ? causes : (state.prefs.causes || [])} />
+          <WebNonprofits q={q} near={matchNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} />
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
