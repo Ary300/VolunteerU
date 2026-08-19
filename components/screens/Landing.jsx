@@ -13,7 +13,7 @@ import { MarketingHeader, MarketingFooter } from '../Marketing.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import {
   proofCards, paths, timeline, sponsorMatches, shareStats, allInOne,
-  effortAlone, effortWith, aloneRows, faqs, PEXELS,
+  faqs, PEXELS,
 } from '../../lib/seed.js';
 
 const CREW = [
@@ -88,9 +88,8 @@ export default function Landing() {
             <br />
             built around you
           </h1>
-          <p style={S('margin:22px 0 0;max-width:470px;font:400 18px/1.55 Geist;color:#57504A;text-wrap:pretty')}>
-            Tell us who you are and we find real openings near you, or hand you everything you need to run your own organization. Either way the hours
-            verify themselves and land on a record colleges can check.
+          <p style={S('margin:22px 0 0;max-width:468px;font:400 18px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
+            Find real openings near you, or run your own project. Either way, your hours verify themselves and land on a record colleges can check.
           </p>
           <div style={S('display:grid;grid-template-columns:repeat(2,minmax(0,215px));gap:16px;margin-top:36px;justify-content:start')}>
             <div>
@@ -407,9 +406,8 @@ export default function Landing() {
               <div className="vu-h2" style={S('margin-top:16px;font:600 36px/1.06 Geist;letter-spacing:-0.045em')}>
                 Run under a real sponsor
               </div>
-              <p style={S('margin:14px 0 0;max-width:420px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-                You do not need a 501(c)(3) or a lawyer. Name the organization that supervises your project — a school, library or nonprofit — use the safety
-                templates they already accept, and request a verified badge when you are set up.
+              <p style={S('margin:14px 0 0;max-width:420px;font:400 17px/1.65 Geist;color:#57504A;text-wrap:pretty')}>
+                You do not need a 501(c)(3) or a lawyer. Name the organization that supervises your project, like a school, library or nonprofit. Use the safety templates they already accept, then request a verified badge when you are set up.
               </p>
               <div style={S('margin-top:24px;display:flex;flex-direction:column;gap:11px')}>
                 {['Safety plan and waiver templates they already accept', 'A named staff contact on every session', 'Their verified badge on your project page'].map((t) => (
@@ -580,64 +578,6 @@ export default function Landing() {
               </span>
               Start an organization
             </Pressable>
-          </div>
-        </div>
-      </div>
-
-      {/* ---- the painful part ---- */}
-      <div style={S('border-top:1px solid #EFE9E2;margin-top:130px')}>
-        <div className="vu-pad-32" style={S('max-width:1180px;margin:0 auto;padding:130px 32px 0')}>
-          <div style={S('text-align:center')}>
-            <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>The painful part</div>
-            <h2 className="vu-h2-big" style={S('margin:16px auto 0;max-width:640px;font:600 52px/1.02 Geist;letter-spacing:-0.05em')}>
-              The same project, two ways
-            </h2>
-            <p style={S('margin:18px auto 0;max-width:520px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-              Everything below is work a student normally eats alone. Left is what it costs you. Right is what we already handle.
-            </p>
-          </div>
-          <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:56px;text-align:left')}>
-            <div style={S('padding:34px;border-radius:18px;border:1px solid #E8E1D9;background:#FCFAF8')}>
-              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A19891`)}>Doing it yourself</div>
-              <div style={S('margin-top:18px;font:600 30px/1.06 Geist;letter-spacing:-0.04em;color:#57504A')}>A semester of admin</div>
-              <div style={S('margin-top:26px;display:flex;flex-direction:column')}>
-                {effortAlone.map((e) => (
-                  <div key={e.l} style={S('padding:16px 0;border-top:1px solid #EEE7DF;display:flex;gap:18px;align-items:baseline')}>
-                    <div style={S('width:120px;flex:none;font:600 26px/1 Geist;letter-spacing:-0.04em;color:#A19891')}>{e.v}</div>
-                    <div style={S('font:450 14px/1.5 Geist;color:#8A8179')}>{e.l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={S('padding:34px;border-radius:18px;border:1px solid #EFE3DC;background:#fff')}>
-              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#C2603C`)}>On VolunteerU</div>
-              <div style={S('margin-top:18px;font:600 30px/1.06 Geist;letter-spacing:-0.04em')}>One sitting, then a week</div>
-              <div style={S('margin-top:26px;display:flex;flex-direction:column')}>
-                {effortWith.map((e) => (
-                  <div key={e.l} style={S('padding:16px 0;border-top:1px solid #F1EBE4;display:flex;gap:18px;align-items:baseline')}>
-                    <div style={S('width:120px;flex:none;font:600 26px/1 Geist;letter-spacing:-0.04em;color:#C2603C')}>{e.v}</div>
-                    <div style={S('font:450 14px/1.5 Geist;color:#332D28')}>{e.l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div style={S('margin-top:44px;border-radius:18px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-            <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr')}>
-              <div style={S(`padding:18px 24px;border-right:1px solid #F1EBE4;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>
-                On your own
-              </div>
-              <div style={S(`padding:18px 24px;border-bottom:1px solid #F1EBE4;background:#FAF6F3;font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#C2603C`)}>
-                With VolunteerU
-              </div>
-            </div>
-            {aloneRows.map((r) => (
-              <div key={r.a} className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #F1EBE4')}>
-                <div style={S('padding:18px 24px;border-right:1px solid #F1EBE4;font:450 15px/1.45 Geist;color:#A19891')}>{r.a}</div>
-                <div style={S('padding:18px 24px;font:500 15px/1.45 Geist;color:#1A1714')}>{r.b}</div>
-              </div>
-            ))}
           </div>
         </div>
       </div>
