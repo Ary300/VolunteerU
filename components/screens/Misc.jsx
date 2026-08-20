@@ -53,7 +53,7 @@ export function Notifications() {
   const list = notifs || [];
 
   return (
-    <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px;max-width:860px')}>
+    <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
       <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:24px')}>
         <div>
           <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Notifications</h1>
@@ -146,7 +146,7 @@ export function Saved() {
         {rows.length ? `${rows.length} saved. We will tell you if one is about to fill up.` : 'Nothing saved yet.'}
       </p>
 
-      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px;max-width:860px')}>
+      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px')}>
         {rows.length ? (
           rows.map((opp) => (
             <OpportunityRow
@@ -212,7 +212,7 @@ export function Friends() {
         Shifts other students from {state.account.school} already claimed. You can turn this off in Settings → Privacy.
       </p>
 
-      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px;max-width:860px')}>
+      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px')}>
         {rows.length ? (
           rows.map((opp) => (
             <OpportunityRow

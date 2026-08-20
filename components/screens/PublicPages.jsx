@@ -140,7 +140,7 @@ export function Safety() {
       title="What we check before a student ever sees a listing"
       lede="Volunteering should not be the risky part of a student's week. These rules are enforced by the product, not by a policy page."
     >
-      <div style={S('margin-top:48px;border-radius:18px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;max-width:860px')}>
+      <div style={S('margin-top:48px;border-radius:18px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;max-width:860px;margin:0 auto')}>
         {rules.map(([t, b]) => (
           <div key={t} style={S('padding:22px 24px;border-bottom:1px solid #F1EBE4;display:flex;gap:14px;align-items:flex-start')}>
             <span aria-hidden="true" style={S('color:#3F6B4E;margin-top:3px')}>✓</span>
