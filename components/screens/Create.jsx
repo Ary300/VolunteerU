@@ -10,7 +10,7 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, Field, Select, TextArea, Checkbox, Chip, EmptyState } from '../ui.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
-import { createProject, perform, verifiedHours } from '../../lib/db.js';
+import { createProject, perform, verifiedHours, canCreateProject, projectBlockingCreation } from '../../lib/db.js';
 import { projectTemplates, PEXELS } from '../../lib/seed.js';
 import {
   defaultDraft, generatedSessions, totalSlots, safetyComplete,
@@ -45,6 +45,24 @@ export default function Create() {
   const [draft, setDraft] = useState(() => state.drafts.create || defaultDraft());
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
+
+  // Gate: you can only start a new project once every project you already run
+  // has a verified event. Send blocked founders back to the workspace.
+  useEffect(() => {
+    if (!canCreateProject()) {
+      const blocker = projectBlockingCreation();
+      toast({
+        title: 'Finish your current project first',
+        message: blocker
+          ? `${blocker.name} has no verified events yet. Run a session and post attendance before starting another.`
+          : 'Run a session and post attendance on your current project first.',
+        tone: 'warn',
+        timeout: 6000,
+      });
+      router.replace('/lead');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Autosave so a student can hand the draft to a sponsor before publishing.
   useEffect(() => {

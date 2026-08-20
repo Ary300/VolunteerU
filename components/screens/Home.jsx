@@ -13,7 +13,7 @@ import DiscoverListings from '../DiscoverListings.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
 import { openLogHours } from '../LogHoursForm.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
-import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
+import { activeProject, taskProgress, getOpportunity, nextBadge, effectiveStreak } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
 import { todayLabel, word, lowerWord, plural, checkinTime, startTime } from '../../lib/format.js';
 
@@ -21,12 +21,11 @@ const MONO = "'Geist Mono',monospace";
 
 function buildTiles(state) {
   const st = state.stats;
-  const req = state.requirement;
   const proj = activeProject();
   const lead = proj ? proj.leadHours : { planning: 0, sessions: 0, recruiting: 0 };
   const leadTotal = Math.round((lead.planning + lead.sessions + lead.recruiting) * 10) / 10;
-  const yearDone = req.yearCounted >= req.yearGoal;
   const liveProjects = state.projects.filter((p) => !p.archived).length;
+  const streak = effectiveStreak();
 
   return [
     {
@@ -42,21 +41,6 @@ function buildTiles(state) {
         { l: 'Best month', v: `${st.bestMonth} hrs` },
         { l: 'Average shift', v: `${st.avgShift} hrs` },
         { l: 'Pending verification', v: `${st.pendingVerification} hrs` },
-      ],
-    },
-    {
-      k: 'req',
-      label: 'School requirement',
-      big: String(req.yearCounted),
-      unit: `/ ${req.yearGoal}`,
-      sub: yearDone ? 'Complete for the year' : `${req.yearGoal - req.yearCounted} hours to go this year`,
-      sign: yearDone ? 'Done' : `${req.yearGoal - req.yearCounted} to go`,
-      href: '/profile',
-      rows: [
-        { l: 'Deadline', v: req.deadline },
-        { l: 'Counted hours', v: `${req.yearCounted} hrs` },
-        { l: 'Counselor', v: req.counselor },
-        { l: 'Last confirmed', v: req.lastConfirmed },
       ],
     },
     {
@@ -76,17 +60,17 @@ function buildTiles(state) {
     },
     {
       k: 'streak',
-      label: 'Active weeks',
-      big: String(st.activeWeeks),
-      unit: 'wks',
-      sub: 'Longest run this year',
-      sign: `${st.currentStreak} week streak`,
+      label: 'Weekly streak',
+      big: String(streak),
+      unit: streak === 1 ? 'week' : 'weeks',
+      sub: streak > 0 ? 'Keep it alive — log a shift each week' : 'Log volunteering to start a streak',
+      sign: streak > 0 ? '🔥 active' : null,
       href: '/profile',
       rows: [
-        { l: 'Current streak', v: `${st.currentStreak} weeks` },
+        { l: 'Current streak', v: `${streak} ${streak === 1 ? 'week' : 'weeks'}` },
+        { l: 'Best streak', v: `${st.bestStreak || 0} weeks` },
         { l: 'Shifts booked', v: `${state.bookings.length} upcoming` },
         { l: 'Causes touched', v: String(st.causes) },
-        { l: 'Organizations', v: String(st.orgs) },
       ],
     },
   ];

@@ -11,10 +11,51 @@ import { S, s, cx, H } from '../lib/style.js';
 import { ImageSlot } from './ui.jsx';
 import { useSnapshot, updateEphemeral } from '../lib/store.js';
 import { menuFromEvent, confirmDialog, toast } from '../lib/overlays.js';
-import { signOut } from '../lib/db.js';
+import { signOut, effectiveStreak } from '../lib/db.js';
 import { Logo } from './Logo.jsx';
 
 const MONO = "'Geist Mono',monospace";
+
+/* Weekly volunteering streak — the flame animates in on every visit, and the
+   count pops when it changes. Keyframes live in globals.css (vu-flame, vu-pop). */
+function StreakCard({ weeks }) {
+  const active = weeks > 0;
+  return (
+    <Link
+      href="/profile"
+      aria-label={`Volunteering streak: ${weeks} ${weeks === 1 ? 'week' : 'weeks'}`}
+      className={H.card}
+      style={S('display:block;padding:14px;border-radius:12px;background:#FAF6F3;border:1px solid #EFE3DC;cursor:pointer;color:inherit;transition:border-color .16s ease')}
+    >
+      <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Weekly streak</div>
+      <div style={S('margin-top:9px;display:flex;align-items:center;gap:9px')}>
+        <span
+          aria-hidden="true"
+          className={active ? 'vu-flame' : undefined}
+          style={s('font-size:22px;line-height:1', active ? 'filter:none' : 'filter:grayscale(1);opacity:.5')}
+        >
+          🔥
+        </span>
+        <span key={weeks} className="vu-pop" style={S('font:600 22px/1 Geist;letter-spacing:-0.03em;color:#1A1714')}>
+          {weeks}
+          <span style={S('font-size:13px;color:#8A8179;font-weight:450')}> {weeks === 1 ? 'week' : 'weeks'}</span>
+        </span>
+      </div>
+      <div style={S('margin-top:9px;display:flex;gap:5px')}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            style={s('flex:1;height:4px;border-radius:3px', i < Math.min(weeks, 5) ? 'background:#C2603C' : 'background:#EFE3DC')}
+          />
+        ))}
+      </div>
+      <div style={S('margin-top:9px;font:450 11px/1.4 Geist;color:#8A8179')}>
+        {active ? 'Log a shift each week to keep it alive.' : 'Log volunteering to start a streak.'}
+      </div>
+    </Link>
+  );
+}
 
 const SIDE_NAV = [
   { k: 'home', label: 'Home', icon: '◇', href: '/app' },
@@ -38,8 +79,7 @@ export default function AppShell({ children }) {
   const router = useRouter();
   const { state, ephemeral } = useSnapshot();
   const activeKey = navKeyFor(pathname);
-  const req = state.requirement;
-  const pct = req.termGoal ? Math.round((req.termDone / req.termGoal) * 100) : 0;
+  const streak = effectiveStreak();
   const unread = (state.ui && state.ui.unreadNotifs) || 0;
 
   // Close the mobile drawer whenever the route changes.
@@ -181,21 +221,7 @@ export default function AppShell({ children }) {
         </div>
 
         <div>
-          <Link
-            href="/profile"
-            aria-label="School requirement progress"
-            className={H.card}
-            style={S('display:block;padding:14px;border-radius:12px;background:#FAF6F3;border:1px solid #EFE3DC;cursor:pointer;color:inherit;transition:border-color .16s ease')}
-          >
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>School requirement</div>
-            <div style={S('margin-top:8px;font:600 22px/1 Geist;letter-spacing:-0.03em;color:#1A1714')}>
-              {req.termDone}
-              <span style={S('font-size:13px;color:#8A8179')}> / {req.termGoal} hrs</span>
-            </div>
-            <div style={S('margin-top:10px;height:4px;border-radius:3px;background:#EFE3DC')}>
-              <div style={s(`width:${pct}%`, 'height:100%;border-radius:3px;background:#C2603C;transition:width .36s cubic-bezier(.16,1,.3,1)')} />
-            </div>
-          </Link>
+          <StreakCard weeks={streak} />
           <button
             type="button"
             aria-label="Account menu"

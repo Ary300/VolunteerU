@@ -60,8 +60,16 @@ export default function PipelineTab({ p }) {
                       <span style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{step.label}</span>
                       <span style={s('padding:3px 8px;border-radius:6px;font:500 10px/1 Geist', `background:${k.bg}`, `color:${k.color}`)}>{k.icon} {k.l}</span>
                       <span style={s('padding:3px 8px;border-radius:6px;font:500 10px/1', 'font-family:' + MONO, step.required ? 'background:#F5E7E0;color:#A8482A' : 'background:#F6F2EE;color:#8A8179')}>{step.required ? 'Required' : 'Optional'}</span>
+                      {(step.kind === 'form' ? step.due && `Due ${step.due}` : step.when) ? (
+                        <span style={s('padding:3px 8px;border-radius:6px;font:500 10px/1', 'font-family:' + MONO, 'background:#EEF3FB;color:#5B6BB0')}>{step.kind === 'form' ? `Due ${step.due}` : step.when}</span>
+                      ) : null}
                     </div>
                     {step.note ? <div style={S('margin-top:5px;font:450 12px/1.45 Geist;color:#8A8179')}>{step.note}</div> : null}
+                    {(step.link || '').trim() ? (
+                      <div className="vu-trunc" style={S('margin-top:5px;font:450 12px/1.4 Geist;color:#5B6BB0')}>🔗 {step.link}</div>
+                    ) : (STEP_FIELDS[step.kind] && STEP_FIELDS[step.kind].link && STEP_FIELDS[step.kind].link.required) ? (
+                      <div style={S('margin-top:5px;font:500 12px/1.4 Geist;color:#A8482A')}>No link yet — Edit to add one so volunteers can do this step.</div>
+                    ) : null}
                   </div>
                   <div style={S('display:flex;gap:6px;flex:none')}>
                     <Pressable label="Edit step" onClick={() => editStep(step)} className={cx(H.secondary, H.press)} style={S('padding:6px 11px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer')}>Edit</Pressable>
@@ -143,12 +151,29 @@ export default function PipelineTab({ p }) {
   );
 }
 
+/* Per-kind details the volunteer needs to actually do the step. */
+const STEP_FIELDS = {
+  meeting: { link: { label: 'Meeting link', ph: 'Paste the Zoom / Google Meet link', required: true }, when: { label: 'When', ph: 'e.g. Tue Aug 20, 4:00pm' } },
+  form: { link: { label: 'Form link', ph: 'Paste the Google Form / sign-up link', required: true }, due: { label: 'Due date', ph: 'e.g. Aug 25' } },
+  training: { link: { label: 'Training link (optional)', ph: 'Paste a video or doc link', required: false }, when: { label: 'When', ph: 'e.g. Before your first shift' } },
+  check: {},
+};
+
 function StepForm({ api, project, step }) {
-  const [f, setF] = useState({ label: step ? step.label : '', kind: step ? step.kind : 'meeting', required: step ? step.required !== false : true, note: step ? step.note : '' });
-  const [err, setErr] = useState('');
+  const [f, setF] = useState({
+    label: step ? step.label : '',
+    kind: step ? step.kind : 'meeting',
+    required: step ? step.required !== false : true,
+    note: step ? step.note : '',
+    link: step ? (step.link || '') : '',
+    when: step ? (step.when || '') : '',
+    due: step ? (step.due || '') : '',
+  });
+  const [err, setErr] = useState({});
+  const cfg = STEP_FIELDS[f.kind] || {};
   return (
     <div>
-      <Field label="Step" value={f.label} onChange={(v) => setF((x) => ({ ...x, label: v }))} placeholder="e.g. Attend the Zoom briefing" maxLength={70} required error={err} />
+      <Field label="Step" value={f.label} onChange={(v) => setF((x) => ({ ...x, label: v }))} placeholder="e.g. Attend the Zoom briefing" maxLength={70} required error={err.label} />
       <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end')}>
         <Select label="Type" value={f.kind} options={KIND_OPTS} onChange={(v) => setF((x) => ({ ...x, kind: v }))} />
         <label style={S('display:flex;align-items:center;gap:9px;height:44px;padding:0 4px;cursor:pointer;font:450 13px/1 Geist;color:#57504A')}>
@@ -156,17 +181,35 @@ function StepForm({ api, project, step }) {
           Required before a shift
         </label>
       </div>
+      {cfg.link || cfg.when || cfg.due ? (
+        <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 180px;gap:14px;align-items:start')}>
+          {cfg.link ? (
+            <Field label={cfg.link.label} value={f.link} onChange={(v) => setF((x) => ({ ...x, link: v }))} placeholder={cfg.link.ph} maxLength={300} inputMode="url" error={err.link} />
+          ) : <span />}
+          {cfg.when ? (
+            <Field label={cfg.when.label} value={f.when} onChange={(v) => setF((x) => ({ ...x, when: v }))} placeholder={cfg.when.ph} maxLength={40} />
+          ) : cfg.due ? (
+            <Field label={cfg.due.label} value={f.due} onChange={(v) => setF((x) => ({ ...x, due: v }))} placeholder={cfg.due.ph} maxLength={40} />
+          ) : <span />}
+        </div>
+      ) : null}
       <div style={S('margin-top:14px')}>
-        <Field label="Note for the volunteer" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} placeholder="Optional — a line they see, e.g. a Zoom link or what to bring." maxLength={140} />
+        <Field label="Note for the volunteer" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} placeholder="Optional — a line they see, e.g. what to bring." maxLength={140} />
       </div>
       <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
         <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
         <Pressable
           label={step ? 'Save step' : 'Add step'}
           onClick={() => {
-            if (!f.label.trim()) { setErr('Give the step a name.'); return; }
-            if (step) updatePipelineStep(project.id, step.id, { label: f.label.trim(), kind: f.kind, required: f.required, note: f.note });
-            else addPipelineStep(project.id, { label: f.label.trim(), kind: f.kind, required: f.required, note: f.note });
+            const e = {};
+            if (!f.label.trim()) e.label = 'Give the step a name.';
+            const need = STEP_FIELDS[f.kind] && STEP_FIELDS[f.kind].link && STEP_FIELDS[f.kind].link.required;
+            if (need && !f.link.trim()) e.link = 'Paste the link so volunteers can do this step.';
+            setErr(e);
+            if (Object.keys(e).length) return;
+            const payload = { label: f.label.trim(), kind: f.kind, required: f.required, note: f.note, link: f.link.trim(), when: f.when.trim(), due: f.due.trim() };
+            if (step) updatePipelineStep(project.id, step.id, payload);
+            else addPipelineStep(project.id, payload);
             api.close();
             toast({ title: step ? 'Step updated' : 'Step added', tone: 'ok', timeout: 2000 });
           }}

@@ -22,13 +22,27 @@ import {
   upsertSession, deleteSession, repeatWeekly, regenerateCode, setReminder, addPerson, updatePerson,
   removePerson, addNote, rosterCSV, download, setActiveProject, projects as allProjects,
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
-  requestProjectVerification,
+  requestProjectVerification, canCreateProject, projectBlockingCreation,
 } from '../../lib/db.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
 } from '../lead/Tabs.jsx';
 
 const MONO = "'Geist Mono',monospace";
+
+/** Navigate to the new-project wizard, or explain why it's blocked. */
+function goCreateProject(router) {
+  if (canCreateProject()) { router.push('/create'); return; }
+  const b = projectBlockingCreation();
+  toast({
+    title: 'Finish your current project first',
+    message: b
+      ? `${b.name} has no verified events yet. Run a session and post attendance before starting another.`
+      : 'Run a session and post attendance on your current project before starting another.',
+    tone: 'warn',
+    timeout: 6000,
+  });
+}
 
 const VOL_TABS = [
   ['overview', 'Overview'],
@@ -78,7 +92,7 @@ export default function Lead({ projectId, tab: tabParam }) {
           title="No project workspace yet"
           body="Set one up under a verified sponsor and you get applications, a roster, attendance and verified hours in one place."
           cta="Start a project"
-          onCta={() => router.push('/create')}
+          onCta={() => goCreateProject(router)}
         />
       </div>
     );
@@ -112,7 +126,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         { key: '__new', label: 'New project', icon: '＋' },
       ],
       (key) => {
-        if (key === '__new') router.push('/create');
+        if (key === '__new') goCreateProject(router);
         else if (key !== p.id) {
           setActiveProject(key);
           router.push(`/lead/${key}/${tab}`);
@@ -180,7 +194,7 @@ export default function Lead({ projectId, tab: tabParam }) {
           </Pressable>
           <Pressable
             label="New project"
-            onClick={() => router.push('/create')}
+            onClick={() => goCreateProject(router)}
             className={cx(H.primary, H.press)}
             style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:background .16s ease, transform .16s ease')}
           >

@@ -106,6 +106,14 @@ img { border-style:none; }
 
 .vu-screen { animation:vu-screen-in var(--vu-dur-3) var(--vu-ease-out); }
 .vu-pop { animation:vu-check var(--vu-dur-2) var(--vu-ease-out); }
+@keyframes vu-flame {
+  0%   { transform:scale(1)      rotate(-2deg); opacity:.92 }
+  25%  { transform:scale(1.14)   rotate(2deg);  opacity:1 }
+  50%  { transform:scale(.98)    rotate(-1deg); opacity:.95 }
+  75%  { transform:scale(1.08)   rotate(1deg);  opacity:1 }
+  100% { transform:scale(1)      rotate(-2deg); opacity:.92 }
+}
+.vu-flame { display:inline-block; transform-origin:50% 80%; animation:vu-flame 1.6s ease-in-out infinite; }
 .vu-shake { animation:vu-shake .4s var(--vu-ease); }
 .vu-spin {
   display:inline-block; width:13px; height:13px; flex:none;

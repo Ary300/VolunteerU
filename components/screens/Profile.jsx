@@ -7,7 +7,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Pressable, EmptyState, Field } from '../ui.jsx';
+import { ImageSlot, Pressable, EmptyState, Field, TextArea, Select } from '../ui.jsx';
+import { safeUrl } from '../MemberProjects.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount } from '../../lib/db.js';
@@ -52,6 +53,14 @@ export default function Profile() {
 
   function logService() {
     openLogHours();
+  }
+
+  function editProfile() {
+    openModal({
+      title: 'Edit your profile',
+      subtitle: 'This is what organizers see when you apply. Saved to your account.',
+      Body: ({ api }) => <ProfileEditForm api={api} account={a} />,
+    });
   }
 
   function shareCard() {
@@ -254,6 +263,57 @@ export default function Profile() {
                 <div style={S('margin-top:6px;font:450 12px/1 Geist;color:#8A8179')}>{k.l}</div>
               </div>
             ))}
+          </div>
+
+          <div style={S('padding:26px 30px;border-bottom:1px solid #F1EBE4')}>
+            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+              <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>About you</div>
+              <Pressable
+                label="Edit profile"
+                onClick={editProfile}
+                className={cx(H.secondary, H.press)}
+                style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}
+              >
+                Edit profile
+              </Pressable>
+            </div>
+            {(a.headline || a.pronouns) ? (
+              <div style={S('margin-top:12px;font:500 14px/1.4 Geist;color:#1A1714')}>
+                {a.headline}{a.pronouns ? <span style={S('color:#8A8179;font-weight:450')}>{a.headline ? '  ·  ' : ''}{a.pronouns}</span> : null}
+              </div>
+            ) : null}
+            {a.bio ? (
+              <div className="vu-break" style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#332D28;white-space:pre-wrap')}>{a.bio}</div>
+            ) : null}
+            {(a.skills || '').trim() ? (
+              <div style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:7px')}>
+                {a.skills.split(',').map((sk) => sk.trim()).filter(Boolean).slice(0, 12).map((sk) => (
+                  <span key={sk} style={S(`padding:4px 10px;border-radius:7px;background:#F6F2EE;font:500 12px/1 Geist;color:#57504A`)}>{sk}</span>
+                ))}
+              </div>
+            ) : null}
+            {(a.experience || '').trim() ? (
+              <div style={S('margin-top:14px')}>
+                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Experience</div>
+                <div className="vu-break" style={S('margin-top:6px;font:450 13px/1.55 Geist;color:#332D28;white-space:pre-wrap')}>{a.experience}</div>
+              </div>
+            ) : null}
+            {(a.goals || '').trim() ? (
+              <div style={S('margin-top:14px')}>
+                <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Goals</div>
+                <div className="vu-break" style={S('margin-top:6px;font:450 13px/1.55 Geist;color:#332D28;white-space:pre-wrap')}>{a.goals}</div>
+              </div>
+            ) : null}
+            {safeUrl(a.resumeUrl) ? (
+              <a href={safeUrl(a.resumeUrl)} target="_blank" rel="noopener noreferrer" style={S('margin-top:14px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#C2603C;text-decoration:none')}>
+                View résumé →
+              </a>
+            ) : null}
+            {!a.bio && !a.headline && !(a.skills || '').trim() && !(a.experience || '').trim() && !safeUrl(a.resumeUrl) ? (
+              <div style={S('margin-top:10px;font:450 13px/1.6 Geist;color:#8A8179')}>
+                Add a bio, skills, experience and a résumé link so organizers know who they are accepting. Everything here is saved to your account.
+              </div>
+            ) : null}
           </div>
 
           <div id="vu-applications" style={S('padding:26px 30px;border-bottom:1px solid #F1EBE4')}>
@@ -580,6 +640,90 @@ function ReviewForm({ api, rows }) {
         >
           Send request
         </Pressable>
+      </div>
+    </div>
+  );
+}
+
+function ProfileEditForm({ api, account }) {
+  const [f, setF] = useState({
+    firstName: account.firstName || '',
+    lastName: account.lastName || '',
+    headline: account.headline || '',
+    pronouns: account.pronouns || '',
+    age: account.age ? String(account.age) : '',
+    school: account.school || '',
+    city: account.city || '',
+    phone: account.phone || '',
+    bio: account.bio || '',
+    skills: account.skills || '',
+    experience: account.experience || '',
+    goals: account.goals || '',
+    resumeUrl: account.resumeUrl || '',
+  });
+  const [err, setErr] = useState({});
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  function save() {
+    const e = {};
+    if (!f.firstName.trim()) e.firstName = 'Your first name.';
+    if (f.resumeUrl.trim() && !safeUrl(f.resumeUrl)) e.resumeUrl = 'Use a full link, e.g. https://…';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    updateAccount({
+      firstName: f.firstName.trim(),
+      lastName: f.lastName.trim(),
+      headline: f.headline.trim(),
+      pronouns: f.pronouns.trim(),
+      age: f.age ? Number(f.age) : null,
+      school: f.school.trim(),
+      city: f.city.trim(),
+      phone: f.phone.trim(),
+      bio: f.bio.trim(),
+      skills: f.skills.trim(),
+      experience: f.experience.trim(),
+      goals: f.goals.trim(),
+      resumeUrl: f.resumeUrl.trim(),
+    });
+    api.close();
+    toast({ title: 'Profile saved', message: 'Your changes are synced to your account.', tone: 'ok' });
+  }
+
+  return (
+    <div>
+      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="First name" value={f.firstName} onChange={(v) => set('firstName', v)} maxLength={40} required error={err.firstName} />
+        <Field label="Last name" value={f.lastName} onChange={(v) => set('lastName', v)} maxLength={40} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="Headline" value={f.headline} onChange={(v) => set('headline', v)} placeholder="e.g. Student volunteer · loves tutoring and food banks" maxLength={80} />
+      </div>
+      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="Pronouns (optional)" value={f.pronouns} onChange={(v) => set('pronouns', v)} placeholder="she/her, he/him, they/them" maxLength={24} />
+        <Field label="Age (optional)" value={f.age} onChange={(v) => set('age', v.replace(/\D/g, '').slice(0, 2))} inputMode="numeric" placeholder="e.g. 16" maxLength={2} />
+      </div>
+      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="School (optional)" value={f.school} onChange={(v) => set('school', v)} maxLength={60} />
+        <Field label="City (optional)" value={f.city} onChange={(v) => set('city', v)} maxLength={60} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <TextArea label="Bio" value={f.bio} onChange={(v) => set('bio', v)} placeholder="A couple of sentences about you and why you volunteer." maxLength={400} minHeight={80} counter />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="Skills & interests (comma separated)" value={f.skills} onChange={(v) => set('skills', v)} placeholder="Tutoring, Spanish, first aid, event setup" maxLength={160} />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <TextArea label="Experience (optional)" value={f.experience} onChange={(v) => set('experience', v)} placeholder="Where you have volunteered before and what you did." maxLength={400} minHeight={70} counter />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <TextArea label="Goals (optional)" value={f.goals} onChange={(v) => set('goals', v)} placeholder="What you want to get out of volunteering." maxLength={300} minHeight={60} counter />
+      </div>
+      <div style={S('margin-top:14px')}>
+        <Field label="Résumé or portfolio link (optional)" value={f.resumeUrl} onChange={(v) => set('resumeUrl', v)} placeholder="https://… a link to your résumé or portfolio" maxLength={300} inputMode="url" error={err.resumeUrl} />
+      </div>
+      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
+        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
+        <Pressable label="Save profile" onClick={save} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>Save profile</Pressable>
       </div>
     </div>
   );

@@ -288,11 +288,11 @@ function PreferencesSection({ state }) {
             onChange={(v) => setPref('radius', Number(v))}
           />
           <Field
-            label="Hours you need this year"
+            label="Your hours goal (optional)"
             value={String(p.hoursGoal)}
             inputMode="numeric"
             onChange={(v) => setPref('hoursGoal', Number(v.replace(/\D/g, '')) || 0)}
-            hint="Drives the school requirement card on Home."
+            hint="A personal target. Track progress on your record."
           />
         </div>
       </Panel>
