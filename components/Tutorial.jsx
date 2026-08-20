@@ -57,12 +57,14 @@ export default function Tutorial() {
     state.meta &&
     !state.meta.tutorialSeen;
 
-  // Lock body scroll while the overlay is up.
+  // Lock body scroll and allow Escape to dismiss while the overlay is up.
   useEffect(() => {
     if (!show) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    const onKey = (e) => { if (e.key === 'Escape') update((sst) => { sst.meta = { ...sst.meta, tutorialSeen: true }; }); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey); };
   }, [show]);
 
   if (!show) return null;

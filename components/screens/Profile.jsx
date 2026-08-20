@@ -305,7 +305,7 @@ export default function Profile() {
               </div>
             ) : null}
             {safeUrl(a.resumeUrl) ? (
-              <a href={safeUrl(a.resumeUrl)} target="_blank" rel="noopener noreferrer" style={S('margin-top:14px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#C2603C;text-decoration:none')}>
+              <a href={safeUrl(a.resumeUrl)} target="_blank" rel="noopener noreferrer" style={S('margin-top:14px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;text-decoration:none')}>
                 View résumé →
               </a>
             ) : null}

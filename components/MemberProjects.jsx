@@ -376,7 +376,7 @@ function VolunteerMember({ app, onToggle }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  style={S('flex:none;align-self:center;margin-right:10px;display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#C2603C;text-decoration:none;cursor:pointer')}
+                  style={S('flex:none;align-self:center;margin-right:10px;display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;text-decoration:none;cursor:pointer')}
                 >
                   {actionLabel} →
                 </a>

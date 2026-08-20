@@ -28,7 +28,7 @@ function buildTiles(state) {
   const liveProjects = state.projects.filter((p) => !p.archived).length;
   const streak = effectiveStreak();
 
-  return [
+  const tiles = [
     {
       k: 'hours',
       label: 'Verified hours',
@@ -75,6 +75,9 @@ function buildTiles(state) {
       ],
     },
   ];
+  // Leadership is only meaningful once you actually lead a project — hide the
+  // organizer tile from pure volunteers so their snapshot stays about them.
+  return tiles.filter((t) => t.k !== 'lead' || liveProjects > 0);
 }
 
 export default function Home() {
@@ -149,7 +152,7 @@ export default function Home() {
           </Pressable>
         </div>
       </div>
-      <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:12px;align-items:start')}>
+      <div className="vu-4col" style={S(`display:grid;grid-template-columns:repeat(${tiles.length},1fr);gap:14px;margin-top:12px;align-items:start`)}>
         {tiles.map((t) => {
           const open = openCard === t.k;
           return (
@@ -168,7 +171,10 @@ export default function Home() {
             >
               <div style={S('display:flex;align-items:center;justify-content:space-between;gap:8px')}>
                 <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>{t.label}</div>
-                <div style={S(`font:500 12px/1 ${MONO};color:#C2603C`)}>{t.sign}</div>
+                <div style={S('display:flex;align-items:center;gap:7px')}>
+                  <div style={S(`font:500 12px/1 ${MONO};color:#C2603C`)}>{t.sign}</div>
+                  <span aria-hidden="true" style={s('font-size:10px;color:#B9AFA5;transition:transform .18s ease', open ? 'transform:rotate(180deg)' : 'transform:none')}>▾</span>
+                </div>
               </div>
               <div style={S('margin-top:14px;display:flex;align-items:baseline;gap:6px')}>
                 <div className="vu-stat-big" style={S('font:600 40px/1 Geist;letter-spacing:-0.045em')}>{t.big}</div>

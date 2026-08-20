@@ -79,7 +79,7 @@ export default function Detail({ id }) {
                 toast(ok ? { title: 'Address copied', tone: 'ok' } : { title: 'Could not copy', message: `${opp.org}, ${opp.address}`, tone: 'warn' });
               }}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;cursor:pointer')}
+              style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}
             >
               Copy address
             </Pressable>
@@ -241,7 +241,7 @@ export default function Detail({ id }) {
                   label="Withdraw this application"
                   onClick={withdraw}
                   className={cx(H.secondaryLift, H.press)}
-                  style={S('margin-top:12px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#8A8179;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+                  style={S('margin-top:12px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:40px;border-radius:11px;border:1px solid #EBD3C8;background:#fff;font:600 14px/1 Geist;color:#A8482A;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
                 >
                   Withdraw application
                 </Pressable>

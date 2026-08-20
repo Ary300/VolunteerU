@@ -68,7 +68,7 @@ export default function WebNonprofits({ q = '', near = '', causes = [], kind = '
               {[titleCase(o.city), o.state].filter(Boolean).join(', ')}{o.ein ? ` · EIN ${o.ein}` : ''}
             </div>
           </div>
-          <span style={S('font:500 12px/1 Geist;color:#C2603C;flex:none')}>Visit site →</span>
+          <span style={S('font:500 12px/1 Geist;color:#C2603C;flex:none')}>Find their site ↗</span>
         </a>
       ))}
       <div style={S('padding:13px 20px;font:450 12px/1.5 Geist;color:#A9A097')}>

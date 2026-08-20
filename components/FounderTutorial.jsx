@@ -16,37 +16,24 @@ import { useSnapshot, update } from '../lib/store.js';
 
 const MONO = "'Geist Mono',monospace";
 
-const STEPS = [
-  {
-    icon: '🎉',
-    title: 'Your project is live',
-    body: 'Nice — it is published and volunteers can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.',
-  },
-  {
-    icon: '🔗',
-    title: 'Recruit your crew',
-    body: 'Use “Copy recruit link” at the top to share your project anywhere. Anyone who opens it can apply — no account hoops for you to manage.',
-  },
-  {
-    icon: '📋',
-    title: 'Review applications',
-    body: 'New applicants land in the Applications tab. Accept the ones you want and they move into People, ready to be scheduled.',
-  },
-  {
-    icon: '◷',
-    title: 'Set the pipeline',
-    body: 'In the Pipeline tab, add the steps a volunteer clears before their first shift — a Zoom briefing, a consent form, role training. Paste the real link so they can actually do it.',
-  },
-  {
-    icon: '✓',
-    title: 'Run sessions & take attendance',
-    body: 'Create shifts, then post attendance after each session. Posting attendance is what turns a session into a verified event on the record.',
-  },
-  {
-    icon: '⭐',
-    title: 'Confirm hours',
-    body: 'When a volunteer logs hours, confirm them in the Hours tab. Confirmed hours become verified on that volunteer’s record — the whole point.',
-  },
+// A volunteer program runs shifts, a pipeline and verified attendance…
+const VOLUNTEER_STEPS = [
+  { icon: '🎉', title: 'Your project is live', body: 'Nice — it is published and volunteers can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
+  { icon: '🔗', title: 'Recruit your crew', body: 'Use “Copy recruit link” at the top to share your project anywhere. Anyone who opens it can apply — no account hoops for you to manage.' },
+  { icon: '📋', title: 'Review applications', body: 'New applicants land in the Applications tab. Accept the ones you want and they move onto your crew, ready to be scheduled.' },
+  { icon: '◷', title: 'Set the pipeline', body: 'In the Pipeline tab, add the steps a volunteer clears before their first shift — a Zoom briefing, a consent form, role training. Paste the real link so they can actually do it.' },
+  { icon: '✓', title: 'Run sessions & take attendance', body: 'Create shifts, then take attendance after each session. Marking attendance is what turns a session into a verified event on the record.' },
+  { icon: '⭐', title: 'Confirm hours', body: 'When a volunteer logs hours, confirm them in the Hours tab. Confirmed hours become verified on that volunteer’s record — the whole point.' },
+];
+
+// …a task team runs roles, briefings and a board instead.
+const TEAM_STEPS = [
+  { icon: '🎉', title: 'Your team is live', body: 'Nice — it is published and people can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
+  { icon: '🔗', title: 'Recruit your team', body: 'Use “Copy recruit link” at the top to share it anywhere. Anyone who opens it can apply — no account hoops for you to manage.' },
+  { icon: '📋', title: 'Review applications', body: 'New applicants land in the Applications view. Accept the ones you want and they join your team.' },
+  { icon: '◈', title: 'Assign roles & briefings', body: 'In the Team tab, give each member a role with a short briefing so they know exactly what they own.' },
+  { icon: '☑', title: 'Run the task board', body: 'In the Tasks tab, add tasks and assign them. Move each to done as your team ships the work.' },
+  { icon: '💬', title: 'Keep everyone in the loop', body: 'Use Messages to post updates and answer questions. Everything you build has a real record behind it.' },
 ];
 
 export default function FounderTutorial() {
@@ -55,7 +42,11 @@ export default function FounderTutorial() {
   const [i, setI] = useState(0);
   const [closing, setClosing] = useState(false);
 
-  const hasProject = (state.projects || []).some((p) => !p.archived);
+  const live = (state.projects || []).filter((p) => !p.archived);
+  const hasProject = live.length > 0;
+  // Show the steps that match the kind of project they just published.
+  const isTeamProject = hasProject && live[0].orgType === 'team';
+  const STEPS = isTeamProject ? TEAM_STEPS : VOLUNTEER_STEPS;
   const show =
     state.session.authed &&
     /^\/lead/.test(pathname) &&
@@ -67,7 +58,9 @@ export default function FounderTutorial() {
     if (!show) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    const onKey = (e) => { if (e.key === 'Escape') update((sst) => { sst.meta = { ...sst.meta, founderTutorialSeen: true }; }); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey); };
   }, [show]);
 
   if (!show) return null;

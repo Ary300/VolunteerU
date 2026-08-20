@@ -37,6 +37,12 @@ const STEP_SETS = {
 
 const KIND_LABEL = { meeting: 'Meeting', form: 'Form', training: 'Training', check: 'Check' };
 
+const DELIVERY_OPTS = [
+  { v: 'in_person', icon: '📍', l: 'In person', d: 'At a physical site' },
+  { v: 'remote', icon: '💻', l: 'Remote', d: 'Online, from anywhere' },
+  { v: 'hybrid', icon: '🔀', l: 'Both', d: 'Some in person, some remote' },
+];
+
 const COVERS = [PEXELS.reading2, PEXELS.food, PEXELS.trail, PEXELS.seniors, PEXELS.shelter, PEXELS.lead];
 
 export default function Create() {
@@ -84,7 +90,7 @@ export default function Create() {
     const e = {};
     if (n === 1) {
       if (!draft.name.trim()) e.name = 'Give the project a name.';
-      if (!draft.site.trim()) e.site = 'Where does it happen?';
+      if (draft.delivery !== 'remote' && !draft.site.trim()) e.site = 'Where does it happen?';
       if (!draft.mission.trim()) e.mission = 'One sentence on what happens and who it is for.';
       else if (draft.mission.length > MISSION_MAX) e.mission = `Trim it to ${MISSION_MAX} characters.`;
       if (draft.website.trim() && !/^https?:\/\/.+\..+/.test(draft.website.trim())) e.website = 'Use a full link starting with https://';
@@ -387,10 +393,49 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
       </div>
 
       <div style={S('margin-top:24px;border-top:1px solid #F1EBE4;padding-top:22px')} />
-      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
+
+      <div id="cr-delivery" style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>How volunteers take part</div>
+      <div role="group" aria-labelledby="cr-delivery" style={S('margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px')}>
+        {DELIVERY_OPTS.map((o) => {
+          const on = d.delivery === o.v;
+          return (
+            <Pressable
+              key={o.v}
+              role="radio"
+              aria-checked={on}
+              label={`${o.l}: ${o.d}`}
+              onClick={() => set({ delivery: o.v })}
+              className={cx(H.card, H.press)}
+              style={s(
+                'padding:13px 14px;border-radius:12px;cursor:pointer;transition:border-color .16s ease, background .16s ease',
+                `border:1px solid ${on ? '#C2603C' : '#E8E1D9'}`,
+                `background:${on ? '#FCF2EC' : '#FCFAF8'}`
+              )}
+            >
+              <div style={S('display:flex;align-items:center;gap:8px')}>
+                <span aria-hidden="true" style={S('font-size:15px')}>{o.icon}</span>
+                <span style={s('font:600 14px/1 Geist', on ? 'color:#A8482A' : 'color:#1A1714')}>{o.l}</span>
+              </div>
+              <div style={S('margin-top:5px;font:450 12px/1.4 Geist;color:#8A8179')}>{o.d}</div>
+            </Pressable>
+          );
+        })}
+      </div>
+
+      <div className="vu-2col-keep" style={S('margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
         <Field label="Project name" value={d.name} onChange={(v) => set({ name: v })} bg="#FCFAF8" fs={14} maxLength={60} required error={errors.name} />
         <Select label="Cause area" value={d.cause} onChange={(v) => set({ cause: v })} options={CAUSE_OPTIONS} bg="#FCFAF8" fs={14} />
-        <Field label="Site or location" value={d.site} onChange={(v) => set({ site: v })} bg="#FCFAF8" fs={14} maxLength={90} required error={errors.site} />
+        <Field
+          label={d.delivery === 'remote' ? 'Where it is based (optional)' : 'Site or location'}
+          value={d.site}
+          onChange={(v) => set({ site: v })}
+          bg="#FCFAF8"
+          fs={14}
+          maxLength={90}
+          required={d.delivery !== 'remote'}
+          placeholder={d.delivery === 'remote' ? 'e.g. Portland, OR — or leave blank' : undefined}
+          error={errors.site}
+        />
         <Field label="Website or social link" value={d.website} onChange={(v) => set({ website: v })} placeholder="Optional" bg="#FCFAF8" fs={14} type="url" error={errors.website} />
       </div>
       <div style={S('margin-top:20px')}>

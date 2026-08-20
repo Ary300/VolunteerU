@@ -684,7 +684,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
                         label={`Waitlist ${a.n}`}
                         onClick={() => decide(a, 'waitlisted')}
                         className={cx(H.secondary, H.press)}
-                        style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
+                        style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease')}
                       >
                         Waitlist
                       </Pressable>
@@ -705,7 +705,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
                         toast({ title: 'Back in the queue', message: `${a.n} is waiting on you again.`, tone: 'ok' });
                       }}
                       className={cx(H.secondary, H.press)}
-                      style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
+                      style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease')}
                     >
                       Undo
                     </Pressable>
