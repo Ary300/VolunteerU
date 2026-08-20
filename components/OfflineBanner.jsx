@@ -14,11 +14,16 @@ export default function OfflineBanner() {
 
   const offline = !ephemeral.online;
   const noStorage = !storageAvailable();
-  if (!offline && !noStorage) return null;
+  // Online, but the cloud sync keeps failing (flaky WiFi / server). Local data
+  // is safe; we keep retrying — but tell the user rather than pretend it saved.
+  const syncTrouble = !offline && ephemeral.saveStatus === 'error';
+  if (!offline && !noStorage && !syncTrouble) return null;
 
   const text = offline
-    ? 'You are offline. Browsing still works — applying, approving and messaging will resume when you reconnect.'
-    : 'This browser is blocking local storage, so changes will not survive a reload.';
+    ? 'You are offline. Your changes are saved on this device and will sync automatically when you reconnect.'
+    : noStorage
+      ? 'This browser is blocking local storage, so changes will not survive a reload.'
+      : 'Trouble saving to the cloud — your changes are safe on this device and we are retrying.';
 
   return (
     <div

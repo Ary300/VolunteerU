@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
 import { searchListings, matchListings, applyToListing, loadMyApplications } from '../lib/listings.js';
+import { safeUrl } from './MemberProjects.jsx';
 import { toast, openModal } from '../lib/overlays.js';
 import { SkeletonRows } from './ui.jsx';
 import MessageThread from './MessageThread.jsx';
@@ -148,8 +149,8 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
               </div>
             </div>
           ) : null}
-          {listing.website ? (
-            <a href={listing.website} target="_blank" rel="noreferrer noopener" style={S('font:500 13px/1 Geist;color:#C2603C;text-decoration:none')}>
+          {safeUrl(listing.website) ? (
+            <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" style={S('font:500 13px/1 Geist;color:#C2603C;text-decoration:none')}>
               Visit their page ↗
             </a>
           ) : null}

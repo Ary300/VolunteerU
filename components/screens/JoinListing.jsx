@@ -16,6 +16,7 @@ import { ImageSlot } from '../ui.jsx';
 import { Logo } from '../Logo.jsx';
 import { toast } from '../../lib/overlays.js';
 import { getListing, applyToListing, loadMyApplications, myId } from '../../lib/listings.js';
+import { safeUrl } from '../MemberProjects.jsx';
 import AnnouncementBoard from '../AnnouncementBoard.jsx';
 
 const MONO = "'Geist Mono',monospace";
@@ -178,9 +179,9 @@ export default function JoinListing({ id }) {
             </div>
           ) : null}
 
-          {listing.website ? (
+          {safeUrl(listing.website) ? (
             <div style={S('margin-top:22px')}>
-              <a href={listing.website} target="_blank" rel="noreferrer noopener" style={S('font:500 14px/1 Geist;color:#C2603C;text-decoration:none')}>Visit their page ↗</a>
+              <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" style={S('font:500 14px/1 Geist;color:#C2603C;text-decoration:none')}>Visit their page ↗</a>
             </div>
           ) : null}
         </div>
