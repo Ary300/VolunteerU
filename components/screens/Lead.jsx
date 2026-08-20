@@ -188,7 +188,7 @@ export default function Lead({ projectId, tab: tabParam }) {
             label="Copy the recruit link"
             onClick={copyRecruit}
             className={cx(H.secondaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
           >
             Copy recruit link
           </Pressable>
@@ -1137,7 +1137,7 @@ function PersonProfile({ api, project, person, onNote }) {
         <Pressable label="Add a note" onClick={onNote} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>
           Add a note
         </Pressable>
-        <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer')}>
+        <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer')}>
           Close
         </Pressable>
       </div>
@@ -1608,7 +1608,7 @@ function Shifts({ p }) {
                 toast({ title: `${n} sessions added`, message: 'They are drafts until you publish them.', tone: 'ok' });
               }}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
             >
               Repeat weekly
             </Pressable>
@@ -1676,7 +1676,7 @@ function Shifts({ p }) {
             label="Regenerate the check-in code"
             onClick={regenerate}
             className={cx(H.secondary, H.press)}
-            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
           >
             Regenerate code
           </Pressable>

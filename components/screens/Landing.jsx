@@ -619,7 +619,7 @@ export default function Landing() {
                     </div>
                     <div style={S('display:flex;gap:7px;flex:none')}>
                       <span style={S('padding:8px 12px;border-radius:9px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 12px/1 Geist')}>Accept</span>
-                      <span style={S('padding:8px 12px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A')}>Later</span>
+                      <span style={S('padding:8px 12px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C')}>Later</span>
                     </div>
                   </div>
                 ))}

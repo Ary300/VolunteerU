@@ -272,7 +272,7 @@ export default function Profile() {
                 label="Edit profile"
                 onClick={editProfile}
                 className={cx(H.secondary, H.press)}
-                style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}
+                style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}
               >
                 Edit profile
               </Pressable>
@@ -449,7 +449,7 @@ export default function Profile() {
                 label="Log hours"
                 onClick={logService}
                 className={cx(H.secondary, H.press)}
-                style={S('flex:none;display:inline-flex;align-items:center;gap:7px;padding:0 13px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}
+                style={S('flex:none;display:inline-flex;align-items:center;gap:7px;padding:0 13px;height:34px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}
               >
                 + Log hours
               </Pressable>
@@ -645,10 +645,38 @@ function ReviewForm({ api, rows }) {
   );
 }
 
+/* Downscale a chosen image to a square ~256px JPEG data URL — small enough to
+   ride along in the account blob, no storage bucket needed. */
+function fileToAvatar(file, size = 256) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) { reject(new Error('Not an image')); return; }
+    if (file.size > 12 * 1024 * 1024) { reject(new Error('That image is too large (max 12MB).')); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        try { resolve(canvas.toDataURL('image/jpeg', 0.82)); } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error('Could not read that image.'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function ProfileEditForm({ api, account }) {
+  const fileRef = useRef(null);
   const [f, setF] = useState({
     firstName: account.firstName || '',
     lastName: account.lastName || '',
+    avatar: account.avatar || '',
     headline: account.headline || '',
     pronouns: account.pronouns || '',
     age: account.age ? String(account.age) : '',
@@ -664,6 +692,18 @@ function ProfileEditForm({ api, account }) {
   const [err, setErr] = useState({});
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
 
+  async function onPickFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    try {
+      const dataUrl = await fileToAvatar(file);
+      set('avatar', dataUrl);
+    } catch (e2) {
+      toast({ title: 'Could not use that image', message: e2.message || 'Try a JPG or PNG.', tone: 'danger' });
+    }
+  }
+
   function save() {
     const e = {};
     if (!f.firstName.trim()) e.firstName = 'Your first name.';
@@ -673,6 +713,7 @@ function ProfileEditForm({ api, account }) {
     updateAccount({
       firstName: f.firstName.trim(),
       lastName: f.lastName.trim(),
+      avatar: f.avatar,
       headline: f.headline.trim(),
       pronouns: f.pronouns.trim(),
       age: f.age ? Number(f.age) : null,
@@ -691,6 +732,25 @@ function ProfileEditForm({ api, account }) {
 
   return (
     <div>
+      <div style={S('display:flex;align-items:center;gap:16px;margin-bottom:16px')}>
+        <div style={S('width:66px;height:66px;border-radius:50%;overflow:hidden;flex:none;background:#F1EBE4')}>
+          <ImageSlot src={f.avatar} shape="circle" placeholder="portrait" />
+        </div>
+        <div style={S('min-width:0')}>
+          <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={S('display:none')} />
+          <div style={S('display:flex;gap:9px;flex-wrap:wrap')}>
+            <Pressable label="Upload a profile photo" onClick={() => fileRef.current && fileRef.current.click()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>
+              {f.avatar ? 'Change photo' : 'Upload photo'}
+            </Pressable>
+            {f.avatar ? (
+              <Pressable label="Remove photo" onClick={() => set('avatar', '')} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#8A8179;cursor:pointer')}>
+                Remove
+              </Pressable>
+            ) : null}
+          </div>
+          <div style={S('margin-top:7px;font:450 12px/1.4 Geist;color:#8A8179')}>JPG or PNG. It is cropped to a square and saved to your account.</div>
+        </div>
+      </div>
       <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
         <Field label="First name" value={f.firstName} onChange={(v) => set('firstName', v)} maxLength={40} required error={err.firstName} />
         <Field label="Last name" value={f.lastName} onChange={(v) => set('lastName', v)} maxLength={40} />

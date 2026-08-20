@@ -131,7 +131,7 @@ export default function TasksTab({ p }) {
             <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Roles & briefings</div>
             <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Each member joins a role and reads its briefing before their tasks unlock.</div>
           </div>
-          <Pressable label="Add a role" onClick={() => editRole(null)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+          <Pressable label="Add a role" onClick={() => editRole(null)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>
             + Add role
           </Pressable>
         </div>

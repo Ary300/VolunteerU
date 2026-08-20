@@ -196,7 +196,7 @@ export default function Apply({ id }) {
               label="Keep browsing"
               onClick={() => router.push('/discover')}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;padding:0 16px;height:44px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;font:600 15px/1 Geist;color:#1A1714;cursor:pointer')}
+              style={S('display:inline-flex;align-items:center;padding:0 16px;height:44px;border-radius:12px;border:1px solid #E7C0AC;background:#fff;font:600 15px/1 Geist;color:#C2603C;cursor:pointer')}
             >
               Keep browsing
             </Pressable>
@@ -457,7 +457,7 @@ function StepDone({ opp, draft, router }) {
           label="Keep browsing"
           onClick={() => router.push('/discover')}
           className={cx(H.secondaryLift, H.press)}
-          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 16px;height:44px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;font:600 15px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 16px;height:44px;border-radius:12px;border:1px solid #E7C0AC;background:#fff;font:600 15px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
         >
           Keep browsing
         </Pressable>

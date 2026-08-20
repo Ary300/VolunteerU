@@ -155,7 +155,7 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
           ) : null}
           <div style={S('display:flex;gap:10px;margin-top:2px')}>
             {app ? (
-              <button type="button" onClick={() => message(listing, app)} style={S('padding:0 16px;height:44px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer')}>Message the founder</button>
+              <button type="button" onClick={() => message(listing, app)} style={S('padding:0 16px;height:44px;border-radius:12px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer')}>Message the founder</button>
             ) : (
               <button type="button" onClick={() => apply(listing)} style={S('padding:0 18px;height:44px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>Apply to join</button>
             )}
@@ -211,7 +211,7 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
                   <button
                     type="button"
                     onClick={() => message(l, app)}
-                    style={S('padding:0 14px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}
+                    style={S('padding:0 14px;height:34px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}
                   >
                     Message
                   </button>

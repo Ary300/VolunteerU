@@ -74,7 +74,7 @@ export default function VolunteerApplications({ showEmpty = false }) {
               <button
                 type="button"
                 onClick={() => openThread(app)}
-                style={S('flex:none;padding:0 14px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}
+                style={S('flex:none;padding:0 14px;height:34px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}
               >
                 Message
               </button>

@@ -595,7 +595,7 @@ export default function Discover() {
               label="How we verify organizations"
               onClick={verifyInfo}
               className={cx(H.secondary, H.press)}
-              style={S('margin-top:14px;display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              style={S('margin-top:14px;display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
             >
               How we verify
             </Pressable>

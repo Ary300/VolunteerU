@@ -159,7 +159,7 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
                   toast(n ? { title: `${n} marked present`, message: 'Adjust anyone who was late or left early.', tone: 'ok' } : { title: 'Everyone is already marked', tone: 'brand' });
                 }}
                 className={cx(H.secondary, H.press)}
-                style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+                style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
               >
                 Mark all present
               </Pressable>
@@ -396,7 +396,7 @@ function DebriefForm({ p }) {
             toast({ title: 'Debrief saved', message: 'Kept on your project record — share it with your organization anytime.', tone: 'ok' });
           }}
           className={cx(H.secondary, H.press)}
-          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
         >
           Save debrief
         </Pressable>
@@ -684,7 +684,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
                         label={`Waitlist ${a.n}`}
                         onClick={() => decide(a, 'waitlisted')}
                         className={cx(H.secondary, H.press)}
-                        style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+                        style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
                       >
                         Waitlist
                       </Pressable>
@@ -705,7 +705,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
                         toast({ title: 'Back in the queue', message: `${a.n} is waiting on you again.`, tone: 'ok' });
                       }}
                       className={cx(H.secondary, H.press)}
-                      style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease')}
+                      style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
                     >
                       Undo
                     </Pressable>
@@ -742,7 +742,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
             label="Edit screening questions"
             onClick={editQuestions}
             className={cx(H.secondary, H.press)}
-            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
           >
             Edit questions
           </Pressable>
@@ -890,7 +890,7 @@ export function HoursTab({ p }) {
                   label={`Adjust hours for ${q.n}`}
                   onClick={() => adjust(q)}
                   className={cx(H.secondary, H.press)}
-                  style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+                  style={S('display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
                 >
                   Adjust
                 </Pressable>
@@ -942,7 +942,7 @@ export function HoursTab({ p }) {
                 toast({ title: 'Roster exported', message: 'Signed CSV downloaded.', tone: 'ok' });
               }}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
             >
               CSV
             </Pressable>
@@ -953,7 +953,7 @@ export function HoursTab({ p }) {
                 setTimeout(() => window.print(), 400);
               }}
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+              style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
             >
               PDF
             </Pressable>
@@ -1088,7 +1088,7 @@ export function QualityTab({ p, params, setParam, goTab }) {
               label="File an incident"
               onClick={file}
               className={cx(H.secondary, H.press)}
-              style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
             >
               File an incident
             </Pressable>
@@ -1376,7 +1376,7 @@ export function MessagesTab({ p, params, setParam }) {
             expanded={false}
             onClick={templates}
             className={cx(H.secondary, H.press)}
-            style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+            style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
           >
             Templates
           </Pressable>
@@ -1504,7 +1504,7 @@ export function SettingsTab({ p }) {
             label="Edit project details"
             onClick={editDetails}
             className={cx(H.secondary, H.press)}
-            style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease')}
+            style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
           >
             Edit project details
           </Pressable>
@@ -1586,7 +1586,7 @@ export function SettingsTab({ p }) {
             label="Invite a co-lead"
             onClick={invite}
             className={cx(H.secondary, H.press)}
-            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+            style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
           >
             Invite a co-lead
           </Pressable>

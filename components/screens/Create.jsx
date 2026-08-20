@@ -514,7 +514,7 @@ function Step2({ d, set, errors, onNext, onBack }) {
           label="Add position"
           onClick={() => editPosition(null)}
           className={cx(H.secondary, H.press)}
-          style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+          style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
         >
           Add position
         </Pressable>
@@ -523,7 +523,7 @@ function Step2({ d, set, errors, onNext, onBack }) {
           expanded={false}
           onClick={useTemplate}
           className={cx(H.secondary, H.press)}
-          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+          style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
         >
           Copy from a template
         </Pressable>
@@ -783,7 +783,7 @@ function PipelineEditor({ steps, onChange, title, blurb }) {
         label="Add a pipeline step"
         onClick={add}
         className={cx(H.secondary, H.press)}
-        style={S('margin-top:12px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}
+        style={S('margin-top:12px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}
       >
         + Add a step
       </Pressable>
@@ -898,7 +898,7 @@ function Step2Team({ d, set, errors, onNext, onBack }) {
       </div>
       {errors.teamRoles ? <div className="vu-err">{errors.teamRoles}</div> : null}
 
-      <Pressable label="Add a role" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+      <Pressable label="Add a role" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>
         + Add a role
       </Pressable>
 
@@ -941,7 +941,7 @@ function Step3Team({ d, set, errors, onNext, onBack }) {
         ) : null}
       </div>
 
-      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>
         + Add a task
       </Pressable>
 

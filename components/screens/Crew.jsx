@@ -46,7 +46,7 @@ export default function Crew() {
           label="Find more projects"
           onClick={() => router.push('/discover')}
           className={cx(H.secondaryLift, H.press)}
-          style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer')}
+          style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer')}
         >
           Find more projects
         </Pressable>

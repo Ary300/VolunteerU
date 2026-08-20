@@ -104,7 +104,7 @@ export function ShareLink({ p, tone = 'soft' }) {
         <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Your join link</div>
         <div className="vu-trunc" style={S('margin-top:6px;font:450 13px/1.3 Geist;color:#332D28')}>{link}</div>
       </div>
-      <Pressable label="Copy the join link" onClick={copy} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>
+      <Pressable label="Copy the join link" onClick={copy} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>
         Copy link
       </Pressable>
     </div>
@@ -232,7 +232,7 @@ export function TeamMembersManager({ p }) {
                     <Pressable label={`Assign tasks to ${app.applicant_name}`} onClick={() => editTasks(app)} className={cx(H.primary, H.press)} style={S('padding:0 14px;height:38px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 12px/1 Geist;cursor:pointer')}>
                       Tasks {tasks.length ? `· ${doneCount}/${tasks.length}` : ''}
                     </Pressable>
-                    <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('padding:0 12px;height:38px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}>
+                    <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('padding:0 12px;height:38px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}>
                       {a.rating && a.rating.stars ? `★ ${a.rating.stars}` : 'Rate'}
                     </Pressable>
                   </div>
@@ -297,7 +297,7 @@ function MemberTaskForm({ api, app, onSaved }) {
         ))}
         {!tasks.length ? <div style={S('padding:14px;border-radius:11px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.5 Geist;color:#8A8179;text-align:center')}>No tasks yet. Add the first thing you want them to do.</div> : null}
       </div>
-      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:12px;display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>+ Add a task</Pressable>
+      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S('margin-top:12px;display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>+ Add a task</Pressable>
       <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
         <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>
         <Pressable label="Save tasks" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer')}>{busy ? 'Saving…' : 'Save tasks'}</Pressable>
@@ -354,7 +354,7 @@ export function PipelineMembers({ p }) {
                   );
                 })}
               </div>
-              <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:34px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}>
+              <Pressable label={`Rate ${app.applicant_name}`} onClick={() => openRating(app, reload)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:34px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}>
                 {app.assignment && app.assignment.rating && app.assignment.rating.stars ? `★ ${app.assignment.rating.stars}` : 'Rate'}
               </Pressable>
               </div>

@@ -46,7 +46,7 @@ export default function PipelineTab({ p }) {
       <div style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
         <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
           <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Steps ({steps.length})</div>
-          <Pressable label="Add a step" onClick={() => editStep(null)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}>+ Add step</Pressable>
+          <Pressable label="Add a step" onClick={() => editStep(null)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer')}>+ Add step</Pressable>
         </div>
         {steps.length ? (
           <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>

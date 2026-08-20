@@ -154,7 +154,7 @@ export default function MemberProjects() {
                 <button
                   type="button"
                   onClick={() => message(app)}
-                  style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#57504A;cursor:pointer')}
+                  style={S('flex:none;padding:0 13px;height:32px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}
                 >
                   Message organizer
                 </button>
@@ -195,7 +195,7 @@ function MemberHours({ app, onLog, onRemove }) {
     <div style={S('margin-top:14px')}>
       <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
         <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.08em;text-transform:uppercase;color:#A9A097`)}>Your hours here</div>
-        <button type="button" onClick={onLog} style={S('flex:none;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}>+ Log hours</button>
+        <button type="button" onClick={onLog} style={S('flex:none;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}>+ Log hours</button>
       </div>
       {log.length ? (
         <>

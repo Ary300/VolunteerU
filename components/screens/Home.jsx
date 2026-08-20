@@ -11,6 +11,7 @@ import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
+import HomeCharts from '../HomeCharts.jsx';
 import { openLogHours } from '../LogHoursForm.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge, effectiveStreak } from '../../lib/db.js';
@@ -116,7 +117,7 @@ export default function Home() {
             label="Student projects"
             onClick={() => router.push('/discover?tab=projects')}
             className={cx(H.secondaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
           >
             Student projects
           </Pressable>
@@ -199,6 +200,8 @@ export default function Home() {
           );
         })}
       </div>
+
+      <HomeCharts />
 
       <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:16px')}>
         <MemberProjects />

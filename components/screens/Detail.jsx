@@ -88,7 +88,7 @@ export default function Detail({ id }) {
               target="_blank"
               rel="noreferrer noopener"
               className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714')}
+              style={S('display:inline-flex;align-items:center;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C')}
             >
               Open in maps ↗
             </a>
@@ -232,7 +232,7 @@ export default function Detail({ id }) {
                     target="_blank"
                     rel="noreferrer noopener"
                     className={cx(H.secondaryLift, H.press)}
-                    style={S('margin-top:12px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;text-decoration:none;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
+                    style={S('margin-top:12px;display:flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;padding:0 18px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;text-decoration:none;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
                   >
                     Add to calendar ↗
                   </a>

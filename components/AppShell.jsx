@@ -14,6 +14,7 @@ import { menuFromEvent, confirmDialog, toast } from '../lib/overlays.js';
 import { signOut, effectiveStreak } from '../lib/db.js';
 import { Logo } from './Logo.jsx';
 import Tutorial from './Tutorial.jsx';
+import FounderTutorial from './FounderTutorial.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -256,6 +257,7 @@ export default function AppShell({ children }) {
         {children}
       </div>
       <Tutorial />
+      <FounderTutorial />
     </div>
   );
 }
