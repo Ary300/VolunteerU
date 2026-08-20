@@ -11,6 +11,7 @@ import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
+import { openLogHours } from '../LogHoursForm.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity, nextBadge } from '../../lib/db.js';
 import { suggestedIds } from '../../lib/seed.js';
@@ -147,11 +148,21 @@ export default function Home() {
         </div>
       </div>
 
-      <div style={S('margin-top:26px;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
+      <div style={S('margin-top:26px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
         <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Your snapshot</div>
-        <Pressable label="See your full record" onClick={() => router.push('/profile')} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
-          Full record →
-        </Pressable>
+        <div style={S('display:flex;align-items:center;gap:12px')}>
+          <Pressable
+            label="Log volunteer hours"
+            onClick={() => openLogHours()}
+            className={cx(H.press)}
+            style={S('display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer')}
+          >
+            <span aria-hidden="true" style={S('font:600 15px/1 Geist')}>+</span> Log hours
+          </Pressable>
+          <Pressable label="See your full record" onClick={() => router.push('/profile')} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
+            Full record →
+          </Pressable>
+        </div>
       </div>
       <div className="vu-4col" style={S('display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:12px;align-items:start')}>
         {tiles.map((t) => {

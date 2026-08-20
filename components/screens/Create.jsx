@@ -668,49 +668,93 @@ function Step3({ d, set, errors, onNext, onBack }) {
   );
 }
 
-/* Shared pipeline editor: an ordered list of QC steps, edited inline. */
+/* What each step kind asks the organizer to provide, so the step is actually
+   actionable for the volunteer. A meeting needs a link + a time; a form needs a
+   link + a due date; training an optional link + a when; a manual check needs
+   nothing extra. */
+const STEP_FIELDS = {
+  meeting: {
+    link: { label: 'Meeting link', ph: 'Paste the Zoom / Google Meet link', required: true },
+    when: { label: 'When', ph: 'e.g. Tue Aug 20, 4:00pm' },
+  },
+  form: {
+    link: { label: 'Form link', ph: 'Paste the Google Form / sign-up link', required: true },
+    due: { label: 'Due date', ph: 'e.g. Aug 25' },
+  },
+  training: {
+    link: { label: 'Training link (optional)', ph: 'Paste a video or doc link', required: false },
+    when: { label: 'When', ph: 'e.g. Before your first shift' },
+  },
+  check: {},
+};
+
+/** A pipeline step is incomplete if its kind requires a link and none is set. */
+export function stepNeedsLink(s) {
+  const cfg = STEP_FIELDS[s.kind];
+  return !!(cfg && cfg.link && cfg.link.required && !(s.link || '').trim());
+}
+
+/* Shared pipeline editor: a list of QC steps, edited inline. Each step collects
+   the details the volunteer needs to actually do it — no reorder arrows. */
 function PipelineEditor({ steps, onChange, title, blurb }) {
   const setStep = (i, patch) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const remove = (i) => onChange(steps.filter((_, j) => j !== i));
-  const move = (i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= steps.length) return;
-    const next = steps.slice();
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-  const add = () => onChange([...steps, { id: `pl-user-${steps.length}-${title.length}`, label: '', kind: 'check', required: true, note: '' }]);
+  const add = () => onChange([...steps, { id: `pl-user-${steps.length}-${title.length}`, label: '', kind: 'check', required: true, note: '', link: '', when: '', due: '' }]);
 
   return (
     <div style={S('margin-top:24px')}>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>{title}</div>
       <div style={S('margin-top:8px;font:450 13px/1.5 Geist;color:#6B635C;max-width:620px')}>{blurb}</div>
       <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-        {steps.map((s, i) => (
-          <div key={s.id || i} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-            <div style={S('display:flex;align-items:center;gap:10px')}>
-              <div style={S(`width:24px;height:24px;border-radius:8px;flex:none;display:grid;place-items:center;background:#F1EBE4;font:600 11px/1 ${MONO};color:#8A8179`)}>{i + 1}</div>
-              <div style={S('flex:1;min-width:0')}>
-                <Field label="" value={s.label} onChange={(v) => setStep(i, { label: v })} placeholder="e.g. Attend the Zoom briefing" bg="#fff" fs={14} maxLength={70} />
+        {steps.map((s, i) => {
+          const cfg = STEP_FIELDS[s.kind] || {};
+          const linkMissing = stepNeedsLink(s) && (s.label || '').trim();
+          return (
+            <div key={s.id || i} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+              <div style={S('display:flex;align-items:center;gap:10px')}>
+                <div style={S(`width:24px;height:24px;border-radius:8px;flex:none;display:grid;place-items:center;background:#F1EBE4;font:600 11px/1 ${MONO};color:#8A8179`)}>{i + 1}</div>
+                <div style={S('flex:1;min-width:0')}>
+                  <Field label="" value={s.label} onChange={(v) => setStep(i, { label: v })} placeholder="e.g. Attend the Zoom briefing" bg="#fff" fs={14} maxLength={70} />
+                </div>
+                <Pressable label="Remove step" onClick={() => remove(i)} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:34px;border-radius:9px;border:1px solid #EBD3C8;background:#fff;font:600 12px/1 Geist;color:#A8482A;cursor:pointer')}>Remove</Pressable>
               </div>
-              <div style={S('display:flex;gap:4px;flex:none')}>
-                <Pressable label="Move up" onClick={() => move(i, -1)} className={cx(H.secondary, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#8A8179;cursor:pointer')}>↑</Pressable>
-                <Pressable label="Move down" onClick={() => move(i, 1)} className={cx(H.secondary, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#8A8179;cursor:pointer')}>↓</Pressable>
-                <Pressable label="Remove step" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:28px;height:28px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 12px/1 Geist;color:#A8482A;cursor:pointer')}>✕</Pressable>
+              <div className="vu-2col-keep" style={S('margin-top:10px;display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:center')}>
+                <Select label="" value={s.kind} options={TASK_KINDS.map((k) => ({ v: k, l: KIND_LABEL[k] }))} onChange={(v) => setStep(i, { kind: v })} bg="#fff" fs={13} />
+                <label style={S('display:flex;align-items:center;gap:8px;cursor:pointer;font:450 13px/1 Geist;color:#57504A')}>
+                  <input type="checkbox" checked={s.required !== false} onChange={(e) => setStep(i, { required: e.target.checked })} style={S('width:15px;height:15px;accent-color:#C2603C;cursor:pointer')} />
+                  Required to work a shift
+                </label>
+              </div>
+
+              {cfg.link || cfg.when || cfg.due ? (
+                <div className="vu-2col-keep" style={S('margin-top:10px;display:grid;grid-template-columns:1fr 180px;gap:12px;align-items:start')}>
+                  {cfg.link ? (
+                    <Field
+                      label=""
+                      value={s.link || ''}
+                      onChange={(v) => setStep(i, { link: v })}
+                      placeholder={cfg.link.ph}
+                      bg="#fff"
+                      fs={13}
+                      maxLength={300}
+                      inputMode="url"
+                      error={linkMissing ? 'Paste the link so volunteers can do this step.' : undefined}
+                    />
+                  ) : <span />}
+                  {cfg.when ? (
+                    <Field label="" value={s.when || ''} onChange={(v) => setStep(i, { when: v })} placeholder={cfg.when.ph} bg="#fff" fs={13} maxLength={40} />
+                  ) : cfg.due ? (
+                    <Field label="" value={s.due || ''} onChange={(v) => setStep(i, { due: v })} placeholder={cfg.due.ph} bg="#fff" fs={13} maxLength={40} />
+                  ) : <span />}
+                </div>
+              ) : null}
+
+              <div style={S('margin-top:10px')}>
+                <Field label="" value={s.note || ''} onChange={(v) => setStep(i, { note: v })} placeholder="A short note the volunteer sees (optional)" bg="#fff" fs={13} maxLength={120} />
               </div>
             </div>
-            <div className="vu-2col-keep" style={S('margin-top:10px;display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:center')}>
-              <Select label="" value={s.kind} options={TASK_KINDS.map((k) => ({ v: k, l: KIND_LABEL[k] }))} onChange={(v) => setStep(i, { kind: v })} bg="#fff" fs={13} />
-              <label style={S('display:flex;align-items:center;gap:8px;cursor:pointer;font:450 13px/1 Geist;color:#57504A')}>
-                <input type="checkbox" checked={s.required !== false} onChange={(e) => setStep(i, { required: e.target.checked })} style={S('width:15px;height:15px;accent-color:#C2603C;cursor:pointer')} />
-                Required to work a shift
-              </label>
-            </div>
-            <div style={S('margin-top:10px')}>
-              <Field label="" value={s.note || ''} onChange={(v) => setStep(i, { note: v })} placeholder="A short note the volunteer sees (optional)" bg="#fff" fs={13} maxLength={120} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {!steps.length ? (
           <div style={S('padding:16px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.5 Geist;color:#8A8179;text-align:center')}>
             No steps yet. Accepted volunteers can work right away. Add a step to gate the first shift.

@@ -19,12 +19,14 @@ const MONO = "'Geist Mono',monospace";
 const SIDE_NAV = [
   { k: 'home', label: 'Home', icon: '◇', href: '/app' },
   { k: 'discover', label: 'Discover', icon: '◎', href: '/discover' },
+  { k: 'crew', label: 'My crew', icon: '❖', href: '/crew' },
   { k: 'lead', label: 'Lead a project', icon: '◈', href: '/lead' },
   { k: 'profile', label: 'Profile', icon: '☺', href: '/profile' },
 ];
 
 export function navKeyFor(pathname) {
   if (pathname === '/app') return 'home';
+  if (/^\/crew/.test(pathname)) return 'crew';
   if (/^\/(discover|volunteers|opportunity|apply|saved|friends|projects)/.test(pathname)) return 'discover';
   if (/^\/(lead|create)/.test(pathname)) return 'lead';
   if (/^\/(profile|settings|notifications)/.test(pathname)) return 'profile';

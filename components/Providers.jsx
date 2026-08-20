@@ -16,7 +16,7 @@ import OverlayHost from './OverlayHost.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 
 /* Routes that require a signed-in account. */
-const PROTECTED = ['/app', '/discover', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
+const PROTECTED = ['/app', '/discover', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
 
