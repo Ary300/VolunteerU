@@ -13,6 +13,7 @@ import { useSnapshot, updateEphemeral } from '../lib/store.js';
 import { menuFromEvent, confirmDialog, toast } from '../lib/overlays.js';
 import { signOut, effectiveStreak } from '../lib/db.js';
 import { Logo } from './Logo.jsx';
+import Tutorial from './Tutorial.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
@@ -254,6 +255,7 @@ export default function AppShell({ children }) {
       <div id="vu-main" className="vu-main-pad">
         {children}
       </div>
+      <Tutorial />
     </div>
   );
 }
