@@ -16,6 +16,7 @@ import { useSnapshot, update } from '../../lib/store.js';
 import { toast } from '../../lib/overlays.js';
 import { intents, CAUSES, WINDOWS } from '../../lib/seed.js';
 import { createProject, perform } from '../../lib/db.js';
+import { track } from '../../lib/analytics.js';
 import { defaultDraft, generatedSessions } from '../../lib/createDraft.js';
 
 const MONO = "'Geist Mono',monospace";
@@ -171,6 +172,7 @@ export default function Onboarding() {
         }
       });
 
+      track('onboarding_completed', { intent, causes: isStart ? [start.cause] : join.causes, has_location: isStart ? !!start.site.trim() : !!join.location.trim() });
       if (isStart) {
         toast({ title: 'Workspace created', message: 'Add your organization and open positions — you can request verification anytime.', tone: 'ok' });
         router.replace('/lead');

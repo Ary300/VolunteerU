@@ -14,6 +14,8 @@ import { initAuth } from '../lib/auth.js';
 import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours } from '../lib/db.js';
 import OverlayHost from './OverlayHost.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
+import AnalyticsProvider from './AnalyticsProvider.jsx';
+import { identifyUser, resetAnalytics } from '../lib/analytics.js';
 
 /* Routes that require a signed-in account. */
 const PROTECTED = ['/app', '/discover', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
@@ -60,6 +62,22 @@ export default function Providers({ children }) {
     refreshNotificationBadge();
   }, [hydrated, state.session.authed, pathname]);
 
+  /* Tie analytics events to the signed-in user; reset on sign-out. */
+  useEffect(() => {
+    if (!hydrated) return;
+    const a = state.account;
+    if (state.session.authed && a && a.id && a.id !== 'me') {
+      identifyUser(a.id, {
+        email: a.email || state.session.email || undefined,
+        name: a.name || undefined,
+        city: a.city || (state.prefs && state.prefs.location) || undefined,
+        is_founder: (state.projects || []).length > 0,
+      });
+    } else if (!state.session.authed) {
+      resetAnalytics();
+    }
+  }, [hydrated, state.session.authed, state.account.id, state.account.email]);
+
   /* Mirror preferences onto <html> so CSS can act on them. */
   useEffect(() => {
     if (!hydrated) return;
@@ -97,6 +115,7 @@ export default function Providers({ children }) {
       )}
     >
       <OfflineBanner />
+      <AnalyticsProvider />
       {children}
       <OverlayHost />
     </div>

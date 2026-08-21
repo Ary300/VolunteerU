@@ -96,6 +96,19 @@ export default function Discover() {
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
+  // Land from onboarding with the volunteer's own location already in the box —
+  // so the very first Discover view (and its location-scoped results) is their
+  // place, not blank. Seeds once when the saved location is available; if they
+  // later clear it, it stays cleared.
+  const seededNear = useRef(false);
+  useEffect(() => {
+    if (seededNear.current) return;
+    if (params.get('near') !== null) { seededNear.current = true; return; }
+    const home = (state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '');
+    if (home) { seededNear.current = true; setParams({ near: home }, { replace: true }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.prefs.location, state.account.city]);
+
   const filters = { q, causes, windows, maxMiles, sort, savedOnly, place };
   const rows = searchOpportunities(filters);
   const nFilters = causes.length + windows.length + (maxMiles != null ? 1 : 0) + (savedOnly ? 1 : 0);

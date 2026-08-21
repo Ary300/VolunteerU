@@ -9,6 +9,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, Field, TextArea, Select } from '../ui.jsx';
 import { safeUrl } from '../MemberProjects.jsx';
+import { track } from '../../lib/analytics.js';
 import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
 import { APP_TONE, GRADE_TONE, tone, transcriptCSV, download, copyText, withdrawApplication, updateAccount } from '../../lib/db.js';
@@ -727,6 +728,7 @@ function ProfileEditForm({ api, account }) {
       resumeUrl: f.resumeUrl.trim(),
     });
     api.close();
+    track('profile_updated', { has_bio: !!f.bio.trim(), has_resume: !!f.resumeUrl.trim(), has_photo: !!f.avatar });
     toast({ title: 'Profile saved', message: 'Your changes are synced to your account.', tone: 'ok' });
   }
 
