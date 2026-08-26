@@ -1,14 +1,13 @@
 'use client';
 
 /* ==========================================================================
-   Discover.jsx — design screen: `isDiscover`
+   Discover.jsx, design screen: `isDiscover`
    ========================================================================== */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, SkeletonRows, Chip, Select, Checkbox, PrimaryButton, SecondaryButton } from '../ui.jsx';
-import MapPanel from '../MapPanel.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
 import { useSnapshot } from '../../lib/store.js';
@@ -29,22 +28,13 @@ const CHIPS = [
   { k: 'Civic', t: 'Civic' },
   { k: 'Animals', t: 'Animals' },
   { k: 'win:Saturday afternoon', t: 'Sat afternoon' },
-  { k: 'mi:5', t: '≤5 mi' },
 ];
 
 const SORTS = [
   { v: 'match', l: 'Best match' },
-  { v: 'distance', l: 'Closest first' },
   { v: 'soonest', l: 'Soonest' },
   { v: 'hours', l: 'Most hours' },
   { v: 'spots', l: 'Most spots left' },
-];
-
-const RADII = [
-  { v: '', l: 'Any distance' },
-  { v: '2', l: 'Within 2 miles' },
-  { v: '5', l: 'Within 5 miles' },
-  { v: '10', l: 'Within 10 miles' },
 ];
 
 export default function Discover() {
@@ -55,20 +45,26 @@ export default function Discover() {
   const q = params.get('q') || '';
   const causes = useMemo(() => (params.get('causes') || '').split('|').filter(Boolean), [params]);
   const windows = useMemo(() => (params.get('windows') || '').split('|').filter(Boolean), [params]);
-  const maxMiles = params.get('mi') ? Number(params.get('mi')) : null;
   const sort = params.get('sort') || 'match';
   const savedOnly = params.get('saved') === '1';
   const tab = params.get('tab') === 'projects' ? 'projects' : 'openings';
   const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
   const kind = ['student', 'official'].includes(params.get('kind')) ? params.get('kind') : 'all';
-  const near = params.get('near') || '';
 
   const { state } = useSnapshot();
   const interest = (state.prefs && state.prefs.interest) || '';
-  const matchNear = near || (state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '');
-  // For the IRS-registry cards: use the typed location as-is, else fall back to
-  // saved location + onboarding ZIP so tiny towns still resolve to a state.
-  const webNear = near || [(state.prefs && state.prefs.location) || (state.account.city || ''), state.onboarding?.zip || ''].filter(Boolean).join(' ');
+  // The volunteer's own area, from their saved location or city. Discover defaults
+  // to this the instant they land, never blank, never a stranger's town.
+  const homeRegion = ((state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '')).trim();
+  // An explicit ?near wins (including '' while they type); with no param at all we
+  // fall back to their region synchronously, so there is no blank-then-jump flash.
+  const nearParam = params.get('near');
+  const near = nearParam !== null ? nearParam : homeRegion;
+  const matchNear = near || homeRegion;
+  // The IRS-registry cards need a *state*. Always fold in the saved ZIP/city so a
+  // bare city name (e.g. "Fairview", which no lookup knows) still resolves to a
+  // state instead of returning nationwide/random nonprofits.
+  const webNear = [near || homeRegion, state.onboarding?.zip || '', (state.account && state.account.zip) || ''].filter(Boolean).join(' ');
   const [draftQuery, setDraftQuery] = useState(q);
   const [showSuggest, setShowSuggest] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -96,24 +92,7 @@ export default function Discover() {
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  // Land from onboarding with the volunteer's own location already in the box —
-  // so the very first Discover view (and its location-scoped results) is their
-  // place, not blank. Seeds once when the saved location is available; if they
-  // later clear it, it stays cleared.
-  const seededNear = useRef(false);
-  useEffect(() => {
-    if (seededNear.current) return;
-    if (params.get('near') !== null) { seededNear.current = true; return; }
-    const home = (state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '');
-    if (home) { seededNear.current = true; setParams({ near: home }, { replace: true }); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.prefs.location, state.account.city]);
-
-  const filters = { q, causes, windows, maxMiles, sort, savedOnly, place };
-  const rows = searchOpportunities(filters);
-  const nFilters = causes.length + windows.length + (maxMiles != null ? 1 : 0) + (savedOnly ? 1 : 0);
-  const withinRadius = state.opportunities.filter((o) => o.distance <= state.prefs.radius).length;
-  const closingSoon = state.opportunities.filter((o) => o.closesSoon).length;
+  const nFilters = causes.length + windows.length + (savedOnly ? 1 : 0);
   const suggestions = showSuggest ? suggestionsFor(draftQuery) : [];
   const peerRows = tab === 'projects' ? state.peerProjects : state.peerProjects.slice(0, 5);
   const weekBookings = state.bookings.slice(0, 2);
@@ -142,19 +121,13 @@ export default function Discover() {
       setParams({ windows: nextW.join('|') });
       return;
     }
-    if (k.startsWith('mi:')) {
-      const m = Number(k.slice(3));
-      setParams({ mi: maxMiles === m ? null : m });
-      return;
-    }
     const nextC = causes.includes(k) ? causes.filter((x) => x !== k) : [...causes, k];
     setParams({ causes: nextC.join('|') });
   }
 
   const chipIsOn = (chip) => {
-    if (chip.k === 'all') return !causes.length && !windows.length && maxMiles == null && !savedOnly;
+    if (chip.k === 'all') return !causes.length && !windows.length && !savedOnly;
     if (chip.k.startsWith('win:')) return windows.includes(chip.k.slice(4));
-    if (chip.k.startsWith('mi:')) return maxMiles === Number(chip.k.slice(3));
     return causes.includes(chip.k);
   };
 
@@ -164,12 +137,11 @@ export default function Discover() {
       subtitle: 'Every filter applies to both accredited organizations and student projects.',
       size: 'wide',
       Body: function FilterBody({ api }) {
-        const [local, setLocal] = useState({ causes: causes.slice(), windows: windows.slice(), mi: maxMiles ? String(maxMiles) : '', sort, savedOnly });
+        const [local, setLocal] = useState({ causes: causes.slice(), windows: windows.slice(), sort, savedOnly });
         const preview = searchOpportunities({
           q,
           causes: local.causes,
           windows: local.windows,
-          maxMiles: local.mi ? Number(local.mi) : null,
           sort: local.sort,
           savedOnly: local.savedOnly,
         }).length;
@@ -205,8 +177,7 @@ export default function Discover() {
                 />
               ))}
             </div>
-            <div className="vu-2col-keep" style={S('margin-top:22px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-              <Select label="Distance" value={local.mi} options={RADII} onChange={(v) => setLocal((f) => ({ ...f, mi: v }))} />
+            <div style={S('margin-top:22px')}>
               <Select label="Sort by" value={local.sort} options={SORTS} onChange={(v) => setLocal((f) => ({ ...f, sort: v }))} />
             </div>
             <div style={S('margin-top:18px')}>
@@ -222,7 +193,7 @@ export default function Discover() {
                   px={16}
                   r={11}
                   fs={14}
-                  onClick={() => setLocal({ causes: [], windows: [], mi: '', sort: 'match', savedOnly: false })}
+                  onClick={() => setLocal({ causes: [], windows: [], sort: 'match', savedOnly: false })}
                 >
                   Reset
                 </SecondaryButton>
@@ -235,7 +206,6 @@ export default function Discover() {
                     setParams({
                       causes: local.causes.join('|'),
                       windows: local.windows.join('|'),
-                      mi: local.mi || null,
                       sort: local.sort === 'match' ? null : local.sort,
                       saved: local.savedOnly ? '1' : null,
                     });
@@ -274,21 +244,8 @@ export default function Discover() {
             </div>
           ))}
           <div style={S('margin-top:4px;padding:14px;border-radius:12px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.55 Geist;color:#6B635C')}>
-            Student projects do not carry the check themselves — they show the lead and the verified sponsor standing behind them.
+            Student projects do not carry the check themselves, they show the lead and the verified sponsor standing behind them.
           </div>
-        </div>
-      ),
-    });
-  }
-
-  function expandMap() {
-    openModal({
-      title: 'Openings near you',
-      subtitle: `${withinRadius} openings within ${state.prefs.radius} miles of ${state.account.zip}`,
-      size: 'wide',
-      body: (
-        <div style={S('border-radius:14px;overflow:hidden;border:1px solid #E8E1D9')}>
-          <MapPanel height={420} top={-120} left={-60} interactive />
         </div>
       ),
     });
@@ -375,7 +332,7 @@ export default function Discover() {
             aria-label="Search openings"
             autoComplete="off"
             value={draftQuery}
-            placeholder="Search “Saturday afternoon, food bank, under 5 miles”"
+            placeholder="Search “food bank, tutoring, Saturday afternoon”"
             onChange={(e) => {
               setDraftQuery(e.target.value);
               setShowSuggest(true);
@@ -408,7 +365,7 @@ export default function Discover() {
 
         <div
           className={H.input}
-          style={S('margin-top:10px;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;max-width:420px;transition:border-color .16s ease')}
+          style={S('margin-top:14px;display:flex;align-items:center;gap:10px;padding:13px 16px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;transition:border-color .16s ease')}
         >
           <span aria-hidden="true" style={S('color:#BEB5AC;font-size:14px')}>◎</span>
           <input
@@ -416,14 +373,15 @@ export default function Discover() {
             aria-label="Filter by location"
             autoComplete="off"
             value={near}
-            placeholder={`City or ZIP${state.account.city ? ` — e.g. ${String(state.account.city).split(',')[0]}` : ' — e.g. San Diego'}`}
+            placeholder={`City or ZIP${homeRegion ? `, e.g. ${homeRegion}` : ', e.g. Rivertown'}`}
             onChange={(e) => setParams({ near: e.target.value || null }, { replace: true })}
             style={S('flex:1;min-width:0;font:450 14px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
           />
-          {near ? (
+          {near && near !== homeRegion ? (
             <button
               type="button"
-              aria-label="Clear location"
+              aria-label="Reset to my area"
+              title="Reset to my area"
               className={cx(H.icon, H.press)}
               onClick={() => setParams({ near: null }, { replace: true })}
               style={S('flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#A9A097;font-size:12px;cursor:pointer;transition:background .16s ease')}
@@ -493,7 +451,7 @@ export default function Discover() {
             ) : null}
             {!suggestions.length && !state.recentSearches.length ? (
               <div style={S('padding:14px;font:450 13px/1.5 Geist;color:#8A8179')}>
-                Try a cause, an organization, a day, or a distance — “Saturday afternoon, food bank, under 5 miles”.
+                Try a cause, an organization, or a day, “Saturday afternoon, food bank, tutoring”.
               </div>
             ) : null}
           </div>

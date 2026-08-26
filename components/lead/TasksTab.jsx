@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   TasksTab.jsx — the task-based team workspace (leader end)
+   TasksTab.jsx, the task-based team workspace (leader end)
    Roles with briefings + a three-column task board. This replaces shifts,
    attendance and hours for projects whose orgType is 'team'.
    ========================================================================== */
@@ -153,7 +153,7 @@ export default function TasksTab({ p }) {
                     <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{r.name}</div>
                   </div>
                   <div style={S('margin-top:8px;font:450 12px/1.55 Geist;color:#57504A;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden')}>
-                    {r.briefing || 'No briefing yet — click to add one.'}
+                    {r.briefing || 'No briefing yet, click to add one.'}
                   </div>
                   <div style={S(`margin-top:10px;font:500 11px/1 ${MONO};color:#A9A097`)}>{count} member{count === 1 ? '' : 's'} · {taskCount} task{taskCount === 1 ? '' : 's'}</div>
                 </Pressable>
@@ -202,7 +202,7 @@ export default function TasksTab({ p }) {
                         {who ? (
                           <span style={S('display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 2px;border-radius:99px;background:#F6F2EE')}>
                             <span style={S('width:18px;height:18px;border-radius:50%;overflow:hidden;flex:none')}>
-                              <ImageSlot src={`https://picsum.photos/seed/${who.slug}/200/200?grayscale`} shape="circle" placeholder="face" />
+                              <ImageSlot src={''} shape="circle" placeholder="face" />
                             </span>
                             <span style={S('font:500 11px/1 Geist;color:#57504A')}>{who.short || who.n}</span>
                           </span>
@@ -215,7 +215,7 @@ export default function TasksTab({ p }) {
                           <Pressable label={`Move to ${PREV[task.status]}`} onClick={() => setTaskStatus(p.id, task.id, PREV[task.status])} className={cx(H.secondary, H.press)} style={S('flex:1;height:30px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 11px/1 Geist;color:#8A8179;cursor:pointer')}>‹ Back</Pressable>
                         ) : null}
                         {NEXT[task.status] ? (
-                          <Pressable label={`Move to ${NEXT[task.status]}`} onClick={() => { setTaskStatus(p.id, task.id, NEXT[task.status]); if (NEXT[task.status] === 'done') toast({ title: 'Nice — task done', tone: 'ok', timeout: 1800 }); }} className={cx(H.secondary, H.press)} style={S('flex:1;height:30px;border-radius:8px;border:1px solid #E7C0AC;background:#FAF6F3;font:600 11px/1 Geist;color:#C2603C;cursor:pointer')}>{NEXT[task.status] === 'done' ? 'Mark done ✓' : 'Advance ›'}</Pressable>
+                          <Pressable label={`Move to ${NEXT[task.status]}`} onClick={() => { setTaskStatus(p.id, task.id, NEXT[task.status]); if (NEXT[task.status] === 'done') toast({ title: 'Nice, task done', tone: 'ok', timeout: 1800 }); }} className={cx(H.secondary, H.press)} style={S('flex:1;height:30px;border-radius:8px;border:1px solid #E7C0AC;background:#FAF6F3;font:600 11px/1 Geist;color:#C2603C;cursor:pointer')}>{NEXT[task.status] === 'done' ? 'Mark done ✓' : 'Advance ›'}</Pressable>
                         ) : null}
                       </div>
                     </div>

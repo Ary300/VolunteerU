@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   PipelineTab.jsx — the QC pipeline every volunteer clears before shift one
+   PipelineTab.jsx, the QC pipeline every volunteer clears before shift one
    Leaders define the steps (a briefing call, a consent form, role training)
    and tick each volunteer through them. A volunteer with unfinished required
    steps can't be counted on a session.
@@ -38,7 +38,7 @@ export default function PipelineTab({ p }) {
         <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Volunteer pipeline</div>
         <div style={S('margin-top:6px;font:600 18px/1.3 Geist;letter-spacing:-0.02em;max-width:640px')}>Quality control before the first shift</div>
         <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C;max-width:640px')}>
-          Every volunteer you accept works through these steps first. Required steps must be clear before they can be staffed on a session — so a no-show at the briefing never becomes a no-show with a child.
+          Every volunteer you accept works through these steps first. Required steps must be clear before they can be staffed on a session, so a no-show at the briefing never becomes a no-show with a child.
         </div>
       </div>
 
@@ -68,7 +68,7 @@ export default function PipelineTab({ p }) {
                     {(step.link || '').trim() ? (
                       <div className="vu-trunc" style={S('margin-top:5px;font:450 12px/1.4 Geist;color:#5B6BB0')}>🔗 {step.link}</div>
                     ) : (STEP_FIELDS[step.kind] && STEP_FIELDS[step.kind].link && STEP_FIELDS[step.kind].link.required) ? (
-                      <div style={S('margin-top:5px;font:500 12px/1.4 Geist;color:#A8482A')}>No link yet — Edit to add one so volunteers can do this step.</div>
+                      <div style={S('margin-top:5px;font:500 12px/1.4 Geist;color:#A8482A')}>No link yet, Edit to add one so volunteers can do this step.</div>
                     ) : null}
                   </div>
                   <div style={S('display:flex;gap:6px;flex:none')}>
@@ -91,7 +91,7 @@ export default function PipelineTab({ p }) {
           </div>
         ) : (
           <div style={S('margin-top:14px')}>
-            <EmptyState compact title="No steps — volunteers work right away" body="Add a briefing, a consent form or role training to gate the first shift." cta="Add a step" onCta={() => editStep(null)} />
+            <EmptyState compact title="No steps, volunteers work right away" body="Add a briefing, a consent form or role training to gate the first shift." cta="Add a step" onCta={() => editStep(null)} />
           </div>
         )}
       </div>
@@ -110,7 +110,7 @@ export default function PipelineTab({ p }) {
                 <div key={person.id} className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;gap:16px')}>
                   <div style={S('display:flex;align-items:center;gap:11px;min-width:170px;flex:none')}>
                     <div style={S('width:34px;height:34px;border-radius:50%;overflow:hidden;flex:none')}>
-                      <ImageSlot src={`https://picsum.photos/seed/${person.slug}/200/200?grayscale`} shape="circle" placeholder="face" />
+                      <ImageSlot src={''} shape="circle" placeholder="face" />
                     </div>
                     <div style={S('min-width:0')}>
                       <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{person.n}</div>
@@ -194,7 +194,7 @@ function StepForm({ api, project, step }) {
         </div>
       ) : null}
       <div style={S('margin-top:14px')}>
-        <Field label="Note for the volunteer" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} placeholder="Optional — a line they see, e.g. what to bring." maxLength={140} />
+        <Field label="Note for the volunteer" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} placeholder="Optional, a line they see, e.g. what to bring." maxLength={140} />
       </div>
       <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
         <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}>Cancel</Pressable>

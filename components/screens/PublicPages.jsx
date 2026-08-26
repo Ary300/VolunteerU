@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   PublicPages.jsx — For schools, Safety, Privacy, and the 404 fallback
+   PublicPages.jsx, For schools, Safety, Privacy, and the 404 fallback
    Destinations for the design's footer and header links, built from the same
    marketing chrome the landing page uses.
    ========================================================================== */
@@ -79,7 +79,7 @@ export function Schools() {
 
       <Section title="What a counselor sees">
         A student grants access from their profile. You see the same record an organization sees when they apply: every event, the hours, whether the
-        student was on time, the score the organizer gave, and the note behind it. You cannot edit any of it — which is the point.
+        student was on time, the score the organizer gave, and the note behind it. You cannot edit any of it, which is the point.
       </Section>
 
       <Section title="Safeguarding">
@@ -153,13 +153,13 @@ export function Safety() {
       </div>
 
       <Section title="If something goes wrong">
-        Leave the situation and tell the staff lead first. Then file it from the project page — incidents are logged on the project record with a timestamp
+        Leave the situation and tell the staff lead first. Then file it from the project page, incidents are logged on the project record with a timestamp
         and sent to the sponsoring organization the same day. If you are a project lead, the incident form is in the Quality tab.
       </Section>
 
       <Section title="Reporting a listing">
-        Anything that looks wrong — an organization that cannot produce a staff contact, a shift that would leave you alone, a listing aimed at students
-        below its own age minimum — should be reported from the listing. Listings are pulled while we check.
+        Anything that looks wrong, an organization that cannot produce a staff contact, a shift that would leave you alone, a listing aimed at students
+        below its own age minimum, should be reported from the listing. Listings are pulled while we check.
       </Section>
       <div style={S('height:64px')} />
     </Shell>

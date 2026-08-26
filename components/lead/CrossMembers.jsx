@@ -1,12 +1,12 @@
 'use client';
 
 /* ==========================================================================
-   CrossMembers.jsx — people who joined THROUGH the app (cross-user)
+   CrossMembers.jsx, people who joined THROUGH the app (cross-user)
    These aren't local roster rows; they're real other-account volunteers who
    applied to your public link and were accepted. The founder assigns each one a
    role and tasks here; the assignment is written to that person's application
    row and shows up on their own home screen. Their progress flows back through
-   member_state. Founder-authoritative, member-reports — the guard trigger keeps
+   member_state. Founder-authoritative, member-reports, the guard trigger keeps
    the two halves from overwriting each other.
    ========================================================================== */
 
@@ -182,7 +182,7 @@ export function TeamMembersManager({ p }) {
       <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
         <div>
           <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Members from your link</div>
-          <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>People who applied through your public link and were accepted. Give each a role and tasks — it lands on their home screen.</div>
+          <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>People who applied through your public link and were accepted. Give each a role and tasks, it lands on their home screen.</div>
         </div>
         <Pressable label="Refresh members" onClick={reload} className={cx(H.secondary, H.press)} style={S('flex:none;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer')}>Refresh</Pressable>
       </div>

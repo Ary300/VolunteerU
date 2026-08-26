@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   MessageThread.jsx — a conversation tied to an application
+   MessageThread.jsx, a conversation tied to an application
    Opened from either side (founder or volunteer). Loads the thread, polls for
    replies, and sends. Kept simple and human so neither party leaves the app to
    talk.

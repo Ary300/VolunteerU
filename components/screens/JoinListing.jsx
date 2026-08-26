@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   JoinListing.jsx — the public page a shared link opens
+   JoinListing.jsx, the public page a shared link opens
    This is what a stranger sees when a founder shares their project link. It is
    the nonprofit's public profile AND the apply entry point: anyone can view it
    signed out; applying funnels through sign-in and lands back here. It reads the
@@ -126,7 +126,7 @@ export default function JoinListing({ id }) {
               <>
                 <div style={S('min-width:0')}>
                   <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>Want to join?</div>
-                  <div style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>{me ? 'Send an application and the organizer will be in touch.' : 'Sign in or make a free account to apply — it takes a minute.'}</div>
+                  <div style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>{me ? 'Send an application and the organizer will be in touch.' : 'Sign in or make a free account to apply, it takes a minute.'}</div>
                 </div>
                 <button type="button" onClick={apply} disabled={busy} className={cx(H.press)} style={S('flex:none;padding:0 20px;height:46px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 15px/1 Geist;cursor:pointer')}>
                   {busy ? 'Sending…' : me ? 'Apply to join' : 'Sign in to apply'}

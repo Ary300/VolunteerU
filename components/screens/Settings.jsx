@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Settings.jsx — account, notifications, privacy, appearance, data, about
+   Settings.jsx, account, notifications, privacy, appearance, data, about
    Built from the design system; the design implies these surfaces (sidebar
    account menu, permissions, counselor access) without drawing them.
    ========================================================================== */
@@ -263,7 +263,7 @@ function PreferencesSection({ state }) {
             <Chip key={c} label={c} role="checkbox" on={p.causes.includes(c)} py={9} px={13} fs={13} onClick={() => toggleInList('prefs.causes', c)} />
           ))}
         </div>
-        {!p.causes.length ? <div className="vu-hint">Nothing selected — we will show you everything nearby.</div> : null}
+        {!p.causes.length ? <div className="vu-hint">Nothing selected, we will show you everything nearby.</div> : null}
       </Panel>
 
       <Panel title="When you are free">
@@ -313,7 +313,7 @@ function NotificationsSection({ state }) {
         <ToggleRow label="Weekly digest" hint="Monday summary of hours, upcoming shifts and new matches." on={n.weeklyDigest} onChange={(v) => setPref('notifications.weeklyDigest', v)} />
         <ToggleRow label="Product news" hint="Occasional updates about new features. Off by default." on={n.productNews} onChange={(v) => setPref('notifications.productNews', v)} />
       </Panel>
-      <Panel title="How we send it" sub="In-app notifications are always on. Email and text delivery are rolling out — your choices here are saved and take effect when they do.">
+      <Panel title="How we send it" sub="In-app notifications are always on. Email and text delivery are rolling out, your choices here are saved and take effect when they do.">
         <ToggleRow label="Push notifications" on={n.channel.push} onChange={(v) => setPref('notifications.channel.push', v)} />
         <ToggleRow label="Email" on={n.channel.email} onChange={(v) => setPref('notifications.channel.email', v)} />
         <ToggleRow label="Text message" hint="Only for shift reminders and cancellations." on={n.channel.sms} onChange={(v) => setPref('notifications.channel.sms', v)} />
@@ -421,7 +421,7 @@ function PermissionsSection({ state }) {
                     timeout: 7000,
                   });
                 else if (result === 'unsupported') toast({ title: 'Not supported in this browser', tone: 'warn' });
-                else toast({ title: 'No answer given', message: 'Nothing changed — you can ask again any time.', tone: 'brand' });
+                else toast({ title: 'No answer given', message: 'Nothing changed, you can ask again any time.', tone: 'brand' });
               }}
               className={cx(H.secondary, H.press)}
               style={S('display:inline-flex;align-items:center;white-space:nowrap;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;cursor:pointer')}
@@ -472,7 +472,7 @@ function DataSection({ state, router }) {
             label="Download a full backup"
             onClick={() => {
               download('volunteeru-backup.json', exportState(), 'application/json');
-              toast({ title: 'Backup downloaded', message: 'Keep it somewhere safe — it restores everything.', tone: 'ok' });
+              toast({ title: 'Backup downloaded', message: 'Keep it somewhere safe, it restores everything.', tone: 'ok' });
             }}
             className={cx(H.secondary, H.press)}
             style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}
@@ -517,13 +517,13 @@ function DataSection({ state, router }) {
         </Pressable>
       </Panel>
 
-      <Panel title="Reset this device" sub="Clears the local copy of your workspace on this device and starts empty. Your cloud account and record are not deleted — sign in again to reload them.">
+      <Panel title="Reset this device" sub="Clears the local copy of your workspace on this device and starts empty. Your cloud account and record are not deleted, sign in again to reload them.">
         <Pressable
           label="Reset this device"
           onClick={async () => {
             const ok = await confirmDialog({
               title: 'Reset this device?',
-              body: 'The local copy of your workspace on this device is cleared and the app starts empty. Your account still exists — sign in to reload your record.',
+              body: 'The local copy of your workspace on this device is cleared and the app starts empty. Your account still exists, sign in to reload your record.',
               confirmLabel: 'Reset',
               requireText: 'RESET',
             });

@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Tabs.jsx — Attendance, Applications, Hours, Quality, Messages, Settings
+   Tabs.jsx, Attendance, Applications, Hours, Quality, Messages, Settings
    ========================================================================== */
 
 import { useEffect, useRef, useState } from 'react';
@@ -189,7 +189,7 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
                     <div key={a.personId} className={H.row} style={S('display:grid;grid-template-columns:1.7fr 1fr 1.3fr .6fr 1fr 1.5fr;gap:12px;padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease')}>
                       <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
                         <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-                          <ImageSlot src={`https://picsum.photos/seed/${a.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                          <ImageSlot src={''} shape="circle" placeholder="face" />
                         </div>
                         <div style={S('min-width:0')}>
                           <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{a.n}</div>
@@ -240,7 +240,7 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
                         className={locked ? '' : H.toInk}
                         style={s('font:450 12px/1.4 Geist;color:#6B635C;transition:color .16s ease', `cursor:${locked ? 'default' : 'pointer'}`)}
                       >
-                        {a.note || (locked ? '—' : 'Add a note')}
+                        {a.note || (locked ? '-' : 'Add a note')}
                       </Pressable>
                     </div>
                   );
@@ -393,7 +393,7 @@ function DebriefForm({ p }) {
               return;
             }
             updateProject(p.id, { debrief: { worked, fix } });
-            toast({ title: 'Debrief saved', message: 'Kept on your project record — share it with your organization anytime.', tone: 'ok' });
+            toast({ title: 'Debrief saved', message: 'Kept on your project record, share it with your organization anytime.', tone: 'ok' });
           }}
           className={cx(H.secondary, H.press)}
           style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease')}
@@ -634,7 +634,7 @@ export function ApplicationsTab({ p, params, setParam, goTab, onCopyLink }) {
               <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
                 <div style={S('display:flex;gap:13px;min-width:0')}>
                   <div style={S('width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <ImageSlot src={`https://picsum.photos/seed/${a.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                    <ImageSlot src={''} shape="circle" placeholder="face" />
                   </div>
                   <div style={S('min-width:0')}>
                     <div style={S('display:flex;align-items:center;gap:9px;flex-wrap:wrap')}>
@@ -875,7 +875,7 @@ export function HoursTab({ p }) {
             <div key={q.id} className={H.row} style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;transition:background .16s ease')}>
               <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
                 <div style={S('width:32px;height:32px;border-radius:50%;overflow:hidden;flex:none')}>
-                  <ImageSlot src={`https://picsum.photos/seed/${encodeURIComponent(q.n)}/400/400?grayscale`} shape="circle" placeholder="face" />
+                  <ImageSlot src={''} shape="circle" placeholder="face" />
                 </div>
                 <div style={S('min-width:0')}>
                   <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{q.n}</div>
@@ -1003,7 +1003,7 @@ export function QualityTab({ p, params, setParam, goTab }) {
                   <div key={r.slug} className={H.row} style={S('display:grid;grid-template-columns:1.8fr .8fr .6fr 1.1fr 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease')}>
                     <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
                       <div style={S('width:28px;height:28px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <ImageSlot src={`https://picsum.photos/seed/${r.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                        <ImageSlot src={''} shape="circle" placeholder="face" />
                       </div>
                       <div className="vu-trunc" style={S('font:500 13px/1 Geist')}>{r.n}</div>
                     </div>

@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Apply.jsx — design screen: `isApply`
+   Apply.jsx, design screen: `isApply`
    Three steps plus a confirmation. The draft survives navigating away.
    ========================================================================== */
 
@@ -133,7 +133,7 @@ export default function Apply({ id }) {
       toast({ title: 'Application sent', message: `${opp.org} will reply soon.`, tone: 'ok' });
     } catch (err) {
       if (err && err.code === 'OFFLINE') {
-        toast({ title: 'You are offline', message: 'Nothing was sent. Your answers are saved — try again once you reconnect.', tone: 'danger' });
+        toast({ title: 'You are offline', message: 'Nothing was sent. Your answers are saved, try again once you reconnect.', tone: 'danger' });
       } else if (err && err.code === 'DUPLICATE') {
         toast({ title: 'Already sending', message: 'Give it a second.', tone: 'warn' });
       } else {
@@ -162,7 +162,7 @@ export default function Apply({ id }) {
 
       <div style={S('margin-top:16px;display:flex;align-items:center;gap:12px')}>
         <div style={S('width:44px;height:44px;border-radius:11px;overflow:hidden;flex:none')}>
-          <ImageSlot src={`https://picsum.photos/seed/${opp.orgSlug}/400/400?grayscale`} shape="rounded" radius={11} placeholder="logo" />
+          <ImageSlot src={''} shape="rounded" radius={11} placeholder="logo" />
         </div>
         <div>
           <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
@@ -395,8 +395,8 @@ function StepReview({ opp, draft, account, sending, onSubmit, onBack }) {
   const role = opp.roles.find((r) => r.id === draft.roleId);
   const shift = opp.shifts.find((x) => x.id === draft.shiftId);
   const rows = [
-    ['Role', role ? role.t : '—'],
-    ['Shift', shift ? `${shift.d} · ${shift.tLong}` : '—'],
+    ['Role', role ? role.t : '-'],
+    ['Shift', shift ? `${shift.d} · ${shift.tLong}` : '-'],
     ['Hours credited', `${opp.hours.toFixed(1)} verified`],
     ['Counts toward school', opp.countsForSchool ? 'Yes' : 'No'],
   ];

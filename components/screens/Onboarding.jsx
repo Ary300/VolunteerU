@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Onboarding.jsx — design screen: `isOnboard`
+   Onboarding.jsx, design screen: `isOnboard`
    Two steps that branch on intent. Everything entered here carries into the
    workspace or the match feed, exactly as the copy promises.
    ========================================================================== */
@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Field, Select, Chip, ImageSlot, Pressable, TextArea } from '../ui.jsx';
+import { Field, Select, Chip, ImageSlot, Pressable, TextArea, countWords } from '../ui.jsx';
 import { Logo } from '../Logo.jsx';
 import { useSnapshot, update } from '../../lib/store.js';
 import { toast } from '../../lib/overlays.js';
@@ -43,7 +43,7 @@ const DEFAULT_START = {
   experience: 'First time',
 };
 
-const INTEREST_MAX = 150;
+const INTEREST_MAX_WORDS = 150;
 
 const DEFAULT_JOIN = {
   interest: '',
@@ -105,8 +105,8 @@ export default function Onboarding() {
       else if (start.mission.length > MISSION_MAX) e.mission = `Trim it to ${MISSION_MAX} characters.`;
       if (!start.positions.length) e.positions = 'Pick at least one position you need.';
     } else {
-      if (!join.interest.trim() || join.interest.trim().length < 8) e.interest = 'A sentence about what you want to do helps us match you.';
-      else if (join.interest.trim().length > INTEREST_MAX) e.interest = `Keep it under ${INTEREST_MAX} characters.`;
+      if (!join.interest.trim() || join.interest.trim().length < 8) e.interest = 'A few words about yourself and what you want to do helps us match you.';
+      else if (countWords(join.interest) > INTEREST_MAX_WORDS) e.interest = `Keep it to ${INTEREST_MAX_WORDS} words or less.`;
       if (!join.location.trim()) e.location = 'Where are you based? A city or area is enough.';
     }
     setErrors(e);
@@ -174,7 +174,7 @@ export default function Onboarding() {
 
       track('onboarding_completed', { intent, causes: isStart ? [start.cause] : join.causes, has_location: isStart ? !!start.site.trim() : !!join.location.trim() });
       if (isStart) {
-        toast({ title: 'Workspace created', message: 'Add your organization and open positions — you can request verification anytime.', tone: 'ok' });
+        toast({ title: 'Workspace created', message: 'Add your organization and open positions, you can request verification anytime.', tone: 'ok' });
         router.replace('/lead');
       } else {
         toast({ title: 'Matches ready', message: 'Ranked to your causes, radius and free time.', tone: 'ok' });
@@ -224,9 +224,9 @@ export default function Onboarding() {
             </div>
             <div style={S('margin-top:12px;display:flex;align-items:center;gap:10px')}>
               <div style={S('width:26px;height:26px;border-radius:50%;overflow:hidden;flex:none')}>
-                <ImageSlot src="https://picsum.photos/seed/ob_face/400/400?grayscale" shape="circle" placeholder="face" />
+                <ImageSlot src="" shape="circle" placeholder="face" />
               </div>
-              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Sofia K. · Grade 10</div>
+              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Nina K. · Grade 10</div>
             </div>
           </div>
         </div>
@@ -283,7 +283,7 @@ export default function Onboarding() {
                   value={identity.zip}
                   onChange={(v) => setIdentity((f) => ({ ...f, zip: v.replace(/\D/g, '').slice(0, 5) }))}
                   onEnter={next}
-                  placeholder="46220"
+                  placeholder="12345"
                   inputMode="numeric"
                   autoComplete="postal-code"
                   maxLength={5}
@@ -358,26 +358,26 @@ export default function Onboarding() {
                 </>
               ) : (
                 <>
-                  <h1 style={S('margin:14px 0 0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>What do you want to do</h1>
-                  <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Tell us in your own words and where you are. We match you to real openings — remote and in person — by cross-referencing what you wrote.</p>
+                  <h1 style={S('margin:14px 0 0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>Tell us about yourself</h1>
+                  <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Write it in your own words, no boxes to check. We read what you wrote and rank real openings (remote and in person) to match your interests, skills and free time.</p>
                   <div style={S('margin-top:22px')}>
                     <TextArea
-                      label="In a sentence or two, what do you want to do?"
+                      label="In 150 words or less, describe yourself. What are your interests? What do you want to do?"
                       value={join.interest}
                       onChange={(v) => setJoin((f) => ({ ...f, interest: v }))}
-                      maxLength={INTEREST_MAX}
+                      maxWords={INTEREST_MAX_WORDS}
                       counter
-                      minHeight={84}
-                      placeholder="e.g. Tutor kids in reading, help at a food bank on weekends, or anything with animals."
+                      minHeight={140}
+                      placeholder="e.g. I love chemistry and biology and I'm good at explaining things to younger students. I'd like to tutor middle schoolers, preferably on weekends somewhere close to me."
                       error={errors.interest}
                     />
                   </div>
                   <div className="vu-2col-keep" style={S('margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-                    <Field label="Where are you?" value={join.location} onChange={(v) => setJoin((f) => ({ ...f, location: v }))} placeholder="City or area — e.g. San Diego" maxLength={60} required error={errors.location} />
+                    <Field label="Where are you?" value={join.location} onChange={(v) => setJoin((f) => ({ ...f, location: v }))} placeholder="City or area, e.g. Rivertown" maxLength={60} required error={errors.location} />
                     <Select label="How far can you travel" value={join.radius} onChange={(v) => setJoin((f) => ({ ...f, radius: v }))} options={RADIUS_OPTIONS} />
                   </div>
 
-                  <div id="ob-cause" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>Causes you care about <span style={S('color:#A9A097;font-weight:400')}>(optional — sharpens your matches)</span></div>
+                  <div id="ob-cause" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>Causes you care about <span style={S('color:#A9A097;font-weight:400')}>(optional, sharpens your matches)</span></div>
                   <div role="group" aria-labelledby="ob-cause" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
                     {CAUSES.map((c) => (
                       <Chip key={c} label={c} on={join.causes.includes(c)} onClick={() => toggleCause(c)} py={10} px={14} fs={14} role="checkbox" />

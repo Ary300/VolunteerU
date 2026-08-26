@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Misc.jsx — notification centre, shortlist, friends going, peer project page
+   Misc.jsx, notification centre, shortlist, friends going, peer project page
    ========================================================================== */
 
 import { useEffect, useState } from 'react';

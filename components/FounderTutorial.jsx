@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   FounderTutorial.jsx — the walkthrough a founder sees the first time they land
+   FounderTutorial.jsx, the walkthrough a founder sees the first time they land
    in the Lead workspace after publishing a project. Explains how to run it:
    recruit, review applications, take attendance (which verifies events), and
    confirm hours. Marks itself seen (meta.founderTutorialSeen) so it shows once.
@@ -18,18 +18,18 @@ const MONO = "'Geist Mono',monospace";
 
 // A volunteer program runs shifts, a pipeline and verified attendance…
 const VOLUNTEER_STEPS = [
-  { icon: '🎉', title: 'Your project is live', body: 'Nice — it is published and volunteers can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
-  { icon: '🔗', title: 'Recruit your crew', body: 'Use “Copy recruit link” at the top to share your project anywhere. Anyone who opens it can apply — no account hoops for you to manage.' },
+  { icon: '🎉', title: 'Your project is live', body: 'Nice, it is published and volunteers can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
+  { icon: '🔗', title: 'Recruit your crew', body: 'Use “Copy recruit link” at the top to share your project anywhere. Anyone who opens it can apply, no account hoops for you to manage.' },
   { icon: '📋', title: 'Review applications', body: 'New applicants land in the Applications tab. Accept the ones you want and they move onto your crew, ready to be scheduled.' },
-  { icon: '◷', title: 'Set the pipeline', body: 'In the Pipeline tab, add the steps a volunteer clears before their first shift — a Zoom briefing, a consent form, role training. Paste the real link so they can actually do it.' },
+  { icon: '◷', title: 'Set the pipeline', body: 'In the Pipeline tab, add the steps a volunteer clears before their first shift, a Zoom briefing, a consent form, role training. Paste the real link so they can actually do it.' },
   { icon: '✓', title: 'Run sessions & take attendance', body: 'Create shifts, then take attendance after each session. Marking attendance is what turns a session into a verified event on the record.' },
-  { icon: '⭐', title: 'Confirm hours', body: 'When a volunteer logs hours, confirm them in the Hours tab. Confirmed hours become verified on that volunteer’s record — the whole point.' },
+  { icon: '⭐', title: 'Confirm hours', body: 'When a volunteer logs hours, confirm them in the Hours tab. Confirmed hours become verified on that volunteer’s record, the whole point.' },
 ];
 
 // …a task team runs roles, briefings and a board instead.
 const TEAM_STEPS = [
-  { icon: '🎉', title: 'Your team is live', body: 'Nice — it is published and people can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
-  { icon: '🔗', title: 'Recruit your team', body: 'Use “Copy recruit link” at the top to share it anywhere. Anyone who opens it can apply — no account hoops for you to manage.' },
+  { icon: '🎉', title: 'Your team is live', body: 'Nice, it is published and people can find it. Here is how to run it from this workspace. Ninety seconds, and you can skip any time.' },
+  { icon: '🔗', title: 'Recruit your team', body: 'Use “Copy recruit link” at the top to share it anywhere. Anyone who opens it can apply, no account hoops for you to manage.' },
   { icon: '📋', title: 'Review applications', body: 'New applicants land in the Applications view. Accept the ones you want and they join your team.' },
   { icon: '◈', title: 'Assign roles & briefings', body: 'In the Team tab, give each member a role with a short briefing so they know exactly what they own.' },
   { icon: '☑', title: 'Run the task board', body: 'In the Tasks tab, add tasks and assign them. Move each to done as your team ships the work.' },

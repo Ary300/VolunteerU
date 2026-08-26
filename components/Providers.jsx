@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Providers.jsx — client root
+   Providers.jsx, client root
    Hydrates the persisted store, mirrors accessibility preferences onto <html>,
    enforces route guards, and hosts overlays plus the design's screen nav.
    ========================================================================== */

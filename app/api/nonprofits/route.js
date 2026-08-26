@@ -1,9 +1,9 @@
 /* ==========================================================================
-   /api/nonprofits — real nonprofit search, no AI.
+   /api/nonprofits, real nonprofit search, no AI.
    Server-side proxy to ProPublica's Nonprofit Explorer (public IRS 990 data).
    Proxied here because the upstream API sends no CORS headers, so the browser
    cannot call it directly. Returns normalized cards: real registered nonprofits
-   by name/keyword, state and cause. Nothing is generated — every row is a real
+   by name/keyword, state and cause. Nothing is generated, every row is a real
    organization with an EIN you can look up.
    ========================================================================== */
 

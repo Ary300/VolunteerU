@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   DiscoverListings.jsx — real student projects from other founders
+   DiscoverListings.jsx, real student projects from other founders
    The cross-user half of discovery: projects other people published, that this
    volunteer can apply to in one tap. The application lands in the founder's
    workspace. Renders nothing until there is something real to show.
@@ -59,7 +59,7 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
   }
   const shown = listings;
   if (shown.length === 0) {
-    // The match feed stays silent — its mount points (Home, Discover) each carry
+    // The match feed stays silent, its mount points (Home, Discover) each carry
     // their own forward CTA, so a blank match section is never a dead end.
     if (mode === 'match') return null;
     return (
@@ -69,8 +69,8 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
         </div>
         <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#8A8179')}>
           {active
-            ? 'Try a broader search, clear a filter, or check back — new projects are published all the time.'
-            : 'Be the first wave — new student projects and nonprofits are posting openings now. Check back soon, or start your own.'}
+            ? 'Try a broader search, clear a filter, or check back, new projects are published all the time.'
+            : 'Be the first wave, new student projects and nonprofits are posting openings now. Check back soon, or start your own.'}
         </div>
       </div>
     );
@@ -108,7 +108,7 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
         <div style={S('display:flex;flex-direction:column;gap:16px')}>
           {listing.verified ? (
             <div style={S(`display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:#EAF3EC;font:500 12px/1.3 Geist;color:#3F6B4E`)}>
-              <span aria-hidden="true">✓</span> Verified organization — a reviewer confirmed this group and a named staff contact.
+              <span aria-hidden="true">✓</span> Verified organization, a reviewer confirmed this group and a named staff contact.
             </div>
           ) : null}
           {(listing.events_hosted || listing.approx_volunteers) ? (

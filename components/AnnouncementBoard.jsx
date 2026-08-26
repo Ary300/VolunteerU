@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   AnnouncementBoard.jsx — a nonprofit's message board
+   AnnouncementBoard.jsx, a nonprofit's message board
    The founder posts updates that every member (and anyone with the join link)
    sees. Backed by listings.announcements, so it's cross-user and saved. Pass
    canPost for the leader view; leave it off for the read-only member/public view.
@@ -71,7 +71,7 @@ export default function AnnouncementBoard({ listingId, canPost = false, compact 
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Post an update for your team — a reminder, a thank-you, what's next."
+              placeholder="Post an update for your team, a reminder, a thank-you, what's next."
               className={H.input}
               maxLength={1000}
               style={S('display:block;width:100%;padding:12px 14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:64px;font:450 14px/1.55 Geist;color:#332D28;resize:vertical')}

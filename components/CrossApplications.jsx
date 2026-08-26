@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   CrossApplications.jsx — real applications from other volunteers
+   CrossApplications.jsx, real applications from other volunteers
    Shown at the top of the Lead workspace so a founder never misses someone who
    wants to join. Reads the shared applications table; accept/decline writes
    straight back. Renders nothing when there is nothing pending.

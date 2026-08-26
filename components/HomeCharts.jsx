@@ -1,9 +1,9 @@
 'use client';
 
 /* ==========================================================================
-   HomeCharts.jsx — two small at-a-glance charts on Home, both from real data:
+   HomeCharts.jsx, two small at-a-glance charts on Home, both from real data:
    where the volunteer's hours go (by category) and the split between verified
-   and still-pending hours. No fake series — it reflects exactly what they have
+   and still-pending hours. No fake series, it reflects exactly what they have
    logged. Renders a gentle prompt until there is something to chart.
    ========================================================================== */
 
@@ -58,7 +58,7 @@ export default function HomeCharts() {
           </div>
         ) : (
           <div style={S('margin-top:16px;font:450 13px/1.6 Geist;color:#8A8179')}>
-            Log volunteering with a category and this fills in — you will see exactly where your time goes.
+            Log volunteering with a category and this fills in, you will see exactly where your time goes.
           </div>
         )}
       </div>

@@ -2,7 +2,7 @@ import './globals.css';
 import Providers from '../components/Providers.jsx';
 
 export const metadata = {
-  title: 'VolunteerU — volunteering built around you',
+  title: 'VolunteerU, volunteering built around you',
   description:
     'Tell us who you are and we find real openings near you, or hand you everything you need to run your own organization. Either way the hours verify themselves.',
   applicationName: 'VolunteerU',

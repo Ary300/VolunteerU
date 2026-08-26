@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   AppShell.jsx — the signed-in chrome (design: the `inApp` two-column grid)
+   AppShell.jsx, the signed-in chrome (design: the `inApp` two-column grid)
    ========================================================================== */
 
 import { useEffect } from 'react';
@@ -18,7 +18,7 @@ import FounderTutorial from './FounderTutorial.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-/* Weekly volunteering streak — the flame animates in on every visit, and the
+/* Weekly volunteering streak, the flame animates in on every visit, and the
    count pops when it changes. Keyframes live in globals.css (vu-flame, vu-pop). */
 function StreakCard({ weeks }) {
   const active = weeks > 0;

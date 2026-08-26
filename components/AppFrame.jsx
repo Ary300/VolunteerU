@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   AppFrame.jsx — client boundary for every signed-in screen
+   AppFrame.jsx, client boundary for every signed-in screen
 
    Every screen reads state that only exists in the browser (localStorage) and
    URL search params, so there is nothing meaningful for the server to render.

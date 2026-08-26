@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   AnalyticsProvider.jsx — boots PostHog once and records a pageview on every
+   AnalyticsProvider.jsx, boots PostHog once and records a pageview on every
    client route change (the App Router doesn't fire one on SPA navigation).
    Renders nothing. Mounted once by Providers.
    ========================================================================== */

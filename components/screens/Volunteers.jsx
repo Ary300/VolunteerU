@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Volunteers.jsx — the volunteer directory (find people, not projects)
+   Volunteers.jsx, the volunteer directory (find people, not projects)
    The flip side of Discover: search every listed volunteer across accounts by
    name/skills, cause and city. Real server-side search over volunteer_directory.
    A founder recruiting, or a volunteer finding peers, lands here.
@@ -54,7 +54,7 @@ export default function Volunteers() {
             </div>
             <div>
               <div style={S('font:600 18px/1.2 Geist;letter-spacing:-0.02em')}>{v.name}</div>
-              <div style={S('margin-top:4px;font:450 13px/1.3 Geist;color:#8A8179')}>{[v.city, v.grade ? `Grade ${v.grade}` : null].filter(Boolean).join(' · ') || '—'}</div>
+              <div style={S('margin-top:4px;font:450 13px/1.3 Geist;color:#8A8179')}>{[v.city, v.grade ? `Grade ${v.grade}` : null].filter(Boolean).join(' · ') || '-'}</div>
             </div>
             <div style={S('margin-left:auto;text-align:right;flex:none')}>
               <div style={S('font:600 24px/1 Geist;letter-spacing:-0.03em;color:#1A1714')}>{v.verified_hours || 0}</div>
@@ -77,7 +77,7 @@ export default function Volunteers() {
             </div>
           ) : null}
           <div style={S('padding:12px 14px;border-radius:11px;background:#FAF6F3;border:1px solid #EFE3DC;font:450 12px/1.5 Geist;color:#8A5A20')}>
-            To bring them on, share your project’s join link — they apply, and you accept them into your workspace.
+            To bring them on, share your project’s join link, they apply, and you accept them into your workspace.
           </div>
         </div>
       ),
@@ -107,7 +107,7 @@ export default function Volunteers() {
       </div>
       <div className={H.input} style={S('margin-top:10px;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;max-width:420px')}>
         <span aria-hidden="true" style={S('color:#BEB5AC;font-size:14px')}>◎</span>
-        <input type="text" aria-label="Filter by city" autoComplete="off" value={near} placeholder="City or ZIP — e.g. San Diego" onChange={(e) => setNear(e.target.value)} style={S('flex:1;min-width:0;font:450 14px/1 Geist;color:#1A1714;background:none;border:none;padding:0')} />
+        <input type="text" aria-label="Filter by city" autoComplete="off" value={near} placeholder="City or ZIP, e.g. Rivertown" onChange={(e) => setNear(e.target.value)} style={S('flex:1;min-width:0;font:450 14px/1 Geist;color:#1A1714;background:none;border:none;padding:0')} />
         {near ? <button type="button" aria-label="Clear location" onClick={() => setNear('')} style={S('flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#A9A097;font-size:12px;cursor:pointer;border:0;background:none')}>✕</button> : null}
       </div>
 

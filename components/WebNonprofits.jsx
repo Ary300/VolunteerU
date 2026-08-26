@@ -1,8 +1,8 @@
 'use client';
 
 /* ==========================================================================
-   WebNonprofits.jsx — real registered nonprofits from the web (no AI).
-   ProPublica / IRS data (via /api/nonprofits) supplies the card info — name,
+   WebNonprofits.jsx, real registered nonprofits from the web (no AI).
+   ProPublica / IRS data (via /api/nonprofits) supplies the card info, name,
    cause, city/state, EIN. Clicking a card opens a web search for that exact
    org so the volunteer lands on its real website / contact page (we can't pull
    a website URL reliably without AI, so we link out instead of faking a page).

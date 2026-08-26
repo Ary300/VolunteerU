@@ -1,9 +1,9 @@
 'use client';
 
 /* ==========================================================================
-   VolunteerApplications.jsx — a volunteer's own applications
+   VolunteerApplications.jsx, a volunteer's own applications
    Everything they applied to, where each one stands, and a way to message the
-   founder — so they never have to leave the app to follow up. Renders nothing
+   founder, so they never have to leave the app to follow up. Renders nothing
    until they have applied to something real.
    ========================================================================== */
 
@@ -37,7 +37,7 @@ export default function VolunteerApplications({ showEmpty = false }) {
       <div style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
         <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Your applications</div>
         <div style={S('margin-top:12px;padding:14px;border-radius:11px;border:1px dashed #E4DDD4;background:#FCFAF8;font:450 13px/1.55 Geist;color:#8A8179')}>
-          No applications yet. Apply to a project and it tracks here — under review, accepted, or not this time.
+          No applications yet. Apply to a project and it tracks here, under review, accepted, or not this time.
         </div>
       </div>
     );

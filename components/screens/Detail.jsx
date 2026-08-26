@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Detail.jsx — design screen: `isDetail` (one opportunity)
+   Detail.jsx, design screen: `isDetail` (one opportunity)
    ========================================================================== */
 
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -51,7 +51,7 @@ export default function Detail({ id }) {
   function directions() {
     openModal({
       title: 'Getting there',
-      subtitle: `${opp.address} · ${opp.distance} mi from ${'46220'}`,
+      subtitle: `${opp.address} · ${opp.distance} mi from ${'12345'}`,
       body: (
         <div>
           <div style={S('border-radius:12px;overflow:hidden;border:1px solid #E8E1D9')}>

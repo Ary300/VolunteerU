@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Tutorial.jsx — the one-time welcome walkthrough. Shows on the first visit to
+   Tutorial.jsx, the one-time welcome walkthrough. Shows on the first visit to
    the signed-in app (once onboarding is done), explains the main surfaces, then
    marks itself seen on the account so it never shows again. Mounted by AppShell.
    ========================================================================== */
@@ -22,17 +22,17 @@ const STEPS = [
   {
     icon: '◎',
     title: 'Discover real openings',
-    body: 'Search by cause and location to find student projects and registered nonprofits near you — pulled from real data, no fakes. Cards link straight to how to help.',
+    body: 'Search by cause and location to find student projects and registered nonprofits near you, pulled from real data, no fakes. Cards link straight to how to help.',
   },
   {
     icon: '❖',
-    title: 'My crew — your home base',
+    title: 'My crew, your home base',
     body: 'Every project you join lives here: the steps to clear before your first shift (with the organizer’s links), check-in, your hours, announcements, and a direct message to each organizer.',
   },
   {
     icon: '＋',
     title: 'Log your hours',
-    body: 'Log volunteering from Home or your record — what you did, the category, and how long. The organizer confirms it, and confirmed hours become verified on your record.',
+    body: 'Log volunteering from Home or your record, what you did, the category, and how long. The organizer confirms it, and confirmed hours become verified on your record.',
   },
   {
     icon: '🔥',

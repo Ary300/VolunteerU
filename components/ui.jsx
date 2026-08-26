@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   ui.jsx — the design system, expressed once
+   ui.jsx, the design system, expressed once
    Each primitive takes the design's literal numbers (height, padding, radius,
    font size) so call sites stay 1:1 with `VolunteerU Design.dc.html` while
    sharing a single implementation.
@@ -53,7 +53,7 @@ export function ImageSlot({ src, shape = 'rounded', radius = 12, placeholder = '
 }
 
 /* An identity avatar for REAL people. Shows their real photo if we have one,
-   otherwise their initials — never a stock face, so a real volunteer is never
+   otherwise their initials, never a stock face, so a real volunteer is never
    represented by someone else's photo. Colors are drawn only from the design's
    own warm token pairs (the same tints used for badges/slots), so it reads as a
    native placeholder rather than an off-palette element. Fills its (already
@@ -354,6 +354,12 @@ export function Field({
   );
 }
 
+/** Words in a string, whitespace-separated. Empty/whitespace counts as 0. */
+export function countWords(str) {
+  const t = String(str || '').trim();
+  return t ? t.split(/\s+/).length : 0;
+}
+
 export function TextArea({
   label,
   value = '',
@@ -361,6 +367,7 @@ export function TextArea({
   placeholder = '',
   minHeight = 80,
   maxLength,
+  maxWords,
   counter,
   error,
   hint,
@@ -375,6 +382,10 @@ export function TextArea({
   const fid = id || auto;
   const eid = `${fid}-err`;
   const len = String(value || '').length;
+  const words = countWords(value);
+  // A word cap keeps a generous char safety net so paste-bombs can't blow up the
+  // field, but the visible counter and the over-limit flag track words.
+  const charGuard = maxWords ? maxWords * 12 : maxLength;
   return (
     <div>
       {label ? (
@@ -387,7 +398,11 @@ export function TextArea({
               </span>
             ) : null}
           </label>
-          {counter && maxLength ? (
+          {counter && maxWords ? (
+            <div className="vu-count" data-over={words > maxWords ? 'true' : 'false'}>
+              {words} / {maxWords} words
+            </div>
+          ) : counter && maxLength ? (
             <div className="vu-count" data-over={len > maxLength ? 'true' : 'false'}>
               {len} / {maxLength}
             </div>
@@ -399,7 +414,7 @@ export function TextArea({
         name={name}
         value={value}
         placeholder={placeholder}
-        maxLength={maxLength}
+        maxLength={charGuard}
         required={required}
         aria-label={ariaLabel}
         aria-invalid={error ? 'true' : undefined}
@@ -563,7 +578,7 @@ export function Toggle({ on, onChange, label, disabled }) {
   );
 }
 
-/** Selectable chip — the design's pill in both selected and idle states. */
+/** Selectable chip, the design's pill in both selected and idle states. */
 export function Chip({ label, on, onClick, py = 10, px = 14, r = 10, fs = 14, role = 'button', ariaLabel, count }) {
   const isCheckbox = role === 'checkbox';
   return (

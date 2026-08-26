@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Auth.jsx — sign in, sign up, forgot / reset password
+   Auth.jsx, sign in, sign up, forgot / reset password
    The design shows a "Sign in" entry point but no auth screens, so these are
    built from the same split layout the onboarding screen uses.
    ========================================================================== */
@@ -148,7 +148,7 @@ export default function Auth({ mode = 'signin' }) {
       }
     } catch (err) {
       if (err && err.code === 'OFFLINE') {
-        toast({ title: 'You are offline', message: 'Reconnect and try again — nothing was sent.', tone: 'danger' });
+        toast({ title: 'You are offline', message: 'Reconnect and try again, nothing was sent.', tone: 'danger' });
       } else if (err && err.code === 'AUTH') {
         toast({ title: mode === 'signup' ? 'Could not create your account' : 'Could not sign you in', message: err.message, tone: 'danger' });
       } else if (err && err.code !== 'DUPLICATE') {
@@ -184,9 +184,9 @@ export default function Auth({ mode = 'signin' }) {
             </div>
             <div style={S('margin-top:12px;display:flex;align-items:center;gap:10px')}>
               <div style={S('width:26px;height:26px;border-radius:50%;overflow:hidden;flex:none')}>
-                <ImageSlot src="https://picsum.photos/seed/proof2/400/400?grayscale" shape="circle" placeholder="face" />
+                <ImageSlot src="" shape="circle" placeholder="face" />
               </div>
-              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Deven A. · Grade 12</div>
+              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Rowan O. · Grade 12</div>
             </div>
           </div>
         </div>

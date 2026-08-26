@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   OfflineBanner.jsx — only rendered while the network is actually down, so it
+   OfflineBanner.jsx, only rendered while the network is actually down, so it
    never changes the default appearance of any screen.
    ========================================================================== */
 
@@ -15,7 +15,7 @@ export default function OfflineBanner() {
   const offline = !ephemeral.online;
   const noStorage = !storageAvailable();
   // Online, but the cloud sync keeps failing (flaky WiFi / server). Local data
-  // is safe; we keep retrying — but tell the user rather than pretend it saved.
+  // is safe; we keep retrying, but tell the user rather than pretend it saved.
   const syncTrouble = !offline && ephemeral.saveStatus === 'error';
   if (!offline && !noStorage && !syncTrouble) return null;
 
@@ -23,7 +23,7 @@ export default function OfflineBanner() {
     ? 'You are offline. Your changes are saved on this device and will sync automatically when you reconnect.'
     : noStorage
       ? 'This browser is blocking local storage, so changes will not survive a reload.'
-      : 'Trouble saving to the cloud — your changes are safe on this device and we are retrying.';
+      : 'Trouble saving to the cloud, your changes are safe on this device and we are retrying.';
 
   return (
     <div

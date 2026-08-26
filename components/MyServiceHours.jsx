@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   MyServiceHours.jsx — the volunteer's real, org-confirmed hours
+   MyServiceHours.jsx, the volunteer's real, org-confirmed hours
    The other end of the verified-hours loop: a volunteer logs hours against a
    project they joined, the organizer confirms them, and confirmed hours show
    here on the record as verified. Renders nothing until they've logged any.
@@ -53,7 +53,7 @@ export default function MyServiceHours() {
         ))}
       </div>
       <div style={S('margin-top:12px;font:450 12px/1.55 Geist;color:#8A8179')}>
-        Confirmed hours are verified by the organization that ran the work — the record a school or scholarship can trust.
+        Confirmed hours are verified by the organization that ran the work, the record a school or scholarship can trust.
       </div>
     </div>
   );

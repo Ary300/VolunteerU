@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Create.jsx — design screen: `isCreate` (new project wizard)
+   Create.jsx, design screen: `isCreate` (new project wizard)
    ========================================================================== */
 
 import { useEffect, useState } from 'react';
@@ -153,7 +153,7 @@ export default function Create() {
       const project = await perform('create.publish', () => createProject(payload));
       toast({
         title: `${project.name} is live`,
-        message: isTeam ? 'Share the join link and start assigning tasks.' : 'Share your join link to recruit volunteers — you can request verification anytime.',
+        message: isTeam ? 'Share the join link and start assigning tasks.' : 'Share your join link to recruit volunteers, you can request verification anytime.',
         tone: 'ok',
       });
       router.replace(`/lead/${project.id}/overview`);
@@ -383,12 +383,12 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
           bg="#FCFAF8"
           fs={14}
           error={errors.founderExperience}
-          placeholder="A sentence or two — where you have volunteered and roughly how much."
+          placeholder="A sentence or two, where you have volunteered and roughly how much."
         />
         <div className="vu-hint" style={S('margin-top:7px;font:450 12px/1.5 Geist;color:#8A8179')}>
           {hasHours
-            ? 'We can see your verified hours in-app, so this is optional — but a line here helps sponsors trust a new project.'
-            : 'Founders do a little volunteering before leading. Just a sentence or two — nothing formal.'}
+            ? 'We can see your verified hours in-app, so this is optional, but a line here helps sponsors trust a new project.'
+            : 'Founders do a little volunteering before leading. Just a sentence or two, nothing formal.'}
         </div>
       </div>
 
@@ -433,7 +433,7 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
           fs={14}
           maxLength={90}
           required={d.delivery !== 'remote'}
-          placeholder={d.delivery === 'remote' ? 'e.g. Portland, OR — or leave blank' : undefined}
+          placeholder={d.delivery === 'remote' ? 'e.g. Portland, OR, or leave blank' : undefined}
           error={errors.site}
         />
         <Field label="Website or social link" value={d.website} onChange={(v) => set({ website: v })} placeholder="Optional" bg="#FCFAF8" fs={14} type="url" error={errors.website} />
@@ -504,7 +504,7 @@ function Step2({ d, set, errors, onNext, onBack }) {
   function useTemplate(e) {
     menuFromEvent(
       e,
-      projectTemplates.map((t) => ({ key: t.id, label: `${t.t} — ${t.m}`, icon: '◈' })),
+      projectTemplates.map((t) => ({ key: t.id, label: `${t.t}, ${t.m}`, icon: '◈' })),
       (key) => {
         const t = projectTemplates.find((x) => x.id === key);
         if (!t) return;
@@ -720,7 +720,7 @@ function Step3({ d, set, errors, onNext, onBack }) {
         steps={d.pipeline}
         onChange={(pipeline) => set({ pipeline })}
         title="Before their first shift"
-        blurb="Quality control for new volunteers. Everyone you accept clears these steps before they can work a session — a briefing call, a consent form, role training. Reorder or remove any that do not apply."
+        blurb="Quality control for new volunteers. Everyone you accept clears these steps before they can work a session, a briefing call, a consent form, role training. Reorder or remove any that do not apply."
       />
 
       <div className="vu-stack vu-stack-gap" style={S('margin-top:24px;display:flex;align-items:center;gap:12px')}>
@@ -758,7 +758,7 @@ export function stepNeedsLink(s) {
 }
 
 /* Shared pipeline editor: a list of QC steps, edited inline. Each step collects
-   the details the volunteer needs to actually do it — no reorder arrows. */
+   the details the volunteer needs to actually do it, no reorder arrows. */
 function PipelineEditor({ steps, onChange, title, blurb }) {
   const setStep = (i, patch) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const remove = (i) => onChange(steps.filter((_, j) => j !== i));
@@ -854,7 +854,7 @@ function Step4({ d, publishing, onPublish, onBack, account, isTeam }) {
         ['Type', 'Volunteer program · shifts'],
         ['Positions', `${d.positions.length} defined, ${slots} slots`],
         ['Sessions', `${sessions.length} ${/one time/i.test(d.repeats) ? 'one off' : 'weekly'}`],
-        ['Pipeline', pipe.length ? `${pipe.length} step${pipe.length === 1 ? '' : 's'} before first shift` : 'None — volunteers work right away'],
+        ['Pipeline', pipe.length ? `${pipe.length} step${pipe.length === 1 ? '' : 's'} before first shift` : 'None, volunteers work right away'],
         ['Applications', d.audience.length ? d.audience.join(', ') : 'Open to everyone'],
       ];
   return (
@@ -912,7 +912,7 @@ function Step2Team({ d, set, errors, onNext, onBack }) {
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>Step 2 of 4</div>
       <h2 style={S('margin:14px 0 0;font:600 26px/1.1 Geist;letter-spacing:-0.035em')}>Roles and briefings</h2>
       <div style={S('margin-top:8px;font:450 14px/1.5 Geist;color:#6B635C;max-width:620px')}>
-        Every member joins a role. The briefing is what they read first — what the role owns, how you work, and where to look. Members confirm they read it before their tasks unlock.
+        Every member joins a role. The briefing is what they read first, what the role owns, how you work, and where to look. Members confirm they read it before their tasks unlock.
       </div>
 
       <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:14px')}>
@@ -921,7 +921,7 @@ function Step2Team({ d, set, errors, onNext, onBack }) {
             <div style={S('display:flex;align-items:center;gap:10px')}>
               <div style={s('width:10px;height:10px;border-radius:50%;flex:none', `background:${r.color || '#C2603C'}`)} />
               <div style={S('flex:1;min-width:0')}>
-                <Field label="" value={r.name} onChange={(v) => setRole(i, { name: v })} placeholder="Role name — e.g. Outreach lead" bg="#fff" fs={14} maxLength={40} />
+                <Field label="" value={r.name} onChange={(v) => setRole(i, { name: v })} placeholder="Role name, e.g. Outreach lead" bg="#fff" fs={14} maxLength={40} />
               </div>
               <Pressable label="Remove role" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:30px;height:30px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 13px/1 Geist;color:#A8482A;cursor:pointer;flex:none')}>✕</Pressable>
             </div>
@@ -974,14 +974,14 @@ function Step3Team({ d, set, errors, onNext, onBack }) {
       <div style={S('margin-top:20px;display:flex;flex-direction:column;gap:10px')}>
         {tasks.map((t, i) => (
           <div key={t.id || i} className="vu-2col-keep" style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;display:grid;grid-template-columns:1fr 200px 34px;gap:12px;align-items:center')}>
-            <Field label="" value={t.title} onChange={(v) => setTask(i, { title: v })} placeholder="Task — e.g. Draft the outreach email" bg="#fff" fs={14} maxLength={80} />
+            <Field label="" value={t.title} onChange={(v) => setTask(i, { title: v })} placeholder="Task, e.g. Draft the outreach email" bg="#fff" fs={14} maxLength={80} />
             <Select label="" value={t.roleId || ''} options={roleOpts} onChange={(v) => setTask(i, { roleId: v })} bg="#fff" fs={13} />
             <Pressable label="Remove task" onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('width:30px;height:30px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>✕</Pressable>
           </div>
         ))}
         {!tasks.length ? (
           <div style={S('padding:16px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.5 Geist;color:#8A8179;text-align:center')}>
-            No starter tasks. That is fine — you can build the board once you publish.
+            No starter tasks. That is fine, you can build the board once you publish.
           </div>
         ) : null}
       </div>

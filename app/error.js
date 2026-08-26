@@ -19,7 +19,7 @@ export default function GlobalError({ error, reset }) {
         </div>
         <div style={S('margin-top:16px;font:600 22px/1.2 Geist;letter-spacing:-0.03em')}>This screen hit a problem</div>
         <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C')}>
-          Nothing you saved was lost — your record and projects are still on this device. Try the screen again, or go back home.
+          Nothing you saved was lost, your record and projects are still on this device. Try the screen again, or go back home.
         </div>
         <div style={S('margin-top:20px;display:flex;gap:10px;justify-content:center')}>
           <button

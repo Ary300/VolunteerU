@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   MemberProjects.jsx — the volunteer/member side of a project they joined
+   MemberProjects.jsx, the volunteer/member side of a project they joined
    Once a founder accepts you, this is where you see what's expected before you
    start: the QC pipeline for a volunteer program, or your role briefing for a
    task-based team. Progress is the member's own, saved on their application row
@@ -25,7 +25,7 @@ export function safeUrl(raw) {
   const v = String(raw || '').trim();
   if (!v) return '';
   if (/^https?:\/\//i.test(v)) return v;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return ''; // some other scheme — reject
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return ''; // some other scheme, reject
   if (/^[\w-]+(\.[\w-]+)+/.test(v)) return `https://${v}`; // looks like a domain
   return '';
 }
@@ -78,7 +78,7 @@ export default function MemberProjects() {
     const cur = (app.member_state && app.member_state.tasks) || {};
     const next = cur[taskId] === 'done' ? 'todo' : 'done';
     const { ok, member_state } = await setMyTaskStatus(app.id, taskId, next);
-    if (ok) { patchLocal(app.id, member_state); if (next === 'done') toast({ title: 'Nice — marked done', tone: 'ok', timeout: 1600 }); }
+    if (ok) { patchLocal(app.id, member_state); if (next === 'done') toast({ title: 'Nice, marked done', tone: 'ok', timeout: 1600 }); }
     else toast({ title: 'Could not save that', tone: 'danger' });
     setBusy(false);
   }
@@ -326,7 +326,7 @@ function VolunteerMember({ app, onToggle }) {
   if (!steps.length) {
     return (
       <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#EAF3EC;font:450 13px/1.5 Geist;color:#3F6B4E')}>
-        You're all set — no steps to clear. Watch for your first shift details.
+        You're all set, no steps to clear. Watch for your first shift details.
       </div>
     );
   }
@@ -406,7 +406,7 @@ function TeamMember({ app, onAck, onToggleTask }) {
   if (!role && !tasks.length) {
     return (
       <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#57504A')}>
-        You're on the team. Your organizer will set your role and assign your first tasks — they'll appear here.
+        You're on the team. Your organizer will set your role and assign your first tasks, they'll appear here.
       </div>
     );
   }
@@ -463,7 +463,7 @@ function TeamMember({ app, onAck, onToggleTask }) {
           </div>
         </div>
       ) : role && acked ? (
-        <div style={S('font:450 12px/1.5 Geist;color:#8A8179')}>No tasks yet — your organizer will assign them here.</div>
+        <div style={S('font:450 12px/1.5 Geist;color:#8A8179')}>No tasks yet, your organizer will assign them here.</div>
       ) : null}
     </div>
   );

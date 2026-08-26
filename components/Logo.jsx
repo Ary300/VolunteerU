@@ -1,12 +1,12 @@
 'use client';
 
 /* ==========================================================================
-   Logo.jsx — the VolunteerU mark.
-   An abstract three-petal bloom set in a rounded badge: three forms converging
-   on a bright center — people turning out and coming together, the idea the
-   product is built on. Warm earth gradient with a soft top-left sheen. One
-   reusable component so the mark is identical everywhere (header, sidebar,
-   auth, onboarding, share pages).
+   Logo.jsx, the VolunteerU mark.
+   A location pin set in a rounded badge: a volunteer opportunity, right near
+   you, the core idea of the product (matched to what you care about, close to
+   home). Warm earth gradient with a soft top-left sheen. One reusable component
+   so the mark is identical everywhere (header, sidebar, auth, onboarding,
+   share pages).
    ========================================================================== */
 
 import { useId } from 'react';
@@ -47,15 +47,14 @@ export function Logo({ size = 26, title = 'VolunteerU' }) {
       <rect x="0.5" y="0.5" width="31" height="31" rx="10.5" fill={`url(#${h})`} />
       <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="10.25" fill="none" stroke="rgba(60,20,8,0.14)" strokeWidth="1" />
 
-      {/* three-petal bloom converging on the center */}
-      <g>
-        <ellipse cx="16" cy="10" rx="5.5" ry="6.6" fill={`url(#${p})`} transform="rotate(0 16 16)" />
-        <ellipse cx="16" cy="10" rx="5.5" ry="6.6" fill={`url(#${p})`} transform="rotate(120 16 16)" />
-        <ellipse cx="16" cy="10" rx="5.5" ry="6.6" fill={`url(#${p})`} transform="rotate(240 16 16)" />
-      </g>
-      {/* warm center — an aperture the petals bloom from */}
-      <circle cx="16" cy="16" r="3.4" fill={`url(#${g})`} />
-      <circle cx="16" cy="16" r="1.7" fill="#fff" fillOpacity="0.96" />
+      {/* location pin, a nearby opportunity */}
+      <path
+        d="M16 5.5 C 11.3 5.5 7.5 9.3 7.5 14 C 7.5 19.8 16 26.5 16 26.5 C 16 26.5 24.5 19.8 24.5 14 C 24.5 9.3 20.7 5.5 16 5.5 Z"
+        fill={`url(#${p})`}
+      />
+      {/* the pin's eye, knocked back to the warm badge so the mark reads as a pin */}
+      <circle cx="16" cy="13.7" r="3.1" fill={`url(#${g})`} />
+      <circle cx="16" cy="13.7" r="1.5" fill="#fff" fillOpacity="0.9" />
     </svg>
   );
 }

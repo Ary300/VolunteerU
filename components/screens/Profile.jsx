@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Profile.jsx — design screen: `isProfile` (the student's verified record)
+   Profile.jsx, design screen: `isProfile` (the student's verified record)
    ========================================================================== */
 
 import { useEffect, useRef, useState } from 'react';
@@ -68,7 +68,7 @@ export default function Profile() {
     const link = typeof window !== 'undefined' ? window.location.origin : 'https://volunteeru.app';
     openModal({
       title: 'Share your record',
-      subtitle: 'Download a verified record a school or scholarship can check. The link points to VolunteerU — never your address or contact details.',
+      subtitle: 'Download a verified record a school or scholarship can check. The link points to VolunteerU, never your address or contact details.',
       body: (
         <div>
           <div style={S('padding:22px;border-radius:16px;background:#1F1B18;position:relative;overflow:hidden')}>
@@ -424,7 +424,7 @@ export default function Profile() {
                       <div style={S('font:450 14px/1.55 Geist;color:#332D28')}>{f.t}</div>
                       <div style={S('margin-top:10px;display:flex;align-items:center;gap:10px')}>
                         <div style={S('width:24px;height:24px;border-radius:50%;overflow:hidden;flex:none')}>
-                          <ImageSlot src={`https://picsum.photos/seed/${f.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                          <ImageSlot src={''} shape="circle" placeholder="face" />
                         </div>
                         <div style={S('font:500 12px/1.3 Geist;color:#57504A')}>{f.who}</div>
                         <div style={S(`margin-left:auto;font:500 10px/1 ${MONO};color:#A9A097;flex:none`)}>{f.when}</div>
@@ -457,7 +457,7 @@ export default function Profile() {
             </div>
             {state.hoursLog.length === 0 ? (
               <div style={S('margin-top:14px;padding:18px;border-radius:12px;border:1px dashed #E0D8CF;background:#FCFAF8;font:450 13px/1.6 Geist;color:#8A8179')}>
-                No hours logged yet. Log service you have done — an organization can confirm it later, and confirmed hours count on your verified record.
+                No hours logged yet. Log service you have done, an organization can confirm it later, and confirmed hours count on your verified record.
               </div>
             ) : (
               <div style={S('margin-top:12px;display:flex;flex-direction:column')}>
@@ -519,7 +519,7 @@ export default function Profile() {
                         const ok = await copyText(link);
                         toast(ok ? { title: 'Link copied', message: 'Paste it anywhere.', tone: 'ok' } : { title: 'Could not copy', message: link, tone: 'warn' });
                       } else {
-                        const ok = await copyText(`${st.verifiedHours} verified volunteer hours on VolunteerU — ${link}`);
+                        const ok = await copyText(`${st.verifiedHours} verified volunteer hours on VolunteerU, ${link}`);
                         toast({
                           title: `Caption copied for ${k}`,
                           message: ok ? 'Paste it into your story with the card image.' : 'Copy the link from the share dialog.',
@@ -616,7 +616,7 @@ function ReviewForm({ api, rows }) {
           value={why}
           maxLength={400}
           onChange={(e) => setWhy(e.target.value)}
-          placeholder="Give the organizer something concrete to check — a time, a task, a person who saw it."
+          placeholder="Give the organizer something concrete to check, a time, a task, a person who saw it."
           className={H.input}
           style={S('margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:90px;font:450 14px/1.55 Geist;color:#332D28')}
         />
@@ -646,7 +646,7 @@ function ReviewForm({ api, rows }) {
   );
 }
 
-/* Downscale a chosen image to a square ~256px JPEG data URL — small enough to
+/* Downscale a chosen image to a square ~256px JPEG data URL, small enough to
    ride along in the account blob, no storage bucket needed. */
 function fileToAvatar(file, size = 256) {
   return new Promise((resolve, reject) => {

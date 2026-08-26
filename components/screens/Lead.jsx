@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Lead.jsx — design screen: `isLead` (project workspace)
+   Lead.jsx, design screen: `isLead` (project workspace)
    Shell, tab bar, and the Overview / People / Positions / Shifts tabs.
    ========================================================================== */
 
@@ -390,7 +390,7 @@ function Overview({ p, goTab }) {
                   style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;text-align:center;cursor:pointer;transition:border-color .16s ease')}
                 >
                   <div style={S('width:48px;height:48px;margin:0 auto;border-radius:50%;overflow:hidden')}>
-                    <ImageSlot src={`https://picsum.photos/seed/${c.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                    <ImageSlot src={''} shape="circle" placeholder="face" />
                   </div>
                   <div style={S('margin-top:11px;font:500 13px/1.2 Geist')}>{c.short}</div>
                   <div style={S('margin-top:4px;font:450 11px/1.2 Geist;color:#8A8179')}>{c.role}</div>
@@ -493,21 +493,21 @@ function SideRow({ l, v }) {
   );
 }
 
-/* Sponsor / organization panel. Shows only honest status — self-reported until a
-   reviewer confirms — and offers a real, persisted "request verification" action.
+/* Sponsor / organization panel. Shows only honest status, self-reported until a
+   reviewer confirms, and offers a real, persisted "request verification" action.
    Nothing here claims an automated match is happening in the background. */
 function SponsorCard({ p }) {
   const sp = p.sponsor || {};
   const named = sp.name && sp.name.trim();
   const status = sp.verified ? 'Verified organization'
-    : sp.verificationRequestedAt ? 'Verification requested — under review'
+    : sp.verificationRequestedAt ? 'Verification requested, under review'
     : named ? 'Self-reported (not yet verified)'
     : 'No organization added yet';
 
   const openRequest = () => {
     openModal({
       title: 'Request verification',
-      subtitle: 'A reviewer confirms your registration and a named staff contact. This sends your details for review — free for students.',
+      subtitle: 'A reviewer confirms your registration and a named staff contact. This sends your details for review, free for students.',
       Body: ({ api }) => <VerifyForm p={p} api={api} />,
     });
   };
@@ -517,7 +517,7 @@ function SponsorCard({ p }) {
       <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Organization</div>
       <div style={S('margin-top:14px;display:flex;align-items:center;gap:11px')}>
         <div style={S('width:36px;height:36px;border-radius:10px;overflow:hidden;flex:none;background:#EFE9E2')}>
-          {named ? <ImageSlot src={`https://picsum.photos/seed/${sp.slug || 'org'}/400/400?grayscale`} shape="rounded" radius={10} placeholder="logo" /> : null}
+          {named ? <ImageSlot src={''} shape="rounded" radius={10} placeholder="logo" /> : null}
         </div>
         <div style={S('min-width:0')}>
           <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>
@@ -526,7 +526,7 @@ function SponsorCard({ p }) {
           <div className="vu-trunc" style={S('margin-top:3px;font:450 11px/1.2 Geist;color:#8A8179')}>{status}</div>
         </div>
       </div>
-      {sp.contact && sp.contact !== '—' ? (
+      {sp.contact && sp.contact !== '-' ? (
         <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
           <SideRow l="Contact" v={sp.contact} />
         </div>
@@ -547,7 +547,7 @@ function SponsorCard({ p }) {
 
 function VerifyForm({ p, api }) {
   const [name, setName] = useState((p.sponsor && p.sponsor.name) || '');
-  const [contact, setContact] = useState((p.sponsor && p.sponsor.contact !== '—' && p.sponsor.contact) || '');
+  const [contact, setContact] = useState((p.sponsor && p.sponsor.contact !== '-' && p.sponsor.contact) || '');
   const [busy, setBusy] = useState(false);
   const submit = () => {
     if (!name.trim() || !contact.trim()) {
@@ -562,7 +562,7 @@ function VerifyForm({ p, api }) {
   return (
     <div style={S('display:flex;flex-direction:column;gap:14px')}>
       <Field label="Organization name" value={name} onChange={setName} placeholder="Registered nonprofit or sponsoring school" />
-      <Field label="Staff contact (name + email)" value={contact} onChange={setContact} placeholder="Ms. Alvarez · alvarez@school.edu" />
+      <Field label="Staff contact (name + email)" value={contact} onChange={setContact} placeholder="Ms. Reyes · alvarez@school.edu" />
       <div style={S('display:flex;gap:10px;justify-content:flex-end')}>
         <button type="button" onClick={() => api.close()} className={cx(H.press)} style={S('padding:10px 16px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:500 13px/1 Geist;cursor:pointer')}>Cancel</button>
         <button type="button" onClick={submit} disabled={busy} className={cx(H.press)} style={S('padding:10px 16px;border-radius:10px;border:0;background:#C2603C;color:#fff;font:500 13px/1 Geist;cursor:pointer')}>Send for review</button>
@@ -572,7 +572,7 @@ function VerifyForm({ p, api }) {
 }
 
 /* A simple, real bar chart of where the crew stands. Populates from live roster
-   and application data — no fabricated numbers. */
+   and application data, no fabricated numbers. */
 function CrewFunnel({ p }) {
   const waiting = p.applications.filter((a) => a.status === 'pending').length;
   const onboarding = p.people.filter((x) => x.st === 'Onboarding').length;
@@ -968,7 +968,7 @@ function People({ p, params, setParam }) {
                     </div>
                     <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} style={S('display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0')}>
                       <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <ImageSlot src={`https://picsum.photos/seed/${x.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                        <ImageSlot src={''} shape="circle" placeholder="face" />
                       </div>
                       <div style={S('min-width:0')}>
                         <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{x.n}</div>
@@ -1083,7 +1083,7 @@ function PersonProfile({ api, project, person, onNote }) {
     <div style={S('display:flex;flex-direction:column;gap:16px')}>
       <div style={S('display:flex;align-items:center;gap:14px')}>
         <div style={S('width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none')}>
-          <ImageSlot src={`https://picsum.photos/seed/${person.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+          <ImageSlot src={''} shape="circle" placeholder="face" />
         </div>
         <div style={S('min-width:0')}>
           <div style={S('font:600 18px/1.2 Geist;letter-spacing:-0.02em')}>{person.n}</div>
@@ -1146,7 +1146,7 @@ function PersonProfile({ api, project, person, onNote }) {
 }
 
 function AddPersonForm({ api, project }) {
-  const [f, setF] = useState({ n: '', school: 'North Central HS', grade: '11', positionId: project.positions[0] ? project.positions[0].id : '' });
+  const [f, setF] = useState({ n: '', school: 'Riverside High', grade: '11', positionId: project.positions[0] ? project.positions[0].id : '' });
   const [err, setErr] = useState({});
   return (
     <div>
@@ -1165,7 +1165,7 @@ function AddPersonForm({ api, project }) {
       </div>
       {Number(f.grade) < 10 ? (
         <div style={S('margin-top:14px;padding:12px 14px;border-radius:11px;background:#FDF3E7;border:1px solid #F3E3CD;font:450 12px/1.5 Geist;color:#8A5A20')}>
-          Under 16 — they will start as Onboarding until guardian consent is on file.
+          Under 16, they will start as Onboarding until guardian consent is on file.
         </div>
       ) : null}
       <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
@@ -1211,7 +1211,7 @@ function ImportForm({ api, project }) {
         id="imp"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'Maya Rodriguez, North Central HS, 11\nDeven Achebe, North Central HS, 12'}
+        placeholder={'Maya Rodriguez, Riverside High, 11\nRowan Okafor, Riverside High, 12'}
         className={H.input}
         style={S('margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:140px;font:450 13px/1.6 Geist;color:#332D28')}
       />

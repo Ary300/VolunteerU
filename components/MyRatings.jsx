@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   MyRatings.jsx — how organizers have rated this volunteer
+   MyRatings.jsx, how organizers have rated this volunteer
    Real cross-user reputation: each rating was written by a nonprofit leader on
    the volunteer's application and lands here on the volunteer's own profile, so
    the next organizer can see how they show up. Renders nothing until rated.

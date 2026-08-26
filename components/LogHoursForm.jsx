@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   LogHoursForm.jsx — one place a volunteer logs service they did on their own.
+   LogHoursForm.jsx, one place a volunteer logs service they did on their own.
    Shared by the Home snapshot ("Log hours" button) and the Profile record so
    both collect the same shape: what they did, the org, a cause category, the
    date, hours and a note. Writes through db.logHours → the entry lands in the

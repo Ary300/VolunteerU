@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Marketing.jsx — public header and footer (design: landing chrome)
+   Marketing.jsx, public header and footer (design: landing chrome)
    ========================================================================== */
 
 import Link from 'next/link';

@@ -1,10 +1,10 @@
 'use client';
 
 /* ==========================================================================
-   Crew.jsx — the volunteer's own CRM. Everywhere they volunteer, in one place:
+   Crew.jsx, the volunteer's own CRM. Everywhere they volunteer, in one place:
    each membership's pipeline (with the organizer's links), briefings, check-in,
    logged hours, the organizer's message board, and a direct message thread.
-   It's read-only on the organizer's data — the volunteer can message, check in,
+   It's read-only on the organizer's data, the volunteer can message, check in,
    check off their own steps and log their own hours, but not edit the program.
    ========================================================================== */
 
@@ -39,7 +39,7 @@ export default function Crew() {
           <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>My crew</div>
           <h1 style={S('margin:12px 0 0;font:600 34px/1.06 Geist;letter-spacing:-0.04em')}>Everywhere you volunteer</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C;max-width:560px')}>
-            Every project you have joined, in one place — your steps and the organizer&apos;s links, check-in, your logged hours, announcements, and a direct line to each organizer.
+            Every project you have joined, in one place, your steps and the organizer&apos;s links, check-in, your logged hours, announcements, and a direct line to each organizer.
           </p>
         </div>
         <Pressable
@@ -62,7 +62,7 @@ export default function Crew() {
           <EmptyState
             icon="❖"
             title="You have not joined a project yet"
-            body="When an organizer accepts you, this becomes your home base for that project — steps, check-in, hours and messaging. Find something to join to get started."
+            body="When an organizer accepts you, this becomes your home base for that project, steps, check-in, hours and messaging. Find something to join to get started."
             cta="Browse openings"
             onCta={() => router.push('/discover')}
           />

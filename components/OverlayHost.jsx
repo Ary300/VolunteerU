@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   OverlayHost.jsx — renders toasts, modals, confirmations and anchored menus
+   OverlayHost.jsx, renders toasts, modals, confirmations and anchored menus
    ========================================================================== */
 
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';

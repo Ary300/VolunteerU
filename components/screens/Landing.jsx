@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Landing.jsx — design screen: `isLanding`
+   Landing.jsx, design screen: `isLanding`
    Transcribed 1:1 from `VolunteerU Design.dc.html`; the design's dead links and
    inert CTAs are the only things that changed, and only to gain destinations.
    ========================================================================== */
@@ -19,20 +19,20 @@ import {
 
 const CREW = [
   { slot: 'crew_a', seed: 'crew-a', n: 'Maya R.', role: 'Supply lead', st: 'CONFIRMED', c: '#3F6B4E' },
-  { slot: 'crew_b', seed: 'crew-b', n: 'Deven A.', role: 'Check-in', st: 'CONFIRMED', c: '#3F6B4E' },
-  { slot: 'crew_c', seed: 'crew-c', n: 'Sofia K.', role: 'Tutor', st: 'REVIEW', c: '#8A5A20' },
+  { slot: 'crew_b', seed: 'crew-b', n: 'Rowan O.', role: 'Check-in', st: 'CONFIRMED', c: '#3F6B4E' },
+  { slot: 'crew_c', seed: 'crew-c', n: 'Nina K.', role: 'Tutor', st: 'REVIEW', c: '#8A5A20' },
 ];
 
 const WAITING = [
-  { slug: 'a-priya', n: 'Priya Nair', role: 'Tutor', when: '2 hours ago' },
-  { slug: 'a-marcus', n: 'Marcus Odom', role: 'Tutor', when: 'Yesterday' },
-  { slug: 'a-ava', n: 'Ava Lindqvist', role: 'Photographer', when: 'Yesterday' },
+  { slug: 'a-priya', n: 'Anaya Rao', role: 'Tutor', when: '2 hours ago' },
+  { slug: 'a-marcus', n: 'Theo Grant', role: 'Tutor', when: 'Yesterday' },
+  { slug: 'a-ava', n: 'Ava Sorensen', role: 'Photographer', when: 'Yesterday' },
   { slug: 'a-ben', n: 'Ben Ortiz', role: 'Tutor', when: '2 days ago' },
 ];
 
 const ATTEND = [
   { n: 'Maya Rodriguez', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.2', grade: 'Exceptional', gBg: '#F5E7E0', gColor: '#A8482A' },
-  { n: 'Deven Achebe', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.3', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
+  { n: 'Rowan Okafor', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.3', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
   { n: 'Sofia Kaur', st: 'Late', stBg: '#FDF3E7', stColor: '#8A5A20', hrs: '1.6', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
   { n: 'Theo Marsh', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.1', grade: 'Solid', gBg: '#F6F2EE', gColor: '#57504A' },
   { n: 'Jonah Park', st: 'Absent', stBg: '#F5E7E0', stColor: '#A8482A', hrs: '0.0', grade: 'Not scored', gBg: '#F6F2EE', gColor: '#A19891' },
@@ -89,7 +89,7 @@ export default function Landing() {
   const go = (path) => () => router.push(path);
 
   return (
-    <div className="vu-screen vu-fixed-width" style={S('width:100%;min-width:1180px;overflow:hidden;padding-bottom:56px')}>
+    <div className="vu-screen vu-fixed-width vu-landing" style={S('width:100%;min-width:1180px;overflow:hidden;padding-bottom:56px')}>
       <MarketingHeader />
 
       {/* ---- hero ---- */}
@@ -176,8 +176,7 @@ export default function Landing() {
               <div style={S('width:44px')} />
             </div>
             <div style={S('height:212px;position:relative')}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={PEXELS.outdoor} alt="Volunteers setting up outdoors" style={S('width:100%;height:100%;object-fit:cover;display:block')} />
+              <div aria-hidden="true" style={S('width:100%;height:100%;background:linear-gradient(135deg,#F1E7DF 0%,#E4D3C7 55%,#D8C3B4 100%);display:block')} />
               <div style={S('position:absolute;left:16px;bottom:14px;display:flex;align-items:center;gap:8px')}>
                 <span style={S(`padding:5px 9px;border-radius:7px;background:rgba(255,255,255,.94);font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED SPONSOR</span>
                 <span style={S(`padding:5px 9px;border-radius:7px;background:rgba(31,27,24,.82);font:500 10px/1 ${MONO};color:#fff`)}>SESSION 3 OF 8</span>
@@ -187,7 +186,7 @@ export default function Landing() {
               <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:16px')}>
                 <div>
                   <div style={S('font:600 19px/1.2 Geist;letter-spacing:-0.03em')}>Saturday Reading Circle</div>
-                  <div style={S('margin-top:5px;font:450 13px/1.3 Geist;color:#8A8179')}>Indy Public Library, Branch 4 · Saturdays 10:00 AM</div>
+                  <div style={S('margin-top:5px;font:450 13px/1.3 Geist;color:#8A8179')}>Rivertown Public Library, Branch 4 · Saturdays 10:00 AM</div>
                 </div>
                 <div style={S('text-align:right;flex:none')}>
                   <div style={S('font:600 22px/1 Geist;letter-spacing:-0.03em')}>
@@ -217,7 +216,7 @@ export default function Landing() {
                   {CREW.map((c) => (
                     <div key={c.slot} style={S('display:flex;align-items:center;gap:10px')}>
                       <div style={S('width:24px;height:24px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <ImageSlot src={`https://picsum.photos/seed/${c.seed}/400/400?grayscale`} shape="circle" placeholder="face" />
+                        <ImageSlot src={''} shape="circle" placeholder="face" />
                       </div>
                       <div style={S('font:500 12px/1 Geist;color:#332D28')}>{c.n}</div>
                       <div style={S('font:450 11px/1 Geist;color:#A9A097')}>{c.role}</div>
@@ -417,7 +416,7 @@ export default function Landing() {
                   <div style={S(`font:500 11px/1 ${MONO};color:#A9A097`)}>THIS TERM</div>
                 </div>
                 {[
-                  { org: 'San Diego Food Bank', d: 'Feb 8', hrs: '3.0' },
+                  { org: 'Rivertown Food Bank', d: 'Feb 8', hrs: '3.0' },
                   { org: 'Ocean Beach Cleanup', d: 'Feb 1', hrs: '2.5' },
                   { org: 'Senior Tech Buddies', d: 'Jan 25', hrs: '1.5' },
                   { org: 'Little Library Helpers', d: 'Jan 18', hrs: '2.0' },
@@ -509,7 +508,7 @@ export default function Landing() {
                 <div key={sp.slug} style={S('padding:18px 22px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff')}>
                   <div style={S('display:flex;align-items:center;gap:13px')}>
                     <div style={S('width:40px;height:40px;border-radius:11px;overflow:hidden;flex:none')}>
-                      <ImageSlot src={`https://picsum.photos/seed/${sp.slug}/400/400?grayscale`} shape="rounded" radius={11} placeholder="logo" />
+                      <ImageSlot src={''} shape="rounded" radius={11} placeholder="logo" />
                     </div>
                     <div>
                       <div style={S('font:500 15px/1.2 Geist')}>
@@ -538,7 +537,7 @@ export default function Landing() {
                   <ImageSlot src={PEXELS.reading} shape="rounded" radius={12} placeholder="cover" />
                 </div>
                 <div style={S('margin-top:16px;font:600 20px/1.2 Geist;letter-spacing:-0.03em')}>Saturday Reading Circle</div>
-                <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Led by Eli F. · sponsored by Indy Public Library ✓</div>
+                <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Led by Milo B. · sponsored by Rivertown Public Library ✓</div>
                 <div style={S('margin-top:16px;display:flex;gap:8px;flex-wrap:wrap')}>
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F6F2EE;font:500 11px/1 ${MONO};color:#57504A`)}>TUTOR · 3 OPEN</span>
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F6F2EE;font:500 11px/1 ${MONO};color:#57504A`)}>PHOTOS · 1 OPEN</span>
@@ -608,7 +607,7 @@ export default function Landing() {
                   <div key={a.slug} style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:14px')}>
                     <div style={S('display:flex;align-items:center;gap:12px')}>
                       <div style={S('width:34px;height:34px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <ImageSlot src={`https://picsum.photos/seed/${a.slug}/400/400?grayscale`} shape="circle" placeholder="face" />
+                        <ImageSlot src={''} shape="circle" placeholder="face" />
                       </div>
                       <div>
                         <div style={S('font:500 14px/1.2 Geist')}>{a.n}</div>
@@ -675,8 +674,8 @@ export default function Landing() {
                   { t: 'Pair up the new tutors', who: 'You', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
                 ] },
                 { name: 'Outreach', color: '#C2603C', brief: 'Recruit and post', tasks: [
-                  { t: 'Post to three school pages', who: 'Deven A.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
-                  { t: 'Email the library contact', who: 'Sofia K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                  { t: 'Post to three school pages', who: 'Rowan O.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Email the library contact', who: 'Nina K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
                 ] },
                 { name: 'Photos', color: '#3F6B4E', brief: 'Capture the day', tasks: [
                   { t: 'Shoot Saturday session', who: 'Theo M.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
@@ -728,7 +727,7 @@ export default function Landing() {
               {[
                 { who: 'Maya R.', text: 'Rooms are booked for all four Saturdays.', w: '9:14 AM' },
                 { you: true, text: 'Amazing. I just posted the sign-up link under Outreach.', w: '9:16 AM' },
-                { who: 'Deven A.', text: 'Two new tutors applied overnight. Want me to accept them?', w: '9:20 AM' },
+                { who: 'Rowan O.', text: 'Two new tutors applied overnight. Want me to accept them?', w: '9:20 AM' },
                 { you: true, text: 'Yes, accept both and add them to the Tutoring role.', w: '9:21 AM' },
               ].map((m, i) => (m.you ? (
                 <div key={i} style={S('align-self:flex-end;max-width:74%')}>

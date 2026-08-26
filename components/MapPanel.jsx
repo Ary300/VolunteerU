@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   MapPanel.jsx — the OpenStreetMap tile mosaic and pins from the design
+   MapPanel.jsx, the OpenStreetMap tile mosaic and pins from the design
    ========================================================================== */
 
 import { useRouter } from 'next/navigation';
