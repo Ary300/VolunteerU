@@ -92,6 +92,22 @@ export default function Discover() {
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
+  // Carry the volunteer's saved preferences (from onboarding) into the visible
+  // filters the first time they land here, so their causes and free time apply
+  // without re-entering them. One-shot, so clearing a filter afterward sticks.
+  const prefsSeeded = useRef(false);
+  useEffect(() => {
+    if (prefsSeeded.current) return;
+    prefsSeeded.current = true;
+    const untouched = !['q', 'causes', 'windows', 'kind', 'place', 'sort', 'saved'].some((k) => params.get(k) !== null);
+    const pc = (state.prefs && state.prefs.causes) || [];
+    const pw = (state.prefs && state.prefs.windows) || [];
+    if (untouched && (pc.length || pw.length)) {
+      setParams({ causes: pc.join('|') || null, windows: pw.join('|') || null }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const nFilters = causes.length + windows.length + (savedOnly ? 1 : 0);
   const suggestions = showSuggest ? suggestionsFor(draftQuery) : [];
   const peerRows = tab === 'projects' ? state.peerProjects : state.peerProjects.slice(0, 5);
@@ -276,7 +292,7 @@ export default function Discover() {
         <div>
           <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Discover{state.account.firstName ? `, ${state.account.firstName}` : ''}</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
-            Search real student projects and nonprofits. Filter by cause, kind and where they run.
+            One feed for every opportunity near you, projects made on VolunteerU and registered nonprofits alike. Filter by cause, type and where they run.
           </p>
         </div>
         <div style={S('display:flex;gap:10px')}>
@@ -459,8 +475,8 @@ export default function Discover() {
       </div>
 
       {tab === 'openings' ? (
-        <div role="group" aria-label="Kind of organization" style={S('margin-top:16px;display:flex;gap:6px')}>
-          {[{ k: 'all', t: 'All projects' }, { k: 'student', t: 'Student-led' }, { k: 'official', t: 'Nonprofits' }].map((o) => {
+        <div role="group" aria-label="Opportunity type" style={S('margin-top:16px;display:flex;gap:6px')}>
+          {[{ k: 'all', t: 'All opportunities' }, { k: 'student', t: 'Made on VolunteerU' }, { k: 'official', t: 'Registered nonprofits' }].map((o) => {
             const on = kind === o.k;
             return (
               <Pressable
@@ -538,11 +554,17 @@ export default function Discover() {
 
       <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
+          <div style={S('display:flex;align-items:baseline;gap:8px;flex-wrap:wrap')}>
+            <div style={S('font:600 16px/1.2 Geist;letter-spacing:-0.02em;color:#1A1714')}>Volunteer opportunities</div>
+            <div style={S('font:450 13px/1.2 Geist;color:#A9A097')}>
+              {kind === 'student' ? 'Made on VolunteerU' : kind === 'official' ? 'Registered nonprofits' : 'On VolunteerU and from the nonprofit registry'}
+            </div>
+          </div>
           {interest && !q && kind === 'all' && place === 'all' && !causes.length ? (
             <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
           ) : null}
-          <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} />
-          <WebNonprofits q={q} near={webNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} />
+          <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} merged showEmpty={kind === 'student'} />
+          <WebNonprofits q={q} near={webNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} heading="From the nonprofit registry" />
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>

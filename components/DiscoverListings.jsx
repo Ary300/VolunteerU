@@ -17,7 +17,7 @@ import MessageThread from './MessageThread.jsx';
 
 const MONO = "'Geist Mono',monospace";
 
-export default function DiscoverListings({ mode = 'search', interest = '', q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent' }) {
+export default function DiscoverListings({ mode = 'search', interest = '', q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent', showEmpty = true, merged = false }) {
   const [listings, setListings] = useState(null);
   const [applied, setApplied] = useState(new Map()); // listing_id -> application
   const [busy, setBusy] = useState(null);
@@ -62,6 +62,10 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
     // The match feed stays silent, its mount points (Home, Discover) each carry
     // their own forward CTA, so a blank match section is never a dead end.
     if (mode === 'match') return null;
+    // In the merged Discover feed, the registered-nonprofit registry carries the
+    // section when there are no platform listings, so stay silent unless we are
+    // explicitly the sole source (no registry showing).
+    if (!showEmpty) return null;
     return (
       <div style={S('margin-bottom:22px;padding:28px 22px;border-radius:14px;border:1px dashed #E0D8CF;background:#FCFAF8;text-align:center')}>
         <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>
@@ -169,7 +173,7 @@ export default function DiscoverListings({ mode = 'search', interest = '', q = '
   return (
     <div style={S('margin-bottom:22px')}>
       <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097;margin-bottom:12px`)}>
-        {mode === 'match' ? 'Matched to what you told us' : kind === 'official' ? 'Nonprofits looking for volunteers' : kind === 'student' ? 'Student projects looking for volunteers' : 'Projects looking for volunteers'}
+        {mode === 'match' ? 'Matched to what you told us' : merged ? 'Made on VolunteerU' : kind === 'official' ? 'Nonprofits looking for volunteers' : kind === 'student' ? 'Student projects looking for volunteers' : 'Projects looking for volunteers'}
       </div>
       <div style={S('display:flex;flex-direction:column;gap:12px')}>
         {shown.map((l) => {
