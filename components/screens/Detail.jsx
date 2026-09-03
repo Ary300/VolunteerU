@@ -51,7 +51,7 @@ export default function Detail({ id }) {
   function directions() {
     openModal({
       title: 'Getting there',
-      subtitle: `${opp.address} · ${opp.distance} mi from ${'12345'}`,
+      subtitle: opp.address,
       body: (
         <div>
           <div style={S('border-radius:12px;overflow:hidden;border:1px solid #E8E1D9')}>
@@ -129,7 +129,7 @@ export default function Detail({ id }) {
           </div>
           <h1 style={S('margin:14px 0 0;font:600 34px/1.1 Geist;letter-spacing:-0.038em')}>{opp.title}</h1>
           <div style={S('margin-top:10px;font:450 15px/1.5 Geist;color:#6B635C')}>
-            {opp.org} · {opp.address} · {opp.distance} mi from you
+            {opp.org} · {opp.address}
           </div>
           <p style={S('margin:22px 0 0;max-width:600px;font:400 16px/1.65 Geist;color:#332D28;text-wrap:pretty')}>{opp.description}</p>
 
@@ -150,7 +150,7 @@ export default function Detail({ id }) {
             <AddressMap address={opp.address} />
             <div style={S('padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
               <div style={S('font:450 13px/1.4 Geist;color:#6B635C')}>
-                {opp.distance} mi · {opp.travelMin} min drive · {opp.transit}
+                {opp.travelMin} min drive · {opp.transit}
               </div>
               <Pressable label={`Directions to ${opp.address}`} onClick={directions} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;flex:none')}>
                 Directions

@@ -170,7 +170,7 @@ export default function Apply({ id }) {
             {opp.verified ? <span style={S(`padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 10px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED</span> : null}
           </div>
           <div style={S('margin-top:5px;font:450 13px/1 Geist;color:#8A8179')}>
-            {opp.org} · {opp.distance} mi · {opp.hours} hours per shift
+            {opp.org} · {opp.hours} hours per shift
           </div>
         </div>
       </div>

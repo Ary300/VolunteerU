@@ -18,25 +18,25 @@ import {
 } from '../../lib/seed.js';
 
 const CREW = [
-  { slot: 'crew_a', seed: 'crew-a', n: 'Maya R.', role: 'Supply lead', st: 'CONFIRMED', c: '#3F6B4E' },
-  { slot: 'crew_b', seed: 'crew-b', n: 'Rowan O.', role: 'Check-in', st: 'CONFIRMED', c: '#3F6B4E' },
-  { slot: 'crew_c', seed: 'crew-c', n: 'Nina K.', role: 'Tutor', st: 'REVIEW', c: '#8A5A20' },
+  { slot: 'crew_a', seed: 'crew-a', n: 'Volunteer 10', role: 'Supply lead', st: 'CONFIRMED', c: '#3F6B4E' },
+  { slot: 'crew_b', seed: 'crew-b', n: 'Volunteer 14', role: 'Check-in', st: 'CONFIRMED', c: '#3F6B4E' },
+  { slot: 'crew_c', seed: 'crew-c', n: 'Volunteer 12', role: 'Tutor', st: 'REVIEW', c: '#8A5A20' },
 ];
 
 const WAITING = [
-  { slug: 'a-priya', n: 'Anaya Rao', role: 'Tutor', when: '2 hours ago' },
-  { slug: 'a-marcus', n: 'Theo Grant', role: 'Tutor', when: 'Yesterday' },
-  { slug: 'a-ava', n: 'Ava Sorensen', role: 'Photographer', when: 'Yesterday' },
-  { slug: 'a-ben', n: 'Ben Ortiz', role: 'Tutor', when: '2 days ago' },
+  { slug: 'a-priya', n: 'Volunteer 2', role: 'Tutor', when: '2 hours ago' },
+  { slug: 'a-marcus', n: 'Volunteer 19', role: 'Tutor', when: 'Yesterday' },
+  { slug: 'a-ava', n: 'Volunteer 3', role: 'Photographer', when: 'Yesterday' },
+  { slug: 'a-ben', n: 'Volunteer 4', role: 'Tutor', when: '2 days ago' },
 ];
 
 const ATTEND = [
-  { n: 'Maya Rodriguez', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.2', grade: 'Exceptional', gBg: '#F5E7E0', gColor: '#A8482A' },
-  { n: 'Rowan Okafor', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.3', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
-  { n: 'Sofia Kaur', st: 'Late', stBg: '#FDF3E7', stColor: '#8A5A20', hrs: '1.6', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
-  { n: 'Theo Marsh', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.1', grade: 'Solid', gBg: '#F6F2EE', gColor: '#57504A' },
-  { n: 'Jonah Park', st: 'Absent', stBg: '#F5E7E0', stColor: '#A8482A', hrs: '0.0', grade: 'Not scored', gBg: '#F6F2EE', gColor: '#A19891' },
-  { n: 'Nina Oyelaran', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '1.4', grade: 'Needs support', gBg: '#FDF3E7', gColor: '#8A5A20' },
+  { n: 'Volunteer 10', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.2', grade: 'Exceptional', gBg: '#F5E7E0', gColor: '#A8482A' },
+  { n: 'Volunteer 14', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.3', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
+  { n: 'Volunteer 17', st: 'Late', stBg: '#FDF3E7', stColor: '#8A5A20', hrs: '1.6', grade: 'Strong', gBg: '#F6F2EE', gColor: '#57504A' },
+  { n: 'Volunteer 18', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '2.1', grade: 'Solid', gBg: '#F6F2EE', gColor: '#57504A' },
+  { n: 'Volunteer 8', st: 'Absent', stBg: '#F5E7E0', stColor: '#A8482A', hrs: '0.0', grade: 'Not scored', gBg: '#F6F2EE', gColor: '#A19891' },
+  { n: 'Volunteer 11', st: 'Present', stBg: '#EAF3EC', stColor: '#3F6B4E', hrs: '1.4', grade: 'Needs support', gBg: '#FDF3E7', gColor: '#8A5A20' },
 ];
 
 const MONO = "'Geist Mono',monospace";
@@ -316,7 +316,7 @@ export default function Landing() {
             Join in a minute
           </h2>
           <p style={S('margin:28px 0 0;max-width:560px;font:400 20px/1.55 Geist;color:#57504A;text-wrap:pretty')}>
-            Accredited institutions and student organizations in one feed, ranked to your causes, your radius and the hours you still need. One
+            Accredited institutions and student organizations in one feed, ranked to your causes and the hours you still need. One
             application, then you show up and the hours count themselves.
           </p>
 
@@ -369,7 +369,7 @@ export default function Landing() {
 
           <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:72px')}>
             {[
-              { n: '01', t: 'Find your fit', b: 'Nonprofits and student projects in one feed, ranked to your causes, radius and free time.' },
+              { n: '01', t: 'Find your fit', b: 'Nonprofits and student projects in one feed, ranked to your causes and free time.' },
               { n: '02', t: 'One application', b: 'Your record, availability and causes are already attached. Pick a role, pick a shift, send.' },
               { n: '03', t: 'Hours count themselves', b: 'Check in on arrival. The organizer confirms attendance and the hours post to your record that day.' },
             ].map((c) => (
@@ -537,7 +537,7 @@ export default function Landing() {
                   <ImageSlot src={PEXELS.reading} shape="rounded" radius={12} placeholder="cover" />
                 </div>
                 <div style={S('margin-top:16px;font:600 20px/1.2 Geist;letter-spacing:-0.03em')}>Saturday Reading Circle</div>
-                <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Led by Milo B. · sponsored by Rivertown Public Library ✓</div>
+                <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Student-led · sponsored by Rivertown Public Library ✓</div>
                 <div style={S('margin-top:16px;display:flex;gap:8px;flex-wrap:wrap')}>
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F6F2EE;font:500 11px/1 ${MONO};color:#57504A`)}>TUTOR · 3 OPEN</span>
                   <span style={S(`padding:6px 10px;border-radius:8px;background:#F6F2EE;font:500 11px/1 ${MONO};color:#57504A`)}>PHOTOS · 1 OPEN</span>
@@ -670,16 +670,16 @@ export default function Landing() {
             <div className="vu-3col" style={S('display:grid;grid-template-columns:repeat(3,1fr)')}>
               {[
                 { name: 'Tutoring', color: '#5B6BB0', brief: 'Run the reading sessions', tasks: [
-                  { t: 'Prep the week 3 worksheets', who: 'Maya R.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Prep the week 3 worksheets', who: 'Volunteer 10', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
                   { t: 'Pair up the new tutors', who: 'You', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
                 ] },
                 { name: 'Outreach', color: '#C2603C', brief: 'Recruit and post', tasks: [
-                  { t: 'Post to three school pages', who: 'Rowan O.', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
-                  { t: 'Email the library contact', who: 'Nina K.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                  { t: 'Post to three school pages', who: 'Volunteer 14', st: 'Doing', bg: '#FDF3E7', c: '#8A5A20' },
+                  { t: 'Email the library contact', who: 'Volunteer 12', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
                 ] },
                 { name: 'Photos', color: '#3F6B4E', brief: 'Capture the day', tasks: [
-                  { t: 'Shoot Saturday session', who: 'Theo M.', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
-                  { t: 'Upload to the shared drive', who: 'Theo M.', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
+                  { t: 'Shoot Saturday session', who: 'Volunteer 18', st: 'To do', bg: '#F6F2EE', c: '#57504A' },
+                  { t: 'Upload to the shared drive', who: 'Volunteer 18', st: 'Done', bg: '#EAF3EC', c: '#3F6B4E' },
                 ] },
               ].map((role, i) => (
                 <div key={role.name} style={S(`padding:28px 22px 44px${i < 2 ? ';border-right:1px solid #F1EBE4' : ''}`)}>
@@ -725,9 +725,9 @@ export default function Landing() {
             </div>
             <div style={S('padding:26px 24px;display:flex;flex-direction:column;gap:16px;background:#FCFAF8')}>
               {[
-                { who: 'Maya R.', text: 'Rooms are booked for all four Saturdays.', w: '9:14 AM' },
+                { who: 'Volunteer 10', text: 'Rooms are booked for all four Saturdays.', w: '9:14 AM' },
                 { you: true, text: 'Amazing. I just posted the sign-up link under Outreach.', w: '9:16 AM' },
-                { who: 'Rowan O.', text: 'Two new tutors applied overnight. Want me to accept them?', w: '9:20 AM' },
+                { who: 'Volunteer 14', text: 'Two new tutors applied overnight. Want me to accept them?', w: '9:20 AM' },
                 { you: true, text: 'Yes, accept both and add them to the Tutoring role.', w: '9:21 AM' },
               ].map((m, i) => (m.you ? (
                 <div key={i} style={S('align-self:flex-end;max-width:74%')}>

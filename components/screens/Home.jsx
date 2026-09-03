@@ -9,7 +9,6 @@ import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable } from '../ui.jsx';
 import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
-import DiscoverListings from '../DiscoverListings.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
 import HomeCharts from '../HomeCharts.jsx';
 import { openLogHours } from '../LogHoursForm.jsx';
@@ -240,9 +239,6 @@ export default function Home() {
             </Pressable>
           </div>
           <div style={S('margin-top:16px')}>
-            {state.prefs && state.prefs.interest ? (
-              <DiscoverListings mode="match" interest={state.prefs.interest} causes={state.prefs.causes || []} near={state.prefs.location || (state.account.city ? String(state.account.city).split(',')[0] : '')} />
-            ) : null}
             <div style={S('padding:18px;border-radius:12px;border:1px dashed #E4DDD4;background:#FCFAF8;text-align:center')}>
               <div style={S('font:500 14px/1.3 Geist;color:#332D28')}>Find your next opportunity</div>
               <div style={S('margin-top:6px;font:450 12px/1.5 Geist;color:#8A8179')}>Search real student projects and nonprofits by cause, kind and location, remote or in person.</div>

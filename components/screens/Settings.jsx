@@ -274,27 +274,14 @@ function PreferencesSection({ state }) {
         </div>
       </Panel>
 
-      <Panel title="Distance and hours">
-        <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-          <Select
-            label="How far you can travel"
-            value={String(p.radius)}
-            options={[
-              { v: '2', l: '2 miles' },
-              { v: '5', l: '5 miles' },
-              { v: '10', l: '10 miles' },
-              { v: '25', l: '25 miles' },
-            ]}
-            onChange={(v) => setPref('radius', Number(v))}
-          />
-          <Field
-            label="Your hours goal (optional)"
-            value={String(p.hoursGoal)}
-            inputMode="numeric"
-            onChange={(v) => setPref('hoursGoal', Number(v.replace(/\D/g, '')) || 0)}
-            hint="A personal target. Track progress on your record."
-          />
-        </div>
+      <Panel title="Hours goal">
+        <Field
+          label="Your hours goal (optional)"
+          value={String(p.hoursGoal)}
+          inputMode="numeric"
+          onChange={(v) => setPref('hoursGoal', Number(v.replace(/\D/g, '')) || 0)}
+          hint="A personal target. Track progress on your record."
+        />
       </Panel>
     </>
   );

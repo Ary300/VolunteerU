@@ -151,7 +151,7 @@ export default function Profile() {
         <div>
           <div style={S('display:flex;flex-direction:column;gap:11px;font:450 14px/1.5 Geist;color:#332D28')}>
             <Row l="Status" v={app.st} />
-            {opp ? <Row l="Where" v={`${opp.address} · ${opp.distance} mi`} /> : null}
+            {opp ? <Row l="Where" v={opp.address} /> : null}
             {opp ? <Row l="Hours" v={`${opp.hours.toFixed(1)} verified`} /> : null}
             <Row l="Shared with them" v={app.shareRecord === false ? 'Basic profile only' : 'Verified hours and cause history'} />
           </div>

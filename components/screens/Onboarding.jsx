@@ -26,12 +26,6 @@ const EXPERIENCE = ['First time', 'Helped run something', 'Led a group before'];
 const VOLUNTEERED = ['Never', 'A few times', 'Regularly'];
 const CAUSE_OPTIONS = ['Education', 'Food & hunger', 'Environment', 'Civic', 'Animals', 'Health', 'Seniors', 'Arts', 'Homelessness', 'Disaster relief'];
 const CREW_OPTIONS = ['4 to 6', '8 to 12', '12 to 20', '20+'];
-const RADIUS_OPTIONS = [
-  { v: '2', l: '2 miles' },
-  { v: '5', l: '5 miles' },
-  { v: '10', l: '10 miles' },
-  { v: '25', l: '25 miles' },
-];
 
 const DEFAULT_START = {
   name: '',
@@ -177,7 +171,7 @@ export default function Onboarding() {
         toast({ title: 'Workspace created', message: 'Add your organization and open positions, you can request verification anytime.', tone: 'ok' });
         router.replace('/lead');
       } else {
-        toast({ title: 'Matches ready', message: 'Ranked to your causes, radius and free time.', tone: 'ok' });
+        toast({ title: 'Matches ready', message: 'Ranked to your causes and free time.', tone: 'ok' });
         router.replace('/discover');
       }
     } catch (err) {
@@ -372,9 +366,8 @@ export default function Onboarding() {
                       error={errors.interest}
                     />
                   </div>
-                  <div className="vu-2col-keep" style={S('margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+                  <div style={S('margin-top:18px')}>
                     <Field label="Where are you?" value={join.location} onChange={(v) => setJoin((f) => ({ ...f, location: v }))} placeholder="City or area, e.g. Rivertown" maxLength={60} required error={errors.location} />
-                    <Select label="How far can you travel" value={join.radius} onChange={(v) => setJoin((f) => ({ ...f, radius: v }))} options={RADIUS_OPTIONS} />
                   </div>
 
                   <div id="ob-cause" style={S('margin-top:24px;font:500 12px/1 Geist;color:#57504A')}>Causes you care about <span style={S('color:#A9A097;font-weight:400')}>(optional, sharpens your matches)</span></div>
