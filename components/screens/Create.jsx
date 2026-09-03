@@ -433,7 +433,7 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
           fs={14}
           maxLength={90}
           required={d.delivery !== 'remote'}
-          placeholder={d.delivery === 'remote' ? 'e.g. Portland, OR, or leave blank' : undefined}
+          placeholder={d.delivery === 'remote' ? 'e.g. Rivertown, or leave blank' : undefined}
           error={errors.site}
         />
         <Field label="Website or social link" value={d.website} onChange={(v) => set({ website: v })} placeholder="Optional" bg="#FCFAF8" fs={14} type="url" error={errors.website} />

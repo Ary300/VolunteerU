@@ -266,7 +266,7 @@ export default function Onboarding() {
                   value={identity.firstName}
                   onChange={(v) => setIdentity((f) => ({ ...f, firstName: v }))}
                   onEnter={next}
-                  placeholder="Eli"
+                  placeholder="Your first name"
                   autoComplete="given-name"
                   maxLength={40}
                   required

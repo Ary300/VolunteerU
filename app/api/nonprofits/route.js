@@ -58,6 +58,30 @@ async function orgDetail(ein) {
   }
 }
 
+/* One ProPublica search. Returns a mapped array of orgs, or null on upstream
+   error so the caller can distinguish "no matches" from "request failed". */
+async function runSearch({ q = '', state = '', ntee = '' }) {
+  const u = new URL('https://projects.propublica.org/nonprofits/api/v2/search.json');
+  if (q) u.searchParams.set('q', q);
+  if (/^[A-Z]{2}$/.test(state)) u.searchParams.set('state[id]', state);
+  if (/^([1-9]|10)$/.test(ntee)) u.searchParams.set('ntee[id]', ntee);
+  const res = await fetch(u.toString(), {
+    headers: { 'User-Agent': 'VolunteerU (nonprofit discovery)' },
+    // cache identical searches for an hour; this data barely changes
+    next: { revalidate: 3600 },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.organizations || []).slice(0, 12).map((o) => ({
+    ein: o.ein,
+    name: o.name,
+    city: o.city || '',
+    state: o.state || '',
+    cause: causeFromNtee(o.ntee_code),
+    url: `https://projects.propublica.org/nonprofits/organizations/${o.ein}`,
+  }));
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const ein = (searchParams.get('ein') || '').trim().replace(/\D/g, '');
@@ -66,31 +90,32 @@ export async function GET(request) {
   const q = (searchParams.get('q') || '').trim().slice(0, 120);
   const state = (searchParams.get('state') || '').trim().toUpperCase();
   const ntee = (searchParams.get('ntee') || '').trim();
+  const stateOk = /^[A-Z]{2}$/.test(state);
 
-  if (!q && !/^[A-Z]{2}$/.test(state)) return Response.json({ organizations: [] });
-
-  const u = new URL('https://projects.propublica.org/nonprofits/api/v2/search.json');
-  if (q) u.searchParams.set('q', q);
-  if (/^[A-Z]{2}$/.test(state)) u.searchParams.set('state[id]', state);
-  if (/^([1-9]|10)$/.test(ntee)) u.searchParams.set('ntee[id]', ntee);
+  // Progressively broaden so the volunteer always sees the closest related
+  // nonprofits rather than an empty result:
+  //   1. exact  — the cause + their state
+  //   2. closest by location — any nonprofit in their state
+  //   3. related by cause — the cause, nationally
+  //   4. general community orgs near them (last resort, never empty)
+  const attempts = [];
+  if (q && stateOk) attempts.push({ q, state, ntee });
+  if (stateOk) attempts.push({ state });
+  if (q) attempts.push({ q });
+  if (stateOk) attempts.push({ q: 'community', state });
+  attempts.push({ q: 'community' });
 
   try {
-    const res = await fetch(u.toString(), {
-      headers: { 'User-Agent': 'VolunteerU (nonprofit discovery)' },
-      // cache identical searches for an hour; this data barely changes
-      next: { revalidate: 3600 },
-    });
-    if (!res.ok) return Response.json({ organizations: [], error: 'upstream' });
-    const data = await res.json();
-    const organizations = (data.organizations || []).slice(0, 12).map((o) => ({
-      ein: o.ein,
-      name: o.name,
-      city: o.city || '',
-      state: o.state || '',
-      cause: causeFromNtee(o.ntee_code),
-      url: `https://projects.propublica.org/nonprofits/organizations/${o.ein}`,
-    }));
-    return Response.json({ organizations, total: data.total_results || organizations.length });
+    let organizations = [];
+    let upstreamErr = false;
+    for (const a of attempts) {
+      const r = await runSearch(a);
+      if (r === null) { upstreamErr = true; continue; }
+      if (r.length) { organizations = r; break; }
+    }
+    const body = { organizations, total: organizations.length };
+    if (upstreamErr && !organizations.length) body.error = 'upstream';
+    return Response.json(body);
   } catch {
     return Response.json({ organizations: [], error: 'fetch_failed' });
   }
