@@ -186,7 +186,7 @@ export default function Auth({ mode = 'signin' }) {
               <div style={S('width:26px;height:26px;border-radius:50%;overflow:hidden;flex:none')}>
                 <ImageSlot src="" shape="circle" placeholder="face" />
               </div>
-              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Rowan O. · Grade 12</div>
+              <div style={S('font:500 12px/1 Geist;color:#8B8078')}>Jane Doe · Grade 12</div>
             </div>
           </div>
         </div>

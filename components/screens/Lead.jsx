@@ -1211,7 +1211,7 @@ function ImportForm({ api, project }) {
         id="imp"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'Maya Rodriguez, Riverside High, 11\nRowan Okafor, Riverside High, 12'}
+        placeholder={'Jane Doe, Riverside High, 11\nJohn Smith, Riverside High, 12'}
         className={H.input}
         style={S('margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:140px;font:450 13px/1.6 Geist;color:#332D28')}
       />
