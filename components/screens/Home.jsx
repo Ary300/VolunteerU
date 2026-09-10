@@ -108,6 +108,9 @@ export default function Home() {
   const badge = nextBadge();
   const progress = proj ? taskProgress(proj) : { done: 0, total: 0, pct: 0 };
   const remaining = progress.total - progress.done;
+  // The real signed-in name: their first name, else the first word of their full
+  // name. Never a placeholder, and never a dangling "Welcome back," with no name.
+  const greetName = ((state.account.firstName || '').trim() || (state.account.name || '').trim().split(/\s+/)[0] || '').trim();
 
   const toggleTile = (k) =>
     update((st) => {
@@ -119,7 +122,7 @@ export default function Home() {
       <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:24px')}>
         <div>
           <div style={S(`font:500 11px/1 ${MONO};letter-spacing:.12em;text-transform:uppercase;color:#A9A097`)}>{todayLabel()}</div>
-          <h1 style={S('margin:12px 0 0;font:600 34px/1.06 Geist;letter-spacing:-0.04em')}>Welcome back, {state.account.firstName}</h1>
+          <h1 style={S('margin:12px 0 0;font:600 34px/1.06 Geist;letter-spacing:-0.04em')}>Welcome back{greetName ? `, ${greetName}` : ''}</h1>
           <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
             {bookingCount > 0
               ? `${word(bookingCount)} ${plural(bookingCount, 'shift')} booked this week.`
