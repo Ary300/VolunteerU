@@ -128,6 +128,10 @@ export default function Auth({ mode = 'signin' }) {
           // The recovery link put us in a temporary session; set the new password
           // against it. Fails clearly if the link expired or was already used.
           if (!supabase) throw { code: 'AUTH', message: 'The backend is not configured.' };
+          // No recovery session means they didn't arrive from a valid link (or it
+          // already expired). Say so plainly instead of a vague failure.
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw { code: 'AUTH', message: 'Open this page from the reset link in your email, then set your new password. The link expires an hour after it is sent.' };
           const { error } = await supabase.auth.updateUser({ password: form.password });
           if (error) throw { code: 'AUTH', message: error.message || 'This reset link has expired. Request a new one.' };
         }

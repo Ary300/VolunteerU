@@ -15,6 +15,7 @@ import { confirmDialog, toast, openModal } from '../../lib/overlays.js';
 import {
   updateAccount, setPref, togglePref, toggleInList, signOut, transcriptCSV, download,
   requestNotificationPermission, requestLocationPermission, validateEmail,
+  changePassword, validatePassword, passwordStrength,
 } from '../../lib/db.js';
 import { CAUSES, WINDOWS } from '../../lib/seed.js';
 
@@ -111,6 +112,71 @@ function ToggleRow({ label, hint, on, onChange, disabled }) {
 
 /* ---- account ------------------------------------------------------------ */
 
+function PasswordPanel() {
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState({});
+  const [busy, setBusy] = useState(false);
+  const strength = passwordStrength(pw);
+
+  async function submit() {
+    if (busy) return;
+    const e = {};
+    const pwErr = validatePassword(pw);
+    if (pwErr) e.pw = pwErr;
+    if (confirm !== pw) e.confirm = 'Those passwords do not match.';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      await changePassword(pw);
+      setPw('');
+      setConfirm('');
+      toast({ title: 'Password updated', message: 'Use your new password the next time you sign in.', tone: 'ok' });
+    } catch (ex) {
+      toast({ title: 'Could not update your password', message: (ex && ex.message) || 'Try again in a moment.', tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="Password" sub="Change the password you use to sign in.">
+      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field
+          label="New password"
+          type="password"
+          value={pw}
+          onChange={(v) => { setPw(v); if (err.pw) setErr((x) => ({ ...x, pw: undefined })); }}
+          autoComplete="new-password"
+          required
+          error={err.pw}
+          hint={pw && !err.pw ? `Strength: ${strength.label}` : undefined}
+        />
+        <Field
+          label="Confirm new password"
+          type="password"
+          value={confirm}
+          onChange={(v) => { setConfirm(v); if (err.confirm) setErr((x) => ({ ...x, confirm: undefined })); }}
+          autoComplete="new-password"
+          required
+          error={err.confirm}
+        />
+      </div>
+      <div style={S('margin-top:20px')}>
+        <Pressable
+          label="Update password"
+          onClick={submit}
+          className={cx(H.primary, H.press)}
+          style={S('display:inline-flex;align-items:center;gap:9px;padding:0 18px;height:44px;border-radius:12px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 15px/1 Geist;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)')}
+        >
+          {busy ? 'Updating…' : 'Update password'}
+        </Pressable>
+      </div>
+    </Panel>
+  );
+}
+
 function AccountSection({ state, router }) {
   const a = state.account;
   const [f, setF] = useState({
@@ -205,6 +271,8 @@ function AccountSection({ state, router }) {
           {saved ? <span style={S('font:500 13px/1 Geist;color:#3F6B4E')}>Saved</span> : null}
         </div>
       </Panel>
+
+      <PasswordPanel />
 
       <Panel title="Session">
         <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:16px')}>
