@@ -10,13 +10,15 @@
    ========================================================================== */
 
 export function Logo({ size = 26, title = 'VolunteerU' }) {
+  // The mark is slightly wider than tall (~1.16:1). Scale by height and let the
+  // width follow, so it fills its height next to the wordmark instead of being
+  // shrunk to fit a square box.
   return (
     <img
       src="/logo.png"
-      width={size}
       height={size}
       alt={title}
-      style={{ display: 'block', flex: 'none', objectFit: 'contain' }}
+      style={{ display: 'block', flex: 'none', height: size, width: 'auto' }}
     />
   );
 }
