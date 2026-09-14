@@ -25,6 +25,9 @@ yarn-error.log*
 /.playwright-mcp/
 *.png
 !public/**/*.png
+# App icons (Next.js file-convention favicon / apple-touch icon) must be tracked.
+!app/icon.png
+!app/apple-icon.png
 
 # os
 .DS_Store
