@@ -24,7 +24,7 @@ const CREW = [
 ];
 
 const WAITING = [
-  { slug: 'a-priya', n: 'Jane Doe', role: 'Tutor', when: '2 hours ago' },
+  { slug: 'a-priya', n: 'Priya Nair', role: 'Tutor', when: '2 hours ago' },
   { slug: 'a-marcus', n: 'Taylor Sample', role: 'Tutor', when: 'Yesterday' },
   { slug: 'a-ava', n: 'John Doe', role: 'Photographer', when: 'Yesterday' },
   { slug: 'a-ben', n: 'Jane Smith', role: 'Tutor', when: '2 days ago' },
