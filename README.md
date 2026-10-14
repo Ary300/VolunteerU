@@ -1,6 +1,6 @@
 # VolunteerU
 
-Students find real, age-eligible volunteering near them — or run their own project under a
+Students find real, age-eligible volunteering near them - or run their own project under a
 verified sponsor. Either way the hours verify themselves and land on a record a college can check.
 
 Built 1:1 from `VolunteerU Design.dc.html` (Claude Design project `Volunteer Hub Design System`).
@@ -13,7 +13,7 @@ npm run dev
 ```
 
 Then open <http://localhost:3000>. On the sign-in screen, **Continue as Eli Fisch (demo account)**
-loads the seeded record — 86 verified hours, four applications and one live project — so every
+loads the seeded record - 86 verified hours, four applications and one live project - so every
 screen has real data in it.
 
 ```bash
@@ -30,8 +30,8 @@ npm run build && npm start   # production
 - **State** is a small external store (`lib/store.js`) read through `useSyncExternalStore`,
   persisted to `localStorage`, synced across tabs, and exportable/restorable from
   Settings → Your data.
-- **Screens render client-side** (`components/AppFrame.jsx`). Everything they read — the store and
-  URL search params — only exists in the browser, so gating on mount gives one render path with no
+- **Screens render client-side** (`components/AppFrame.jsx`). Everything they read - the store and
+  URL search params - only exists in the browser, so gating on mount gives one render path with no
   hydration divergence.
 
 ## Layout
@@ -47,7 +47,7 @@ components/
   OverlayHost.jsx        toasts, modals, confirms, anchored menus
 lib/
   seed.js                every string, colour and number from the design
-  db.js                  domain logic — selectors and actions
+  db.js                  domain logic - selectors and actions
   store.js               persistence and React bindings
   style.js               CSS-string → style object, design tokens
 .design/                 the source design file, kept for reference
@@ -76,7 +76,7 @@ Supporting routes the design links to but never drew: `/signin`, `/signup`, `/fo
 ## Notes on the data
 
 The seeded dataset is anchored to **Wednesday, July 29 2026** (`lib/format.js`) so every relative
-label — "2 hours ago", "Sat, Aug 9", "Wednesday, July 29" — stays mutually consistent instead of
+label - "2 hours ago", "Sat, Aug 9", "Wednesday, July 29" - stays mutually consistent instead of
 drifting against the real clock.
 
 Headline record totals (86 verified hours, 14 events, 6 organizations) are stored rather than summed
