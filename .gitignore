@@ -33,3 +33,7 @@ yarn-error.log*
 .DS_Store
 *.pem
 .vercel
+
+# Local tool config
+CLAUDE.md
+.claude/
