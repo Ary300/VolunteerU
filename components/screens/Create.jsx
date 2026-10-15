@@ -109,7 +109,7 @@ export default function Create() {
     }
     if (n === 3 && !isTeam) {
       if (!/[A-Za-z]{3}\s+\d{1,2}/.test(draft.firstSession)) e.firstSession = 'Use a date like “Aug 9”.';
-      if (!/\d{1,2}:\d{2}\s*(?:to|-|)\s*\d{1,2}:\d{2}/.test(draft.time)) e.time = 'Use a range like “10:00 to 12:00”.';
+      if (!/\d{1,2}:\d{2}\s*(?:to|-|\u2013)\s*\d{1,2}:\d{2}/.test(draft.time)) e.time = 'Use a range like “10:00 to 12:00”.';
       if (!safetyComplete(draft)) e.safety = 'All three safety commitments are required before you can publish.';
     }
     setErrors(e);
