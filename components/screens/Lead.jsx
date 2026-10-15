@@ -1031,7 +1031,7 @@ function People({ p, params, setParam }) {
 
         <div className="vu-stack vu-stack-gap" style={S('padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;font:450 12px/1 Geist;color:#8A8179')}>
           <div>
-            {rows.length ? `${(safePage - 1) * PAGE + 1}–${(safePage - 1) * PAGE + rows.length}` : '0'} of {filtered.length} people
+            {rows.length ? `${(safePage - 1) * PAGE + 1}-${(safePage - 1) * PAGE + rows.length}` : '0'} of {filtered.length} people
             {filtered.length !== p.people.length ? ` (filtered from ${p.people.length})` : ''}
           </div>
           <div style={S('display:flex;gap:8px')}>

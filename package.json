@@ -2,7 +2,7 @@
   "name": "volunteeru",
   "version": "1.0.0",
   "private": true,
-  "description": "VolunteerU — find verified volunteering near you, or run your own student organization under a verified sponsor.",
+  "description": "VolunteerU, find verified volunteering near you, or run your own student organization under a verified sponsor.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

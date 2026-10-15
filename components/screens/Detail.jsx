@@ -182,7 +182,7 @@ export default function Detail({ id }) {
                   )}
                 >
                   <div style={s('font:500 15px/1 Geist', on ? '' : 'color:#332D28')}>
-                    {sh.d} · {sh.tLong.replace(' to ', '–')}
+                    {sh.d} · {sh.tLong.replace(' to ', '-')}
                   </div>
                   <div style={s(`font:500 12px/1 ${MONO};flex:none`, `color:${left === 0 ? '#A8482A' : on ? '#A8482A' : '#8A8179'}`)}>
                     {left === 0 ? 'full' : `${left} of ${sh.cap} left`}
@@ -199,7 +199,7 @@ export default function Detail({ id }) {
             <div style={S('margin-top:10px;font:600 18px/1.25 Geist;letter-spacing:-0.025em')}>
               {selected.d}
               <br />
-              {selected.tLong.replace(' to ', '–')}
+              {selected.tLong.replace(' to ', '-')}
             </div>
             <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
               <div style={S('display:flex;justify-content:space-between;gap:10px')}>

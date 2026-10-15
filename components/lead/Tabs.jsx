@@ -1537,7 +1537,7 @@ export function SettingsTab({ p }) {
                         {d.t === 'Safety plan'
                           ? 'Version 3, approved by the sponsor on Jul 12. Covers supervision ratios, the two-adult rule, first aid location and the weather cancellation policy.'
                           : d.t === 'Room agreement'
-                          ? `Signed with ${p.sponsor.name}. The community room is held every Saturday 9:45–12:15 through ${p.sponsor.roomBookedTo}.`
+                          ? `Signed with ${p.sponsor.name}. The community room is held every Saturday 9:45-12:15 through ${p.sponsor.roomBookedTo}.`
                           : 'Guardian consent is collected at accept time for anyone under 16. Outstanding forms are listed in the Quality tab.'}
                       </div>
                     ),

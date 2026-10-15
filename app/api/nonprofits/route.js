@@ -94,9 +94,9 @@ export async function GET(request) {
 
   // Progressively broaden so the volunteer always sees the closest related
   // nonprofits rather than an empty result:
-  //   1. exact  — the cause + their state
-  //   2. closest by location — any nonprofit in their state
-  //   3. related by cause — the cause, nationally
+  //   1. exact: the cause + their state
+  //   2. closest by location: any nonprofit in their state
+  //   3. related by cause: the cause, nationally
   //   4. general community orgs near them (last resort, never empty)
   const attempts = [];
   if (q && stateOk) attempts.push({ q, state, ntee });
