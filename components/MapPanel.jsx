@@ -6,7 +6,7 @@
 
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../lib/style.js';
-import { Pressable } from './ui.jsx';
+import { Pressable, Icon } from './ui.jsx';
 import { mapTiles, mapPins } from '../lib/seed.js';
 
 const MONO = "'Geist Mono',monospace";
@@ -63,7 +63,8 @@ export default function MapPanel({ height = 220, top = -46, left = -42, interact
   );
 }
 
-/** The single-address variant used on the opportunity detail screen. */
+/** The single-address variant used on the opportunity detail screen. The tiles
+    are a fixed backdrop, so the link opens the real address on OpenStreetMap. */
 export function AddressMap({ address }) {
   return (
     <div style={S('height:200px;position:relative;overflow:hidden;background:#EDE7DF')}>
@@ -75,10 +76,22 @@ export function AddressMap({ address }) {
           <div key={t.url} style={s('width:256px;height:256px', `background-image:url(${t.url})`, 'background-size:256px 256px')} />
         ))}
       </div>
-      <div style={S('position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:3px')}>
-        <div style={S(`padding:5px 9px;border-radius:6px;background:#1F1B18;font:500 10px/1 ${MONO};color:#fff;white-space:nowrap`)}>{address}</div>
+      <div style={S('position:absolute;left:50%;top:50%;max-width:calc(100% - 24px);transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:3px')}>
+        <div style={S(`max-width:100%;padding:5px 9px;border-radius:6px;background:#1F1B18;font:500 10px/1.3 ${MONO};color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`)}>{address}</div>
         <div style={S('width:12px;height:12px;border-radius:50%;background:#C2603C;border:2px solid #fff')} />
       </div>
+      {address ? (
+        <a
+          href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(address)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cx(H.secondary, H.press)}
+          style={S('position:absolute;left:8px;bottom:8px;display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:8px;background:#fff;border:1px solid #E0D5C9;font:600 12px/1 Geist;color:#1A1714;text-decoration:none')}
+        >
+          <Icon name="map" size={13} />
+          Open in OpenStreetMap
+        </a>
+      ) : null}
       <div style={S(`position:absolute;bottom:8px;right:8px;padding:3px 6px;border-radius:5px;background:rgba(255,255,255,.9);font:400 9px/1 ${MONO};color:#6B635C`)}>© OpenStreetMap</div>
     </div>
   );

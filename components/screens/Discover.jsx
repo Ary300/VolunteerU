@@ -2,40 +2,47 @@
 
 /* ==========================================================================
    Discover.jsx, design screen: `isDiscover`
+   Search opportunities posted on VolunteerU and nonprofits from IRS records
+   in one place. Every filter lives in the URL, so a search can be shared and
+   the back button works. ?ein= opens a nonprofit's detail.
    ========================================================================== */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Pressable, EmptyState, SkeletonRows, Chip, Select, Checkbox, PrimaryButton, SecondaryButton } from '../ui.jsx';
+import { Pressable, Chip, Select, Checkbox, PrimaryButton, SecondaryButton, Icon } from '../ui.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
-import WebNonprofits from '../WebNonprofits.jsx';
+import WebNonprofits, { NonprofitDetail, stateName, formatCount } from '../WebNonprofits.jsx';
 import { useSnapshot } from '../../lib/store.js';
-import { openModal, toast } from '../../lib/overlays.js';
-import {
-  searchOpportunities, suggestionsFor, spotsLeft, spotsLabel, applicationFor, rememberSearch, clearSearches, claimSpot,
-} from '../../lib/db.js';
-import { CAUSES, WINDOWS } from '../../lib/seed.js';
-import { word, startTime } from '../../lib/format.js';
+import { openModal, closeModal } from '../../lib/overlays.js';
+import { rememberSearch, clearSearches } from '../../lib/db.js';
+import { searchListings } from '../../lib/listings.js';
+import { CAUSES } from '../../lib/seed.js';
 
 const MONO = "'Geist Mono',monospace";
 
-const CHIPS = [
-  { k: 'all', t: 'All causes' },
-  { k: 'Food & hunger', t: 'Food & hunger' },
-  { k: 'Education', t: 'Education' },
-  { k: 'Environment', t: 'Environment' },
-  { k: 'Civic', t: 'Civic' },
-  { k: 'Animals', t: 'Animals' },
-  { k: 'win:Saturday afternoon', t: 'Sat afternoon' },
-];
+const QUICK_CAUSES = ['Food & hunger', 'Education', 'Homelessness', 'Environment', 'Animals'];
 
 const SORTS = [
-  { v: 'match', l: 'Best match' },
-  { v: 'soonest', l: 'Soonest' },
-  { v: 'hours', l: 'Most hours' },
-  { v: 'spots', l: 'Most spots left' },
+  { v: 'recent', l: 'Newest' },
+  { v: 'established', l: "Most events (lead's count)" },
 ];
+
+const KINDS = [
+  { k: 'all', t: 'All' },
+  { k: 'student', t: 'Student projects' },
+  { k: 'official', t: 'Nonprofits' },
+];
+
+const PLACES = [
+  { k: 'all', t: 'Anywhere' },
+  { k: 'person', t: 'In person' },
+  { k: 'online', t: 'Online' },
+];
+
+function plural(n, one, many) {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
+}
 
 export default function Discover() {
   const router = useRouter();
@@ -44,33 +51,59 @@ export default function Discover() {
 
   const q = params.get('q') || '';
   const causes = useMemo(() => (params.get('causes') || '').split('|').filter(Boolean), [params]);
-  const windows = useMemo(() => (params.get('windows') || '').split('|').filter(Boolean), [params]);
-  const sort = params.get('sort') || 'match';
+  const sort = params.get('sort') === 'established' ? 'established' : 'recent';
   const savedOnly = params.get('saved') === '1';
-  const tab = params.get('tab') === 'projects' ? 'projects' : 'openings';
   const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
   const kind = ['student', 'official'].includes(params.get('kind')) ? params.get('kind') : 'all';
+  const ein = (params.get('ein') || '').replace(/\D/g, '');
 
   const { state } = useSnapshot();
-  const interest = (state.prefs && state.prefs.interest) || '';
-  // The volunteer's own area, from their saved location or city. Discover defaults
-  // to this the instant they land, never blank, never a stranger's town.
+  // The volunteer's own area, from their saved location or city. With no ?near
+  // at all we fall back to it synchronously, so there is no blank-then-jump.
   const homeRegion = ((state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '')).trim();
-  // An explicit ?near wins (including '' while they type); with no param at all we
-  // fall back to their region synchronously, so there is no blank-then-jump flash.
   const nearParam = params.get('near');
   const near = nearParam !== null ? nearParam : homeRegion;
-  const matchNear = near || homeRegion;
-  // The IRS-registry cards need a *state*. Always fold in the saved ZIP/city so a
-  // bare city name (e.g. "Fairview", which no lookup knows) still resolves to a
-  // state instead of returning nationwide/random nonprofits.
-  const webNear = [near || homeRegion, state.onboarding?.zip || '', (state.account && state.account.zip) || ''].filter(Boolean).join(' ');
+  // Nonprofit search needs a state. Fold in the saved ZIP so a city name no
+  // lookup knows ("Rivertown") still resolves to one. An explicitly empty
+  // Where field means anywhere, so the ZIP is left out then.
+  const savedZip = state.onboarding?.zip || (state.account && state.account.zip) || '';
+  const webNear = nearParam === '' ? '' : [near, near === homeRegion ? savedZip : ''].filter(Boolean).join(' ');
+
   const [draftQuery, setDraftQuery] = useState(q);
+  // Where is typed into local state and written to the URL after a short
+  // pause, so fast typing never races a router update. `committedNear` is the
+  // last value this screen wrote; any other change to `near` came from outside
+  // (back button, a shared link) and replaces the draft.
+  const [draftNear, setDraftNear] = useState(near);
+  const committedNear = useRef(near);
+  const nearTimer = useRef(null);
   const [showSuggest, setShowSuggest] = useState(false);
-  const [searching, setSearching] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [listingCount, setListingCount] = useState(null);
+  const [nonprofitCount, setNonprofitCount] = useState(null);
   const searchWrap = useRef(null);
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia('(max-width: 1179px)');
+    const sync = () => setNarrow(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => setDraftQuery(q), [q]);
+
+  useEffect(() => {
+    if (near === committedNear.current) return;
+    committedNear.current = near;
+    clearTimeout(nearTimer.current);
+    nearTimer.current = null;
+    setDraftNear(near);
+  }, [near]);
+
+  useEffect(() => () => clearTimeout(nearTimer.current), []);
 
   // Close the suggestion panel on an outside click.
   useEffect(() => {
@@ -82,135 +115,222 @@ export default function Discover() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [showSuggest]);
 
-  const setParams = (patch, opts = {}) => {
-    const next = new URLSearchParams(params.toString());
-    Object.entries(patch).forEach(([k, v]) => {
-      if (v === null || v === undefined || v === '' || v === false) next.delete(k);
-      else next.set(k, String(v));
-    });
+  const pushQuery = (next, opts = {}) => {
     const qs = next.toString();
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  // Carry the volunteer's saved preferences (from onboarding) into the visible
-  // filters the first time they land here, so their causes and free time apply
-  // without re-entering them. One-shot, so clearing a filter afterward sticks.
+  // Every URL write carries whatever is typed in Where, so a search or filter
+  // change never drops it, even before its pause has passed.
+  const setParams = (patch, opts = {}) => {
+    clearTimeout(nearTimer.current);
+    nearTimer.current = null;
+    const carryNear = !('near' in patch) && draftNear !== near;
+    const full = carryNear ? { ...patch, near: draftNear } : patch;
+    const keepEmpty = carryNear ? [...(opts.keepEmpty || []), 'near'] : opts.keepEmpty || [];
+    const next = new URLSearchParams(params.toString());
+    Object.entries(full).forEach(([k, v]) => {
+      if (v === null || v === undefined || v === false || (v === '' && !keepEmpty.includes(k))) next.delete(k);
+      else next.set(k, String(v));
+    });
+    if ('near' in full) {
+      const resolved = next.has('near') ? next.get('near') : homeRegion;
+      committedNear.current = resolved;
+      setDraftNear(resolved);
+    }
+    pushQuery(next, opts);
+  };
+  const latestSetParams = useRef(setParams);
+  latestSetParams.current = setParams;
+
+  function typeNear(v) {
+    setDraftNear(v);
+    clearTimeout(nearTimer.current);
+    nearTimer.current = setTimeout(() => {
+      nearTimer.current = null;
+      latestSetParams.current({ near: v }, { replace: true, keepEmpty: ['near'] });
+    }, 400);
+  }
+
+  // Carry the volunteer's saved causes (from onboarding) into the visible
+  // filters the first time they land here. One-shot, so clearing sticks.
   const prefsSeeded = useRef(false);
   useEffect(() => {
     if (prefsSeeded.current) return;
     prefsSeeded.current = true;
-    const untouched = !['q', 'causes', 'windows', 'kind', 'place', 'sort', 'saved'].some((k) => params.get(k) !== null);
-    const pc = (state.prefs && state.prefs.causes) || [];
-    const pw = (state.prefs && state.prefs.windows) || [];
-    if (untouched && (pc.length || pw.length)) {
-      setParams({ causes: pc.join('|') || null, windows: pw.join('|') || null }, { replace: true });
-    }
+    const untouched = !['q', 'causes', 'near', 'kind', 'place', 'sort', 'saved', 'ein'].some((k) => params.get(k) !== null);
+    const pc = ((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c));
+    if (untouched && pc.length) setParams({ causes: pc.join('|') }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const nFilters = causes.length + windows.length + (savedOnly ? 1 : 0);
-  const suggestions = showSuggest ? suggestionsFor(draftQuery) : [];
-  const peerRows = tab === 'projects' ? state.peerProjects : state.peerProjects.slice(0, 5);
-  const weekBookings = state.bookings.slice(0, 2);
-  const weekHours = weekBookings.reduce((a, b) => {
-    const opp = state.opportunities.find((o) => o.id === b.oppId);
-    return a + (opp ? opp.hours : 0);
-  }, 0);
+  /* ---- nonprofit detail, driven by ?ein= ---------------------------------- */
+  const einModal = useRef(null); // { ein, id }
+  useEffect(() => {
+    const cur = einModal.current;
+    if (cur && cur.ein !== ein) {
+      einModal.current = null;
+      closeModal(cur.id, 'route');
+    }
+    if (!ein || (einModal.current && einModal.current.ein === ein)) return;
+    const api = openModal({
+      title: 'Nonprofit',
+      size: 'wide',
+      Body: function NonprofitBody() {
+        return <NonprofitDetail ein={ein} />;
+      },
+      onClose: () => {
+        if (!einModal.current || einModal.current.ein !== ein) return; // closed by a route change
+        einModal.current = null;
+        const next = new URLSearchParams(window.location.search);
+        next.delete('ein');
+        pushQuery(next, { replace: true });
+      },
+    });
+    einModal.current = { ein, id: api.id };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ein]);
 
-  function runSearch(value) {
-    const v = value === undefined ? draftQuery : value;
-    setShowSuggest(false);
-    setSearching(true);
-    rememberSearch(v);
-    setParams({ q: v });
-    setTimeout(() => setSearching(false), 260);
+  // Leaving Discover closes the dialog it opened.
+  useEffect(() => () => {
+    const cur = einModal.current;
+    einModal.current = null;
+    if (cur) closeModal(cur.id, 'unmount');
+  }, []);
+
+  const openNonprofit = (o) => setParams({ ein: o.ein });
+
+  /* ---- search -------------------------------------------------------------- */
+  const term = draftQuery.trim().toLowerCase();
+  const causeSuggestions = showSuggest && term.length >= 2 ? CAUSES.filter((c) => c.toLowerCase().includes(term) && !causes.includes(c)).slice(0, 4) : [];
+  // An empty field lists every recent search; typing narrows them to the ones that contain the text.
+  const recent = (state.recentSearches || []).filter((r) => !term || r.toLowerCase().includes(term));
+  const suggestOpen = showSuggest && (causeSuggestions.length > 0 || recent.length > 0);
+  // One flat list for the keyboard: cause suggestions first, then recent searches.
+  const options = suggestOpen ? [...causeSuggestions.map((v) => ({ kind: 'cause', v })), ...recent.map((v) => ({ kind: 'recent', v }))] : [];
+  const active = activeIdx >= 0 && activeIdx < options.length ? activeIdx : -1;
+  const optionId = (i) => `vu-suggest-opt-${i}`;
+
+  useEffect(() => {
+    if (!suggestOpen) setActiveIdx(-1);
+  }, [suggestOpen]);
+
+  function chooseOption(o) {
+    if (o.kind === 'cause') addCause(o.v);
+    else {
+      setDraftQuery(o.v);
+      runSearch(o.v);
+    }
   }
 
-  function toggleChip(k) {
-    if (k === 'all') {
-      setParams({ causes: null, windows: null, mi: null, saved: null });
+  function onQueryKeyDown(e) {
+    if (e.key === 'Escape') {
+      // Close the list without the browser also wiping the field.
+      e.preventDefault();
+      setShowSuggest(false);
+      e.currentTarget.blur();
       return;
     }
-    if (k.startsWith('win:')) {
-      const w = k.slice(4);
-      const nextW = windows.includes(w) ? windows.filter((x) => x !== w) : [...windows, w];
-      setParams({ windows: nextW.join('|') });
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!suggestOpen) {
+        setShowSuggest(true);
+        return;
+      }
+      const n = options.length;
+      if (!n) return;
+      if (e.key === 'ArrowDown') setActiveIdx(active < 0 || active >= n - 1 ? 0 : active + 1);
+      else setActiveIdx(active <= 0 ? n - 1 : active - 1);
       return;
     }
-    const nextC = causes.includes(k) ? causes.filter((x) => x !== k) : [...causes, k];
+    if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      chooseOption(options[active]);
+    }
+  }
+
+  function runSearch(value) {
+    const v = (value === undefined ? draftQuery : value).trim();
+    setShowSuggest(false);
+    rememberSearch(v);
+    setParams({ q: v });
+  }
+
+  function addCause(c) {
+    setShowSuggest(false);
+    setDraftQuery('');
+    setParams({ q: null, causes: [...causes, c].join('|') });
+  }
+
+  function toggleCause(c) {
+    const nextC = causes.includes(c) ? causes.filter((x) => x !== c) : [...causes, c];
     setParams({ causes: nextC.join('|') });
   }
 
-  const chipIsOn = (chip) => {
-    if (chip.k === 'all') return !causes.length && !windows.length && !savedOnly;
-    if (chip.k.startsWith('win:')) return windows.includes(chip.k.slice(4));
-    return causes.includes(chip.k);
-  };
+  function clearFilters() {
+    clearTimeout(nearTimer.current);
+    nearTimer.current = null;
+    committedNear.current = '';
+    setDraftNear('');
+    const next = new URLSearchParams();
+    next.set('near', '');
+    pushQuery(next);
+  }
+
+  const nFilters = causes.length + (savedOnly ? 1 : 0) + (sort !== 'recent' ? 1 : 0);
 
   function openFilters() {
     openModal({
-      title: 'Filter openings',
-      subtitle: 'Every filter applies to both accredited organizations and student projects.',
+      title: 'Filter opportunities',
+      subtitle: 'Causes also narrow the nonprofit search.',
       size: 'wide',
       Body: function FilterBody({ api }) {
-        const [local, setLocal] = useState({ causes: causes.slice(), windows: windows.slice(), sort, savedOnly });
-        const preview = searchOpportunities({
-          q,
-          causes: local.causes,
-          windows: local.windows,
-          sort: local.sort,
-          savedOnly: local.savedOnly,
-        }).length;
+        const [local, setLocal] = useState({ causes: causes.slice(), sort, savedOnly });
+        const [preview, setPreview] = useState({ n: null, failed: false });
+        const localKey = `${local.causes.join('|')}#${local.sort}#${local.savedOnly}`;
+        useEffect(() => {
+          let alive = true;
+          setPreview({ n: null, failed: false });
+          // Saved-only can't be counted from one page of results, so it gets no number.
+          if (local.savedOnly) return undefined;
+          const t = setTimeout(async () => {
+            try {
+              const rows = await searchListings({ q, causes: local.causes, kind, place, near, sort: local.sort });
+              const n = rows.total ?? rows.length;
+              if (alive) setPreview({ n, failed: false });
+            } catch (err) {
+              console.error('[discover] filter preview failed', err);
+              if (alive) setPreview({ n: null, failed: true });
+            }
+          }, 200);
+          return () => {
+            alive = false;
+            clearTimeout(t);
+          };
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [localKey]);
+        const toggle = (c) => setLocal((f) => ({ ...f, causes: f.causes.includes(c) ? f.causes.filter((x) => x !== c) : [...f.causes, c] }));
+        const label = local.savedOnly ? 'Show saved opportunities' : preview.n === null ? 'Show opportunities' : preview.n === 0 ? 'Show 0 opportunities' : `Show ${plural(preview.n, 'opportunity', 'opportunities')}`;
         return (
           <div>
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Causes</div>
-            <div style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
+            <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>Causes</div>
+            <div role="group" aria-label="Causes" style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
               {CAUSES.map((c) => (
-                <Chip
-                  key={c}
-                  label={c}
-                  role="checkbox"
-                  on={local.causes.includes(c)}
-                  py={9}
-                  px={13}
-                  fs={13}
-                  onClick={() => setLocal((f) => ({ ...f, causes: f.causes.includes(c) ? f.causes.filter((x) => x !== c) : [...f.causes, c] }))}
-                />
-              ))}
-            </div>
-            <div style={S(`margin-top:22px;font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>When you are free</div>
-            <div style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
-              {WINDOWS.map((w) => (
-                <Chip
-                  key={w}
-                  label={w}
-                  role="checkbox"
-                  on={local.windows.includes(w)}
-                  py={9}
-                  px={13}
-                  fs={13}
-                  onClick={() => setLocal((f) => ({ ...f, windows: f.windows.includes(w) ? f.windows.filter((x) => x !== w) : [...f.windows, w] }))}
-                />
+                <Chip key={c} label={c} role="checkbox" on={local.causes.includes(c)} py={9} px={13} fs={13} onClick={() => toggle(c)} />
               ))}
             </div>
             <div style={S('margin-top:22px')}>
               <Select label="Sort by" value={local.sort} options={SORTS} onChange={(v) => setLocal((f) => ({ ...f, sort: v }))} />
             </div>
             <div style={S('margin-top:18px')}>
-              <Checkbox checked={local.savedOnly} size={16} label="Only show my shortlist" onChange={(v) => setLocal((f) => ({ ...f, savedOnly: v }))} />
+              <Checkbox checked={local.savedOnly} size={16} label="Only show opportunities I saved" onChange={(v) => setLocal((f) => ({ ...f, savedOnly: v }))} />
             </div>
             <div style={S('margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-              <div style={S('font:450 13px/1.4 Geist;color:#8A8179')}>
-                {preview} {preview === 1 ? 'opening matches' : 'openings match'} these filters
+              <div aria-live="polite" style={S('font:450 13px/1.4 Geist;color:#8A8179')}>
+                {local.savedOnly ? '' : preview.failed ? "Couldn't count matches right now." : preview.n === null ? 'Counting matches' : `${plural(preview.n, 'opportunity matches', 'opportunities match')}`}
               </div>
-              <div style={S('display:flex;gap:10px')}>
-                <SecondaryButton
-                  h={40}
-                  px={16}
-                  r={11}
-                  fs={14}
-                  onClick={() => setLocal({ causes: [], windows: [], sort: 'match', savedOnly: false })}
-                >
+              <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
+                <SecondaryButton h={40} px={16} r={11} fs={14} onClick={() => setLocal({ causes: [], sort: 'recent', savedOnly: false })}>
                   Reset
                 </SecondaryButton>
                 <PrimaryButton
@@ -221,14 +341,13 @@ export default function Discover() {
                   onClick={() => {
                     setParams({
                       causes: local.causes.join('|'),
-                      windows: local.windows.join('|'),
-                      sort: local.sort === 'match' ? null : local.sort,
+                      sort: local.sort === 'recent' ? null : local.sort,
                       saved: local.savedOnly ? '1' : null,
                     });
                     api.close();
                   }}
                 >
-                  Show {preview}
+                  {label}
                 </PrimaryButton>
               </div>
             </div>
@@ -240,243 +359,247 @@ export default function Discover() {
 
   function verifyInfo() {
     openModal({
-      title: 'How we verify an organization',
-      subtitle: 'A green check is never automatic.',
+      title: 'How verification works',
       body: (
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
           {[
-            ['Registration', 'We confirm the organization is a registered nonprofit, school, library or public agency in good standing.'],
-            ['Insurance', 'General liability coverage has to be current and on file before a listing can go live.'],
-            ['A named staff contact', 'Every shift lists a background-checked adult who is on site and reachable.'],
-            ['Youth policy', 'Age minimums, guardian consent and the two-adult rule are enforced before a listing is shown to you.'],
-            ['Re-checks', 'Verification is reviewed every term. A lapse pulls the listing until it is fixed.'],
+            ['An organization asks for it', 'It sends a request from its project page with the name of a staff contact.'],
+            ['A person reviews it', 'Someone at VolunteerU checks the request by hand.'],
+            ["What it doesn't cover", "Verification isn't a background check. Read each listing's details before you apply."],
+            ['Nonprofits from IRS records', "They're registered with the IRS. VolunteerU hasn't reviewed them."],
           ].map(([t, b]) => (
-            <div key={t} style={S('display:flex;gap:11px;align-items:flex-start')}>
-              <span aria-hidden="true" style={S('color:#3F6B4E;margin-top:2px')}>✓</span>
-              <div>
-                <div style={S('font:600 14px/1.3 Geist')}>{t}</div>
-                <div style={S('margin-top:5px;font:450 13px/1.55 Geist;color:#6B635C')}>{b}</div>
-              </div>
+            <div key={t}>
+              <div style={S('font:600 14px/1.3 Geist')}>{t}</div>
+              <div style={S('margin-top:5px;font:450 13px/1.55 Geist;color:#6B635C')}>{b}</div>
             </div>
           ))}
-          <div style={S('margin-top:4px;padding:14px;border-radius:12px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.55 Geist;color:#6B635C')}>
-            Student projects do not carry the check themselves, they show the lead and the verified sponsor standing behind them.
-          </div>
         </div>
       ),
     });
   }
 
-  function claim(id) {
-    try {
-      const { shift } = claimSpot(id);
-      router.push(`/apply/${id}?shift=${shift.id}`);
-    } catch (err) {
-      if (err && err.code === 'FULL') {
-        toast({
-          title: 'Every shift is full',
-          message: 'Join the waitlist and we will text you the moment a spot opens.',
-          tone: 'warn',
-          actionLabel: 'Open listing',
-          onAction: () => router.push(`/opportunity/${id}`),
-        });
-      } else {
-        toast({ title: 'That listing is gone', message: 'It was taken down while you were browsing.', tone: 'danger' });
-      }
-    }
-  }
+  // On narrow screens the fields stack, so the list sits in the flow under
+  // What instead of covering Where and the Search button.
+  const suggestBox = suggestOpen ? (
+    <div
+      id="vu-suggest"
+      role="listbox"
+      aria-label="Suggestions"
+      onMouseDown={(e) => e.preventDefault()}
+      style={s(
+        narrow ? 'position:relative' : 'position:absolute;left:0;right:0;top:56px;z-index:70;max-width:640px',
+        'border-radius:12px;border:1px solid #E8E1D9;background:#fff;box-shadow:0 18px 40px -22px rgba(60,40,25,.35), 0 1px 2px rgba(30,20,10,.06);overflow:hidden'
+      )}
+    >
+      {causeSuggestions.length ? (
+        <>
+          <div style={S('padding:12px 14px 6px;font:600 12px/1 Geist;color:#8A8179')}>Causes</div>
+          {causeSuggestions.map((c, i) => (
+            <Pressable
+              key={c}
+              id={optionId(i)}
+              role="option"
+              tabIndex={-1}
+              aria-selected={active === i ? 'true' : 'false'}
+              label={`Filter by ${c}`}
+              onClick={() => addCause(c)}
+              onMouseEnter={() => setActiveIdx(i)}
+              className={cx(H.row, H.press)}
+              style={s('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease', active === i ? 'background:#F6F2EE' : '')}
+            >
+              <Icon name="filter" size={13} color="#C2603C" />
+              <span style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{c}</span>
+            </Pressable>
+          ))}
+        </>
+      ) : null}
+      {recent.length ? (
+        <>
+          <div style={s('padding:12px 14px 6px;display:flex;align-items:center;justify-content:space-between', causeSuggestions.length ? 'border-top:1px solid #F1EBE4' : '')}>
+            <div style={S('font:600 12px/1 Geist;color:#8A8179')}>Recent searches</div>
+            <Pressable label="Clear recent searches" onClick={() => clearSearches()} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
+              Clear
+            </Pressable>
+          </div>
+          {recent.map((r, j) => {
+            const i = causeSuggestions.length + j;
+            return (
+            <Pressable
+              key={r}
+              id={optionId(i)}
+              role="option"
+              tabIndex={-1}
+              aria-selected={active === i ? 'true' : 'false'}
+              label={`Search ${r}`}
+              onClick={() => chooseOption({ kind: 'recent', v: r })}
+              onMouseEnter={() => setActiveIdx(i)}
+              className={cx(H.row, H.press)}
+              style={s('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease', active === i ? 'background:#F6F2EE' : '')}
+            >
+              <Icon name="clock" size={13} color="#A9A097" />
+              <span style={S('font:450 13px/1.3 Geist;color:#332D28')}>{r}</span>
+            </Pressable>
+            );
+          })}
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
+  const showNonprofits = kind !== 'student' && !savedOnly;
+  const nonprofitWhere = nonprofitCount && nonprofitCount.state ? ` in ${stateName(nonprofitCount.state)}` : '';
 
   return (
     <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
-      <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:24px')}>
-        <div>
-          <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Discover{state.account.firstName ? `, ${state.account.firstName}` : ''}</h1>
-          <p style={S('margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>
-            One feed for every opportunity near you, projects made on VolunteerU and registered nonprofits alike. Filter by cause, type and where they run.
-          </p>
-        </div>
-        <div style={S('display:flex;gap:10px')}>
+      <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:24px')}>
+        <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Discover</h1>
+        <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
           <Pressable
             label={`Filters${nFilters ? `, ${nFilters} active` : ''}`}
-            expanded={false}
             onClick={openFilters}
             className={cx(H.secondaryLift, H.press)}
             style={s(
-              'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px',
+              'display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px',
               `border:1px solid ${nFilters ? '#D8CEC3' : '#E4DDD4'}`,
               'background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease'
             )}
           >
+            <Icon name="filter" size={15} />
             Filters
             {nFilters ? (
               <span style={S(`min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#F5E7E0;color:#A8482A;font:600 10px/18px ${MONO};text-align:center`)}>{nFilters}</span>
             ) : null}
           </Pressable>
           <Pressable
-            label="Start a project"
+            label="Start a student project"
             onClick={() => router.push('/create')}
             className={cx(H.primaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:transform .16s ease, box-shadow .16s ease, background .16s ease')}
+            style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:transform .16s ease, background .16s ease')}
           >
-            <span aria-hidden="true" style={S('font-size:11px;opacity:.9')}>▷</span>
-            Start a project
+            <Icon name="plus" size={15} />
+            Start a student project
           </Pressable>
         </div>
       </div>
 
-      <div style={S('margin-top:18px;display:flex;gap:6px')}>
-        <span style={s('padding:8px 14px;border-radius:9px;font:600 13px/1 Geist', 'border:1px solid #C2603C;background:#FAF6F3;color:#A8482A')}>Find projects</span>
+      <div style={S('margin-top:18px;display:flex;gap:6px;flex-wrap:wrap')}>
+        <span aria-current="page" style={s('padding:8px 14px;border-radius:9px;font:600 13px/1 Geist', 'border:1px solid #C2603C;background:#FAF6F3;color:#A8482A')}>Find opportunities</span>
         <Pressable label="Find volunteers" onClick={() => router.push('/volunteers')} className={cx(H.press)} style={s('padding:8px 14px;border-radius:9px;cursor:pointer;font:600 13px/1 Geist', 'border:1px solid #E8E1D9;background:#fff;color:#57504A')}>Find volunteers</Pressable>
       </div>
 
-      <div ref={searchWrap} style={S('position:relative')}>
-        <div
-          className={H.input}
-          style={s(
-            'margin-top:22px;display:flex;align-items:center;gap:10px;padding:13px 16px;border-radius:12px',
-            `border:1px solid ${showSuggest ? '#D8CEC3' : '#E8E1D9'}`,
-            'background:#fff;transition:border-color .16s ease'
-          )}
-        >
-          <span aria-hidden="true" style={S('color:#BEB5AC;font-size:14px')}>⌕</span>
-          <input
-            id="vu-discover-search"
-            type="search"
-            role="combobox"
-            aria-expanded={showSuggest}
-            aria-controls="vu-suggest"
-            aria-label="Search openings"
-            autoComplete="off"
-            value={draftQuery}
-            placeholder="Search “food bank, tutoring, Saturday afternoon”"
-            onChange={(e) => {
-              setDraftQuery(e.target.value);
-              setShowSuggest(true);
-            }}
-            onFocus={() => setShowSuggest(true)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') runSearch();
-              if (e.key === 'Escape') {
-                setShowSuggest(false);
-                e.currentTarget.blur();
-              }
-            }}
-            style={S('flex:1;min-width:0;font:450 15px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
-          />
-          {draftQuery ? (
-            <button
-              type="button"
-              aria-label="Clear search"
-              className={cx(H.icon, H.press)}
-              onClick={() => {
-                setDraftQuery('');
-                runSearch('');
-              }}
-              style={S('flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#A9A097;font-size:12px;cursor:pointer;transition:background .16s ease')}
-            >
-              ✕
-            </button>
-          ) : null}
-        </div>
-
-        <div
-          className={H.input}
-          style={S('margin-top:14px;display:flex;align-items:center;gap:10px;padding:13px 16px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;transition:border-color .16s ease')}
-        >
-          <span aria-hidden="true" style={S('color:#BEB5AC;font-size:14px')}>◎</span>
-          <input
-            type="text"
-            aria-label="Filter by location"
-            autoComplete="off"
-            value={near}
-            placeholder={`City or ZIP${homeRegion ? `, e.g. ${homeRegion}` : ', e.g. Rivertown'}`}
-            onChange={(e) => setParams({ near: e.target.value || null }, { replace: true })}
-            style={S('flex:1;min-width:0;font:450 14px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
-          />
-          {near && near !== homeRegion ? (
-            <button
-              type="button"
-              aria-label="Reset to my area"
-              title="Reset to my area"
-              className={cx(H.icon, H.press)}
-              onClick={() => setParams({ near: null }, { replace: true })}
-              style={S('flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#A9A097;font-size:12px;cursor:pointer;transition:background .16s ease')}
-            >
-              ✕
-            </button>
-          ) : null}
-        </div>
-
-        {showSuggest ? (
-          <div
-            id="vu-suggest"
-            role="listbox"
-            className="vu-screen"
-            style={S('position:absolute;left:0;right:0;top:100%;margin-top:6px;z-index:70;border-radius:12px;border:1px solid #E8E1D9;background:#fff;box-shadow:0 22px 44px -22px rgba(60,40,25,.42), 0 1px 2px rgba(30,20,10,.06);overflow:hidden')}
+      <form
+        ref={searchWrap}
+        role="search"
+        aria-label="Search opportunities and nonprofits"
+        onSubmit={(e) => {
+          e.preventDefault();
+          runSearch();
+        }}
+        style={S('position:relative;margin-top:22px')}
+      >
+        <div className="vu-stack vu-stack-gap" style={S('display:flex;gap:10px;align-items:stretch')}>
+          <label
+            className={H.input}
+            style={s(
+              // min-height keeps the field 50px tall when phones stack the row
+              // into a column, where flex:1.4 would set its height basis to 0.
+              'flex:1.4;min-width:0;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:50px;min-height:50px;border-radius:12px;cursor:text',
+              `border:1px solid ${showSuggest ? '#D8CEC3' : '#E8E1D9'}`,
+              'background:#fff;transition:border-color .16s ease'
+            )}
           >
-            {suggestions.length ? (
-              <>
-                <div style={S(`padding:10px 14px 6px;font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Suggestions</div>
-                {suggestions.map((sg) => (
-                  <Pressable
-                    key={`${sg.kind}-${sg.id}-${sg.label}`}
-                    role="option"
-                    label={sg.label}
-                    onClick={() => {
-                      if (sg.kind === 'project') router.push(`/projects/${sg.id}`);
-                      else router.push(`/opportunity/${sg.id}`);
-                      setShowSuggest(false);
-                    }}
-                    className={cx(H.row, H.press)}
-                    style={S('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease')}
-                  >
-                    <span aria-hidden="true" style={S('font-size:11px;color:#C2603C;width:14px')}>
-                      {sg.kind === 'org' ? '◎' : sg.kind === 'project' ? '◈' : '⌕'}
-                    </span>
-                    <span style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{sg.label}</span>
-                    <span style={S('font:450 12px/1.3 Geist;color:#A9A097')}>{sg.sub}</span>
-                  </Pressable>
-                ))}
-              </>
+            <span style={S('flex:none;font:600 12px/1 Geist;color:#57504A')}>What</span>
+            <Icon name="search" size={15} color="#A9A097" />
+            <input
+              id="vu-discover-search"
+              type="search"
+              role="combobox"
+              aria-expanded={suggestOpen}
+              aria-controls={suggestOpen ? 'vu-suggest' : undefined}
+              aria-activedescendant={active >= 0 ? optionId(active) : undefined}
+              aria-autocomplete="list"
+              aria-label="What: cause, organization or nonprofit name"
+              autoComplete="off"
+              enterKeyHint="search"
+              value={draftQuery}
+              placeholder="Food bank, tutoring, animal shelter"
+              onChange={(e) => {
+                setDraftQuery(e.target.value);
+                setShowSuggest(true);
+                setActiveIdx(-1);
+              }}
+              onFocus={() => setShowSuggest(true)}
+              onClick={() => setShowSuggest(true)}
+              onBlur={(e) => {
+                // Moving within the search form (to the Search button, say) keeps
+                // the list put, so the layout doesn't jump under the pointer.
+                const to = e.relatedTarget;
+                if (!to || !(searchWrap.current && searchWrap.current.contains(to))) setShowSuggest(false);
+              }}
+              onKeyDown={onQueryKeyDown}
+              style={S('flex:1;min-width:0;font:450 15px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
+            />
+            {draftQuery ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                className={cx(H.icon, H.press)}
+                onClick={() => {
+                  setDraftQuery('');
+                  runSearch('');
+                }}
+                style={S('flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#8A8179;cursor:pointer;transition:background .16s ease')}
+              >
+                <Icon name="x" size={13} />
+              </button>
             ) : null}
-            {state.recentSearches.length ? (
-              <>
-                <div style={s('padding:10px 14px 6px;display:flex;align-items:center;justify-content:space-between', suggestions.length ? 'border-top:1px solid #F1EBE4' : '')}>
-                  <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Recent</div>
-                  <Pressable label="Clear recent searches" onClick={() => clearSearches()} className={H.link} style={S('font:500 11px/1 Geist;color:#C2603C;cursor:pointer')}>
-                    Clear
-                  </Pressable>
-                </div>
-                {state.recentSearches.map((r) => (
-                  <Pressable
-                    key={r}
-                    role="option"
-                    label={`Search ${r}`}
-                    onClick={() => {
-                      setDraftQuery(r);
-                      runSearch(r);
-                    }}
-                    className={cx(H.row, H.press)}
-                    style={S('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease')}
-                  >
-                    <span aria-hidden="true" style={S('font-size:11px;color:#BEB5AC;width:14px')}>↺</span>
-                    <span style={S('font:450 13px/1.3 Geist;color:#332D28')}>{r}</span>
-                  </Pressable>
-                ))}
-              </>
-            ) : null}
-            {!suggestions.length && !state.recentSearches.length ? (
-              <div style={S('padding:14px;font:450 13px/1.5 Geist;color:#8A8179')}>
-                Try a cause, an organization, or a day, “Saturday afternoon, food bank, tutoring”.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+          </label>
+          {narrow ? suggestBox : null}
 
-      {tab === 'openings' ? (
-        <div role="group" aria-label="Opportunity type" style={S('margin-top:16px;display:flex;gap:6px')}>
-          {[{ k: 'all', t: 'All opportunities' }, { k: 'student', t: 'Made on VolunteerU' }, { k: 'official', t: 'Registered nonprofits' }].map((o) => {
+          <label
+            className={H.input}
+            style={S('flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:50px;min-height:50px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;cursor:text;transition:border-color .16s ease')}
+          >
+            <span style={S('flex:none;font:600 12px/1 Geist;color:#57504A')}>Where</span>
+            <Icon name="pin" size={15} color="#A9A097" />
+            <input
+              type="text"
+              aria-label="Where: city or ZIP. Leave empty to search anywhere."
+              autoComplete="off"
+              value={draftNear}
+              placeholder="City or ZIP, or anywhere"
+              onChange={(e) => typeNear(e.target.value)}
+              onFocus={() => setShowSuggest(false)}
+              style={S('flex:1;min-width:0;font:450 15px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
+            />
+            {homeRegion && draftNear !== homeRegion ? (
+              <button
+                type="button"
+                className={cx(H.link, H.press)}
+                onClick={() => setParams({ near: null }, { replace: true })}
+                style={S('flex:none;font:500 12px/1 Geist;color:#C2603C;cursor:pointer;white-space:nowrap;background:none;border:0;padding:4px')}
+              >
+                Use {homeRegion}
+              </button>
+            ) : null}
+          </label>
+
+          <button
+            type="submit"
+            className={cx(H.primary, H.press)}
+            style={S('flex:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 20px;height:50px;border-radius:12px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer')}
+          >
+            <Icon name="search" size={15} />
+            Search
+          </button>
+        </div>
+
+        {!narrow ? suggestBox : null}
+      </form>
+
+      <div className="vu-stack vu-stack-gap" style={S('margin-top:16px;display:flex;gap:18px;flex-wrap:wrap;align-items:center')}>
+        <div role="radiogroup" aria-label="Who posted it" style={S('display:flex;gap:6px;flex-wrap:wrap')}>
+          {KINDS.map((o) => {
             const on = kind === o.k;
             return (
               <Pressable
@@ -488,9 +611,9 @@ export default function Discover() {
                 className={cx(H.press)}
                 style={s(
                   'padding:8px 14px;border-radius:9px',
-                  `border:1px solid ${on ? '#C2603C' : '#E8E1D9'}`,
-                  `background:${on ? '#FAF6F3' : '#FFFFFF'}`,
-                  `color:${on ? '#A8482A' : '#57504A'}`,
+                  `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
+                  `background:${on ? '#1F1B18' : '#FFFFFF'}`,
+                  `color:${on ? '#FFFFFF' : '#57504A'}`,
                   'font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
                 )}
               >
@@ -499,11 +622,8 @@ export default function Discover() {
             );
           })}
         </div>
-      ) : null}
-
-      {tab === 'openings' ? (
-        <div role="group" aria-label="Where openings happen" style={S('margin-top:12px;display:flex;gap:6px')}>
-          {[{ k: 'all', t: 'All' }, { k: 'person', t: 'In person' }, { k: 'online', t: 'Online' }].map((o) => {
+        <div role="radiogroup" aria-label="Where it happens" style={S('display:flex;gap:6px;flex-wrap:wrap')}>
+          {PLACES.map((o) => {
             const on = place === o.k;
             return (
               <Pressable
@@ -526,17 +646,17 @@ export default function Discover() {
             );
           })}
         </div>
-      ) : null}
+      </div>
 
-      <div role="group" aria-label="Quick filters" style={S('margin-top:14px;display:flex;flex-wrap:wrap;gap:8px')}>
-        {CHIPS.map((c) => {
-          const on = chipIsOn(c);
+      <div role="group" aria-label="Causes" style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
+        {[{ k: 'all', t: 'All causes' }, ...Array.from(new Set([...QUICK_CAUSES, ...causes])).map((c) => ({ k: c, t: c }))].map((c) => {
+          const on = c.k === 'all' ? !causes.length : causes.includes(c.k);
           return (
             <Pressable
               key={c.k}
               label={c.t}
               pressed={on}
-              onClick={() => toggleChip(c.k)}
+              onClick={() => (c.k === 'all' ? setParams({ causes: null }) : toggleCause(c.k))}
               className={cx(on ? H.link : H.chip, H.press)}
               style={s(
                 'padding:8px 13px;border-radius:9px',
@@ -552,19 +672,44 @@ export default function Discover() {
         })}
       </div>
 
-      <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:26px;align-items:start')}>
-        <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <div style={S('display:flex;align-items:baseline;gap:8px;flex-wrap:wrap')}>
-            <div style={S('font:600 16px/1.2 Geist;letter-spacing:-0.02em;color:#1A1714')}>Volunteer opportunities</div>
-            <div style={S('font:450 13px/1.2 Geist;color:#A9A097')}>
-              {kind === 'student' ? 'Made on VolunteerU' : kind === 'official' ? 'Registered nonprofits' : 'On VolunteerU and from the nonprofit registry'}
-            </div>
-          </div>
-          {interest && !q && kind === 'all' && place === 'all' && !causes.length ? (
-            <DiscoverListings mode="match" interest={interest} causes={state.prefs.causes || []} near={matchNear} />
+      {listingCount !== null || (showNonprofits && nonprofitCount) ? (
+        <div aria-live="polite" style={S('margin-top:20px;display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;font:450 14px/1.4 Geist;color:#57504A')}>
+          <span>
+            {listingCount !== null ? plural(listingCount, 'opportunity', 'opportunities') + ' on VolunteerU' : ''}
+            {listingCount !== null && showNonprofits && nonprofitCount ? ', ' : ''}
+            {showNonprofits && nonprofitCount ? `${plural(nonprofitCount.total, 'nonprofit', 'nonprofits')}${nonprofitWhere}` : ''}
+          </span>
+          {showNonprofits && nonprofitCount && nonprofitCount.total ? (
+            <a href="#nonprofits" className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;text-decoration:none')}>
+              Jump to nonprofits
+            </a>
           ) : null}
-          <DiscoverListings q={q} causes={causes} kind={kind} place={place} near={near} sort={sort} merged showEmpty={kind === 'student'} />
-          <WebNonprofits q={q} near={webNear} causes={causes.length ? causes : (state.prefs.causes || [])} kind={kind} heading="From the nonprofit registry" />
+        </div>
+      ) : null}
+
+      <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:18px;align-items:start')}>
+        <div style={S('display:flex;flex-direction:column;gap:14px')}>
+          <DiscoverListings
+            q={q}
+            causes={causes}
+            kind={kind}
+            place={place}
+            near={near}
+            sort={sort}
+            savedOnly={savedOnly}
+            onClearFilters={clearFilters}
+            onCount={setListingCount}
+          />
+          <WebNonprofits
+            id="nonprofits"
+            q={q}
+            near={webNear}
+            causes={causes}
+            kind={showNonprofits ? kind : 'student'}
+            onOpen={openNonprofit}
+            onClear={() => runSearch('')}
+            onCount={setNonprofitCount}
+          />
         </div>
 
         <div style={S('display:flex;flex-direction:column;gap:14px')}>
@@ -574,82 +719,27 @@ export default function Discover() {
             className={cx(H.card, H.press)}
             style={S('text-align:left;padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff;cursor:pointer;transition:border-color .16s ease')}
           >
-            <div style={S(`font:500 10px/1 ${MONO};letter-spacing:.1em;text-transform:uppercase;color:#A9A097`)}>Directory</div>
-            <div style={S('margin-top:9px;font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>Looking for people, not projects?</div>
-            <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>Search every volunteer by cause and city. →</div>
+            <div style={S('font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>Looking for people to help with your project?</div>
+            <div style={S('margin-top:6px;display:flex;align-items:center;gap:6px;font:450 13px/1.5 Geist;color:#6B635C')}>
+              Search volunteers by cause and city
+              <Icon name="arrow-right" size={13} />
+            </div>
           </Pressable>
 
           <div style={S('padding:18px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
             <div style={S('font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>What verified means</div>
             <div style={S('margin-top:7px;font:450 13px/1.5 Geist;color:#6B635C')}>
-              A green check means the organization is a registered institution we confirmed, with insurance and a named staff contact on file.
+              A green check means a VolunteerU reviewer checked the organization by hand. Student projects don&apos;t carry one.
             </div>
             <Pressable
-              label="How we verify organizations"
+              label="How verification works"
               onClick={verifyInfo}
               className={cx(H.secondary, H.press)}
-              style={S('margin-top:14px;display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
             >
-              How we verify
+              How verification works
             </Pressable>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResultCard({ m, onOpen, onClaim }) {
-  const app = applicationFor(m.id);
-  const applied = app && app.st !== 'Withdrawn' && app.st !== 'Declined';
-  const openShift = m.shifts.find((x) => spotsLeft(x) > 0);
-  const full = !openShift;
-
-  return (
-    <div className={cx('vu-media-row', H.card)} style={S('display:grid;grid-template-columns:180px 1fr;border-radius:14px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;transition:border-color .16s ease')}>
-      <Pressable className={cx('vu-media-thumb', H.press)} label={`${m.title} at ${m.org}`} onClick={onOpen} style={S('min-height:168px;cursor:pointer')}>
-        <ImageSlot src={m.img} shape="rect" placeholder={m.ph} alt={m.ph} />
-      </Pressable>
-      <div style={S('padding:18px 20px')}>
-        <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:14px')}>
-          <Pressable label={`Open ${m.title}`} onClick={onOpen} style={S('cursor:pointer')}>
-            <div style={S('font:600 17px/1.25 Geist;letter-spacing:-0.025em')}>{m.title}</div>
-            <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>
-              {m.org} · {m.meta}
-            </div>
-          </Pressable>
-          <div style={S('flex:none;display:flex;align-items:center;gap:6px')}>
-            {m.verified ? <div style={S(`padding:5px 9px;border-radius:7px;background:#EAF3EC;font:500 11px/1 ${MONO};color:#3F6B4E`)}>✓ VERIFIED</div> : null}
-            <div style={S(`padding:5px 9px;border-radius:7px;background:#F5E7E0;font:500 12px/1 ${MONO};color:#A8482A`)}>{m.score}%</div>
-          </div>
-        </div>
-        <div style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:6px')}>
-          {m.tags.map((t) => (
-            <div key={t} style={S('padding:5px 9px;border-radius:7px;background:#F6F2EE;font:500 11px/1 Geist;color:#57504A')}>
-              {t}
-            </div>
-          ))}
-        </div>
-        <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#6B635C')}>{m.why}</div>
-        <div className="vu-stack vu-stack-gap" style={S('margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-          <div style={S(`font:500 12px/1 ${MONO};color:#A9A097`)}>
-            {m.hrs} · {openShift ? spotsLabel(openShift).replace(' left', ' spots left') : 'no spots left'}
-          </div>
-          {applied ? (
-            <div style={S('display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:10px;border:1px solid #E4DDD4;background:#FCFAF8;color:#57504A;font:600 13px/1 Geist')}>
-              {app.st === 'Accepted' ? '✓ Confirmed' : 'Applied'}
-            </div>
-          ) : (
-            <Pressable
-              label={full ? 'Join the waitlist' : `Claim a spot for ${m.title}`}
-              onClick={onClaim}
-              className={cx(H.primaryLift, H.press)}
-              style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:9px 15px;border-radius:10px;border:1px solid #A8482A;background:linear-gradient(180deg,#D2775B 0%,#C2603C 100%);color:#fff;font:600 13px/1 Geist;cursor:pointer;transition:transform .16s ease, box-shadow .16s ease, background .16s ease')}
-            >
-              <span aria-hidden="true" style={S('font-size:10px;opacity:.9')}>▷</span>
-              {full ? 'Join waitlist' : 'Claim spot'}
-            </Pressable>
-          )}
         </div>
       </div>
     </div>
