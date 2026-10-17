@@ -37,3 +37,6 @@ yarn-error.log*
 # Local tool config
 CLAUDE.md
 .claude/
+
+# supabase CLI local state
+/supabase/.temp/
