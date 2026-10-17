@@ -6,12 +6,13 @@
    enforces route guards, and hosts overlays plus the design's screen nav.
    ========================================================================== */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { hydrate, useSnapshot, useHydrated } from '../lib/store.js';
 import { initAuth } from '../lib/auth.js';
-import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours } from '../lib/db.js';
+import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours, justSignedOut as signedOutRecently } from '../lib/db.js';
+import { sameSitePath } from '../lib/safePath.js';
 import OverlayHost from './OverlayHost.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 import AnalyticsProvider from './AnalyticsProvider.jsx';
@@ -21,6 +22,15 @@ import { identifyUser, resetAnalytics } from '../lib/analytics.js';
 const PROTECTED = ['/app', '/discover', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
+
+/** The ?next= of the current URL when it is a same-site page outside the auth forms, else ''. */
+function nextTarget(search) {
+  let raw = '';
+  try { raw = new URLSearchParams(search).get('next') || ''; } catch { raw = ''; }
+  const p = sameSitePath(raw);
+  const path = p.split(/[?#]/)[0];
+  return p && !AUTH_ONLY.includes(path) ? p : '';
+}
 
 export default function Providers({ children }) {
   const pathname = usePathname();
@@ -78,32 +88,64 @@ export default function Providers({ children }) {
     }
   }, [hydrated, state.session.authed, state.account.id, state.account.email]);
 
-  /* Mirror preferences onto <html> so CSS can act on them. */
+  /* Mirror preferences onto <html> so CSS can act on them. The store mutates
+     `prefs.appearance` in place, so the effect keys on the values themselves;
+     keying on the object meant a change only showed up after a reload. */
+  const appearance = (state.prefs && state.prefs.appearance) || {};
+  const motionPref = appearance.motion === 'off' ? 'off' : 'system';
+  const textSizePref = appearance.textSize || 'default';
+  const contrastPref = appearance.contrast || 'default';
   useEffect(() => {
     if (!hydrated) return;
     const el = document.documentElement;
-    const a = state.prefs.appearance;
-    el.dataset.motion = a.motion === 'off' ? 'off' : 'system';
-    el.dataset.textsize = a.textSize;
-    el.dataset.contrast = a.contrast;
-  }, [hydrated, state.prefs.appearance]);
+    el.dataset.motion = motionPref;
+    el.dataset.textsize = textSizePref;
+    el.dataset.contrast = contrastPref;
+  }, [hydrated, motionPref, textSizePref, contrastPref]);
+
+  /* Was the user signed in on the previous render? A true -> false flip means
+     they just signed out, which should land on the home page, not on a sign-in
+     form that promises to send them back where they were. */
+  const wasAuthed = useRef(null);
+
+  /* Onboarding flips `completed` itself and then navigates, so only someone who
+     arrives on /onboarding already finished gets sent on. These track whether
+     the flip happened while the page was open. */
+  const wasCompleted = useRef(null);
+  const finishedOnPage = useRef(false);
 
   /* Route guards. Runs only after hydration so we never bounce a signed-in
      user during the first paint. */
   useEffect(() => {
     if (!hydrated || !pathname) return;
     const authed = state.session.authed;
+    const justSignedOut = (wasAuthed.current === true && !authed) || signedOutRecently();
+    wasAuthed.current = !!authed;
+    const completed = !!state.onboarding.completed;
+    if (pathname !== '/onboarding') finishedOnPage.current = false;
+    else if (wasCompleted.current === false && completed) finishedOnPage.current = true;
+    wasCompleted.current = completed;
+    const search = typeof window !== 'undefined' ? window.location.search : '';
     const needsAuth = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
     if (needsAuth && !authed) {
-      router.replace(`/signin?next=${encodeURIComponent(pathname)}`);
+      router.replace(justSignedOut ? '/' : `/signin?next=${encodeURIComponent(pathname + search)}`);
       return;
     }
     if (authed && AUTH_ONLY.includes(pathname)) {
-      router.replace('/app');
+      router.replace(nextTarget(search) || '/app');
       return;
     }
-    if (authed && needsAuth && !state.onboarding.completed && pathname !== '/onboarding') {
-      router.replace('/onboarding');
+    if (authed && completed && pathname === '/onboarding' && !finishedOnPage.current) {
+      // Setup is done; redoing it would overwrite causes, location and goals.
+      // Those are edited in Settings instead.
+      const target = nextTarget(search);
+      router.replace(target && target.split(/[?#]/)[0] !== '/onboarding' ? target : '/app');
+      return;
+    }
+    if (authed && needsAuth && !completed && pathname !== '/onboarding') {
+      // '/app' is onboarding's own default, so only deep links carry a next=.
+      const back = pathname === '/app' ? '' : `?next=${encodeURIComponent(pathname + search)}`;
+      router.replace(`/onboarding${back}`);
     }
   }, [hydrated, pathname, state.session.authed, state.onboarding.completed, router]);
 
@@ -111,7 +153,7 @@ export default function Providers({ children }) {
     <div
       className="vu-root"
       style={S(
-        'min-height:100vh;min-width:1180px;background:#FAF8F5;background-image:linear-gradient(rgba(31,27,24,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(31,27,24,.028) 1px,transparent 1px);background-size:96px 96px,96px 96px'
+        'min-height:100vh;min-width:1180px;background:#FAF8F5'
       )}
     >
       <OfflineBanner />
