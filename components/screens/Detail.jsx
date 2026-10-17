@@ -81,9 +81,9 @@ export default function Detail({ id }) {
         <BackToDiscover router={router} />
         <EmptyState
           icon={<SearchIcon />}
-          title="This opportunity isn't listed anymore"
-          body="The organization took it down. Other opportunities are open on Discover."
-          cta="Browse opportunities"
+          title="This link is out of date"
+          body="Search for the opportunity by name to find its current page."
+          cta="Search opportunities"
           onCta={() => router.push('/discover')}
         />
       </div>

@@ -75,9 +75,9 @@ export default function Apply({ id }) {
       <div className="vu-pad-40" style={S('padding:28px 40px 96px;max-width:1040px')}>
         <EmptyState
           icon={<SearchIcon />}
-          title="This opportunity isn't listed anymore"
-          body="The organization took it down. Other opportunities are open on Discover."
-          cta="Browse opportunities"
+          title="This link is out of date"
+          body="Search for the opportunity by name to find its current page."
+          cta="Search opportunities"
           onCta={() => router.push('/discover')}
         />
       </div>

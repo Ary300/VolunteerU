@@ -130,6 +130,9 @@ function resolveRole(assignment, listingRoles, position) {
 export default function MemberProjects() {
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Prefix for each card's heading id, so "Message organizer" keeps its
+  // visible text as its name and points at the project name for context.
+  const uid = useId();
 
   useEffect(() => {
     let alive = true;
@@ -284,12 +287,13 @@ export default function MemberProjects() {
           // organizer brought back is readable again, so neither reads archived.
           const archivedOn = closed ? archivedLabel(app.assignment && app.assignment.closedAt) : null;
           const meta = [l.cause, l.site, app.position].filter(Boolean).join(', ') || 'Student project';
+          const nameId = `${uid}-name-${app.id}`;
           return (
             <article key={app.id} aria-label={l.name} style={S('padding:16px 18px;border-radius:14px;background:#FCFAF8;border:1px solid #F1EBE4')}>
               <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
                 <div style={S('min-width:0;flex:1 1 220px')}>
                   <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                    <h3 style={S('margin:0;font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</h3>
+                    <h3 id={nameId} style={S('margin:0;font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</h3>
                     {archivedOn !== null ? <span style={s(CHIP, 'background:#F6F2EE;color:#6B635C')}>Archived</span> : null}
                   </div>
                   <div className="vu-break" style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>{meta}</div>
@@ -297,7 +301,7 @@ export default function MemberProjects() {
                 <button
                   type="button"
                   onClick={() => message(app)}
-                  aria-label={`Message organizer of ${l.name}`}
+                  aria-describedby={nameId}
                   className={cx(H.secondary, H.press)}
                   style={S(BTN_SECONDARY)}
                 >

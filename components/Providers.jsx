@@ -19,7 +19,9 @@ import AnalyticsProvider from './AnalyticsProvider.jsx';
 import { identifyUser, resetAnalytics } from '../lib/analytics.js';
 
 /* Routes that require a signed-in account. */
-const PROTECTED = ['/app', '/discover', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
+const PROTECTED = ['/app', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
+/* Routes anyone can open, but a signed-in account finishes onboarding first. */
+const PUBLIC_IN_APP = ['/discover'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
 
@@ -126,7 +128,9 @@ export default function Providers({ children }) {
     else if (wasCompleted.current === false && completed) finishedOnPage.current = true;
     wasCompleted.current = completed;
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const needsAuth = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+    const under = (p) => pathname === p || pathname.startsWith(`${p}/`);
+    const needsAuth = PROTECTED.some(under);
+    const needsOnboarding = needsAuth || PUBLIC_IN_APP.some(under);
     if (needsAuth && !authed) {
       router.replace(justSignedOut ? '/' : `/signin?next=${encodeURIComponent(pathname + search)}`);
       return;
@@ -142,7 +146,7 @@ export default function Providers({ children }) {
       router.replace(target && target.split(/[?#]/)[0] !== '/onboarding' ? target : '/app');
       return;
     }
-    if (authed && needsAuth && !completed && pathname !== '/onboarding') {
+    if (authed && needsOnboarding && !completed && pathname !== '/onboarding') {
       // '/app' is onboarding's own default, so only deep links carry a next=.
       const back = pathname === '/app' ? '' : `?next=${encodeURIComponent(pathname + search)}`;
       router.replace(`/onboarding${back}`);

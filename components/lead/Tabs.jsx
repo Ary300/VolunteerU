@@ -102,7 +102,7 @@ function sessionTime(p, x) {
 /* ---- posted hours reach the volunteer ------------------------------------ */
 
 /**
- * Write posted attendance hours onto a join-link member's application, in the
+ * Write posted attendance hours onto a linked member's application, in the
  * owner-written half (`assignment.attendanceHours`). The lead posted them, so
  * they count as confirmed for the volunteer. Keyed by entry id, so a retry
  * replaces instead of adding twice. Returns { ok, gone }.
@@ -123,24 +123,133 @@ async function creditAttendanceHours(applicationId, entry) {
 }
 
 /**
- * Send every posted shift's hours to the members who joined through the link
- * and haven't received them yet. `credited` on the session remembers who did,
- * so this is safe to run again (it is, each time Attendance opens).
- * Returns the names that couldn't be written.
+ * The accepted application on this project's listing for a roster row that is
+ * linked to an account (`accountId`) but didn't come in through the join link,
+ * so has no `appId`. Posted hours live on that application. Returns its id,
+ * null when there is none, or undefined when the lookup failed.
+ */
+async function memberApplicationFor(listingId, accountId) {
+  if (!supabase || !listingId || !accountId) return null;
+  const me = await myId();
+  if (!me) return undefined;
+  const { data, error } = await supabase
+    .from('applications')
+    .select('id')
+    .eq('listing_id', listingId)
+    .eq('applicant_id', accountId)
+    .eq('owner_id', me)
+    .eq('status', 'accepted')
+    .limit(1);
+  if (error) {
+    console.error('[lead] could not look up the application for a linked roster row', error);
+    return undefined;
+  }
+  return Array.isArray(data) && data[0] ? data[0].id : null;
+}
+
+/**
+ * Where each row's posted hours can go. Rows with hours get one of:
+ * - `appId`: the application the hours are written to (join-link members, and
+ *   rows linked to an account that is an accepted member)
+ * - `unlinked: true`: added by the lead with no VolunteerU account linked
+ * - `notMember: true`: linked to an account that isn't an accepted member of
+ *   this project, so there's no application to write to yet
+ * - `lookupFailed: true`: the application lookup itself failed
+ * Rows with no hours are left out.
+ */
+async function postTargets(p, rows, cache = new Map()) {
+  const out = [];
+  for (const r of rows) {
+    if (!(Number(r.hrs) > 0)) continue;
+    const person = (p.people || []).find((x) => x.id === r.personId);
+    if (person && person.appId) {
+      out.push({ row: r, appId: person.appId });
+      continue;
+    }
+    const accountId = person && person.accountId;
+    if (!accountId) {
+      out.push({ row: r, unlinked: true });
+      continue;
+    }
+    if (!cache.has(accountId)) {
+      let found;
+      try {
+        found = await memberApplicationFor(p.listingId, accountId);
+      } catch (err) {
+        console.error('[lead] application lookup failed', err);
+        found = undefined;
+      }
+      cache.set(accountId, found);
+    }
+    const appId = cache.get(accountId);
+    if (appId) out.push({ row: r, appId });
+    else if (appId === undefined) out.push({ row: r, lookupFailed: true });
+    else out.push({ row: r, notMember: true });
+  }
+  return out;
+}
+
+/** "Owen Park", "Owen Park and Priya Nair", "Owen Park, Priya Nair and Ana Ruiz", or "4 people". */
+function nameList(names) {
+  if (names.length > 3) return plural(names.length, 'person', 'people');
+  if (names.length < 2) return names[0] || '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** "has" or "have" to follow nameList(names). */
+const hasHave = (names) => (names.length === 1 ? 'has' : 'have');
+
+/**
+ * Who sees posted hours. `seen` is how many people get the hours on their
+ * profile; the name lists are the ones who don't. The confirm dialog says what
+ * that means (`future`); the toast after posting only names who's left out.
+ */
+function reachCopy({ seen, unlinked = [], notMember = [], future }) {
+  const parts = [];
+  if (seen) parts.push(future ? `${plural(seen, 'person', 'people')} will see these hours on their profile.` : `${plural(seen, 'person', 'people')} can now see these hours.`);
+  if (unlinked.length) {
+    parts.push(`${nameList(unlinked)} ${hasHave(unlinked)} no VolunteerU account linked${future ? ', so their hours stay on your People tab' : ''}.`);
+  }
+  if (notMember.length) {
+    const one = notMember.length === 1;
+    parts.push(future
+      ? `${nameList(notMember)} won't see them until you accept them through your join link.`
+      : `${nameList(notMember)} ${one ? "isn't an accepted member" : "aren't accepted members"} yet.`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Send every posted shift's hours to the members linked to an account and
+ * who haven't received them yet. `credited` on the session remembers who did,
+ * so this is safe to run again (it is, each time Attendance opens), and a row
+ * the lead links after posting gets its hours on the next run.
+ * Returns names per outcome: `delivered` (written now or earlier), `failed`
+ * (write or lookup failed, retried later), `unlinked` (no account linked) and
+ * `notMember` (account linked, not an accepted member yet).
  */
 async function creditPostedAttendance(projectId, onlySessionId) {
   const p = getProject(projectId);
-  if (!p) return [];
-  const failed = [];
+  const result = { delivered: [], failed: [], unlinked: [], notMember: [] };
+  if (!p) return result;
+  const cache = new Map();
   const posted = (p.attendanceSessions || []).filter((x) => x.posted && (!onlySessionId || x.id === onlySessionId));
   for (const meta of posted) {
     const done = meta.credited || {};
     const rows = (p.attendance && p.attendance[meta.id]) || [];
     const time = sessionTime(p, meta);
-    for (const r of rows) {
-      const person = (p.people || []).find((x) => x.id === r.personId);
-      const appId = person && person.appId;
-      if (!appId || done[appId] || !(Number(r.hrs) > 0)) continue;
+    const targets = await postTargets(p, rows, cache);
+    for (const t of targets) {
+      const r = t.row;
+      if (t.unlinked) { result.unlinked.push(r.n); continue; }
+      if (t.notMember) { result.notMember.push(r.n); continue; }
+      if (t.lookupFailed) { result.failed.push(r.n); continue; }
+      const appId = t.appId;
+      if (done[appId]) {
+        if (done[appId] === true) result.delivered.push(r.n);
+        else result.notMember.push(r.n);
+        continue;
+      }
       const entry = {
         id: `att-${meta.id}`,
         date: String(meta.d || '').replace(/^[A-Za-z]{3},\s*/, ''),
@@ -160,13 +269,15 @@ async function creditPostedAttendance(projectId, onlySessionId) {
           const m = proj && (proj.attendanceSessions || []).find((x) => x.id === meta.id);
           if (m) m.credited = { ...(m.credited || {}), [appId]: res.ok ? true : 'gone' };
         });
+        if (res.ok) result.delivered.push(r.n);
+        else result.notMember.push(r.n);
       } else {
         console.error('[lead] could not send posted hours to', r.n, res.error);
-        failed.push(r.n);
+        result.failed.push(r.n);
       }
     }
   }
-  return failed;
+  return result;
 }
 
 /**
@@ -359,9 +470,23 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
       toast({ title: `${unmarked} still unmarked`, message: 'Mark everyone before you post.', tone: 'warn' });
       return;
     }
+    // Say who will and won't see the hours before they're locked in.
+    let targets = [];
+    try {
+      targets = await postTargets(p, rows);
+    } catch (err) {
+      console.error('[lead] could not check who gets posted hours', err);
+    }
+    const names = (pick) => targets.filter(pick).map((t) => t.row.n);
+    const reach = reachCopy({
+      seen: targets.filter((t) => t.appId || t.lookupFailed).length,
+      unlinked: names((t) => t.unlinked),
+      notMember: names((t) => t.notMember),
+      future: true,
+    });
     const ok = await confirmDialog({
       title: `Post attendance for ${meta.d}?`,
-      body: "This locks the shift and adds the hours to each person's total on your People tab. You can't edit it afterward.",
+      body: `This locks the shift and adds the hours to each person's total on your People tab. You can't edit it afterward.${reach ? ` ${reach}` : ''}`,
       confirmLabel: 'Post attendance',
       cancelLabel: 'Go back',
       tone: 'brand',
@@ -376,18 +501,27 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
       toast({ title: "Couldn't post attendance", message: err && err.code === 'DUPLICATE' ? 'This shift was already posted.' : 'Mark everyone, then try again.', tone: 'danger' });
       return;
     }
-    const failed = await creditPostedAttendance(p.id, sessionId).catch((err) => {
+    let res;
+    try {
+      res = await creditPostedAttendance(p.id, sessionId);
+    } catch (err) {
       console.error('[lead] sending posted hours failed', err);
-      return ['Some volunteers'];
-    });
-    if (failed.length) {
+      toast({ title: 'Attendance posted', message: "Hours didn't reach volunteers' profiles yet. We'll retry when you reopen Attendance.", tone: 'warn' });
+      return;
+    }
+    if (!n) {
+      toast({ title: 'Attendance posted', message: 'Nobody had hours to add.', tone: 'ok' });
+      return;
+    }
+    const sent = reachCopy({ seen: res.delivered.length, unlinked: res.unlinked, notMember: res.notMember, future: false });
+    if (res.failed.length) {
       toast({
         title: 'Attendance posted',
-        message: `${failed.join(', ')} won't see these hours yet. We'll retry when you reopen Attendance.`,
+        message: `${nameList(res.failed)} won't see these hours yet. We'll retry when you reopen Attendance.${sent ? ` ${sent}` : ''}`,
         tone: 'warn',
       });
     } else {
-      toast({ title: 'Attendance posted', message: `Hours added for ${plural(n, 'person', 'people')}.`, tone: 'ok' });
+      toast({ title: 'Attendance posted', message: sent || `Hours added for ${plural(n, 'person', 'people')}.`, tone: 'ok' });
     }
   }
 

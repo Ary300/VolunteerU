@@ -5,7 +5,7 @@
    Shell, tab bar, and the Overview / People / Positions / Shifts tabs.
    ========================================================================== */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { Pressable, EmptyState, Field, Select, Chip, Avatar, Icon, Checkbox } from '../ui.jsx';
@@ -25,7 +25,7 @@ import {
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
   requestProjectVerification, parseSessionDate, formatSessionDate, uid, shortName,
 } from '../../lib/db.js';
-import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount } from '../../lib/listings.js';
+import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment } from '../../lib/listings.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
 } from '../lead/Tabs.jsx';
@@ -148,10 +148,31 @@ function memberHoursWaiting(apps) {
   return out;
 }
 
+/** A row the lead made themselves that hasn't been tied to any account. */
+const unclaimedRow = (x) => !x.appId && !x.accountId && !x.linkAdded;
+
+/** Same-name matches still waiting on the lead, with both rows resolved.
+    A match goes away once either row is gone or the lead row got linked. */
+function openLinkSuggestions(p) {
+  const out = [];
+  for (const sug of p.linkSuggestions || []) {
+    const added = p.people.find((x) => x.appId === sug.appId && x.linkAdded);
+    const row = p.people.find((x) => x.id === sug.personId);
+    if (added && row && unclaimedRow(row)) out.push({ ...sug, added, row });
+  }
+  return out;
+}
+
 /**
  * Put accepted join-link members on the project roster, so People, Overview,
  * position fill and Attendance count them like anyone the lead added. Mutates
  * `p` and returns true when anything changed.
+ *
+ * A row the lead added is only ever tied to an application by account id
+ * (`accountId === app.applicant_id`) or after the lead confirms a same-name
+ * match on People. A matching display name alone links nothing: anyone can
+ * sign up under any name. The member gets their own row, and the same-name
+ * row is offered as a possible match in `linkSuggestions`.
  *
  * Only acts on application rows it can see: a failed load (empty list) never
  * removes anyone. `linkedApps` remembers who was added once, so a person the
@@ -159,7 +180,18 @@ function memberHoursWaiting(apps) {
  */
 function applyMemberLinks(p, apps) {
   const linked = new Set(p.linkedApps || []);
+  let suggestions = (p.linkSuggestions || []).slice();
   let changed = false;
+  // Earlier versions tied a lead's row to a join-link member by name alone.
+  // Undo those links so the member gets their own row and the lead decides.
+  for (const x of p.people) {
+    if (x.appId && !x.linkAdded && !x.linkConfirmed) {
+      linked.delete(x.appId);
+      delete x.appId;
+      delete x.accountId;
+      changed = true;
+    }
+  }
   for (const app of apps) {
     const i = p.people.findIndex((x) => x.appId === app.id);
     const person = i >= 0 ? p.people[i] : null;
@@ -177,6 +209,8 @@ function applyMemberLinks(p, apps) {
             person.slug = slug;
             changed = true;
           }
+        }
+        if (person.linkAdded || person.linkConfirmed) {
           const hrs = confirmedMemberHours(app);
           if (hrs !== (person.linkHrs || 0)) {
             person.hrs = Math.max(0, Math.round(((Number(person.hrs) || 0) - (person.linkHrs || 0) + hrs) * 10) / 10);
@@ -188,13 +222,15 @@ function applyMemberLinks(p, apps) {
       }
       if (linked.has(app.id)) continue;
       const name = String(app.applicant_name || '').trim() || 'Volunteer';
-      const same = p.people.find((x) => !x.appId && norm(x.n) === norm(name));
       linked.add(app.id);
       changed = true;
-      if (same) {
-        // Already on the roster under the same name: link, don't duplicate.
-        same.appId = app.id;
-        same.accountId = app.applicant_id;
+      // A row the lead already tied to this account (they confirmed the
+      // match before and the member left and came back).
+      const mine = app.applicant_id ? p.people.find((x) => !x.appId && x.accountId && x.accountId === app.applicant_id) : null;
+      if (mine) {
+        mine.appId = app.id;
+        // Matched on the account itself, so the link is as good as confirmed.
+        mine.linkConfirmed = true;
         continue;
       }
       const pos = p.positions.find((x) => norm(x.t) === norm(app.position)) || p.positions.find((x) => x.open !== false) || p.positions[0];
@@ -226,12 +262,16 @@ function applyMemberLinks(p, apps) {
       const at = app.decided_at ? new Date(app.decided_at) : null;
       const when = at && !Number.isNaN(at.getTime()) && Date.now() - at.getTime() > 864e5 ? `${MONTH_ABBR[at.getMonth()]} ${at.getDate()}` : 'now';
       p.activity = [{ id: uid('ac'), t: `${name} joined through your join link`, w: when }, ...(p.activity || [])].slice(0, 30);
+      // Same name as a row the lead added: ask, never assume.
+      const same = p.people.find((x) => unclaimedRow(x) && norm(x.n) === norm(name));
+      if (same) suggestions = [...suggestions.filter((sg) => sg.appId !== app.id), { appId: app.id, personId: same.id }];
     } else if (person) {
       if (!person.linkAdded) {
         changed = true;
-        // A roster row the lead made themselves: just drop the link.
+        // A roster row the lead made themselves: just drop the link. The
+        // account id they confirmed stays, so the row comes back to this
+        // member if they're accepted again.
         delete person.appId;
-        delete person.accountId;
         linked.delete(app.id);
       } else if (app.status === 'pending' && !((Number(person.hrs) || 0) - (person.linkHrs || 0) > 0)) {
         // The acceptance was undone: take back the row it added.
@@ -245,6 +285,11 @@ function applyMemberLinks(p, apps) {
         changed = true;
       }
     }
+  }
+  const open = openLinkSuggestions({ ...p, linkSuggestions: suggestions }).map(({ appId, personId }) => ({ appId, personId }));
+  if (open.length !== (p.linkSuggestions || []).length || open.some((sg, k) => sg.appId !== p.linkSuggestions[k].appId || sg.personId !== p.linkSuggestions[k].personId)) {
+    p.linkSuggestions = open;
+    changed = true;
   }
   if (!changed) return false;
   p.linkedApps = Array.from(linked);
@@ -262,6 +307,52 @@ function linkMembers(projectId, apps) {
   updateStore((s) => {
     const p = s.projects.find((x) => x.id === projectId);
     if (p) applyMemberLinks(p, apps);
+  });
+}
+
+/** The lead confirmed a same-name match: their own row takes the member's
+    application and account, and the row the join link added comes off. Tasks,
+    attendance, notes and tags on the join-link row move to the lead's row.
+    Returns false when the match is no longer open. */
+function confirmLinkSuggestion(projectId, appId, personId) {
+  let ok = false;
+  updateStore((s) => {
+    const p = s.projects.find((x) => x.id === projectId);
+    if (!p) return;
+    const added = p.people.find((x) => x.appId === appId && x.linkAdded);
+    const row = p.people.find((x) => x.id === personId);
+    p.linkSuggestions = (p.linkSuggestions || []).filter((sg) => sg.appId !== appId);
+    if (!added || !row || !unclaimedRow(row)) return;
+    row.appId = appId;
+    row.accountId = added.accountId;
+    row.linkConfirmed = true;
+    // Hours the lead confirmed on the member's own log now count on this row.
+    row.linkHrs = Number(added.linkHrs) || 0;
+    row.hrs = Math.round(((Number(row.hrs) || 0) + row.linkHrs) * 10) / 10;
+    if (row.st === 'Invited' || row.st === 'Inactive') row.st = added.st === 'Inactive' ? row.st : added.st;
+    row.notes = [...(added.notes || []), ...(row.notes || [])];
+    row.tags = Array.from(new Set([...(row.tags || []), ...(added.tags || [])]));
+    for (const t of (p.taskBoard && p.taskBoard.tasks) || []) if (t.assigneeId === added.id) t.assigneeId = row.id;
+    for (const sid of Object.keys(p.attendance || {})) {
+      const rows = p.attendance[sid] || [];
+      const hasRow = rows.some((r) => r.personId === row.id);
+      p.attendance[sid] = hasRow ? rows.filter((r) => r.personId !== added.id) : rows.map((r) => (r.personId === added.id ? { ...r, personId: row.id, n: row.n } : r));
+    }
+    p.people = p.people.filter((x) => x.id !== added.id);
+    for (const pos of p.positions) {
+      pos.filledCount = p.people.filter((x) => x.positionId === pos.id && (x.st === 'Active' || x.st === 'Onboarding')).length;
+    }
+    p.activity = [{ id: uid('ac'), t: `${row.n} linked to the account they joined with`, w: 'now' }, ...(p.activity || [])].slice(0, 30);
+    ok = true;
+  });
+  return ok;
+}
+
+/** The lead says the two same-name rows are different people. */
+function dismissLinkSuggestion(projectId, appId) {
+  updateStore((s) => {
+    const p = s.projects.find((x) => x.id === projectId);
+    if (p) p.linkSuggestions = (p.linkSuggestions || []).filter((sg) => sg.appId !== appId);
   });
 }
 
@@ -393,6 +484,33 @@ export function tabsFor(p) {
 // Back-compat export (some tooling references it); the volunteer set is the default.
 export const LEAD_TABS = VOL_TABS;
 
+/** Tab title before a project exists. app/lead/page.js writes the same text
+    (a server page can't import values from this client module). */
+const LEAD_TITLE = 'Lead a project, VolunteerU';
+
+/** Name the browser tab after the open project and tab. The project lives in
+    the client store, so the server metadata can't know it. Next streams its
+    metadata <title> in after hydration and it sits ahead of anything this
+    component could hoist, so the title is set directly and put back if the
+    metadata lands later. The layout effect's cleanup runs inside the commit
+    that leaves the page, so the next page's own title is never overwritten. */
+function useDocumentTitle(title) {
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined' || !title) return undefined;
+    let live = true;
+    const apply = () => {
+      if (live && document.title !== title) document.title = title;
+    };
+    apply();
+    const watch = new MutationObserver(apply);
+    watch.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+    return () => {
+      live = false;
+      watch.disconnect();
+    };
+  }, [title]);
+}
+
 export default function Lead({ projectId, tab: tabParam }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -402,6 +520,8 @@ export default function Lead({ projectId, tab: tabParam }) {
   const p = getProject(projectId || state.activeProjectId);
   const TABS = tabsFor(p);
   const tab = TABS.some(([k]) => k === tabParam) ? tabParam : 'overview';
+  const tabLabel = (TABS.find(([k]) => k === tab) || [])[1] || 'Overview';
+  useDocumentTitle(p ? `${p.name} \u00b7 ${tabLabel}, VolunteerU` : LEAD_TITLE);
   const linkApps = useListingApps(p);
   const unreadMessages = useUnreadMessages(p ? p.listingId : null, tab);
 
@@ -607,6 +727,7 @@ function Overview({ p, goTab, crossPending = 0, memberHours = [], apps = [] }) {
   const nextRow = nextUpcomingShift(p);
   const next = nextRow ? withFill(p, nextRow, apps) : null;
   const ns = p.nextSession || {};
+  const matches = openLinkSuggestions(p);
 
   const facts = next
     ? [
@@ -790,7 +911,14 @@ function Overview({ p, goTab, crossPending = 0, memberHours = [], apps = [] }) {
                 onClick={() => goTab('shifts')}
               />
             ) : null}
-            {!appsCount && !hoursCount && !shortSession ? (
+            {matches.length ? (
+              <NeedCard
+                title={`${plural(matches.length, 'possible match', 'possible matches')} on the roster`}
+                sub="Same name as someone you added. Check on People"
+                onClick={() => goTab('people')}
+              />
+            ) : null}
+            {!appsCount && !hoursCount && !shortSession && !matches.length ? (
               <div style={S('padding:14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#57504A')}>
                 Nothing waiting on you. No applications or hours to review.
               </div>
@@ -955,10 +1083,12 @@ function teamRoleFor(m, appsById) {
   if (app && app.status === 'accepted') {
     const roleId = (app.assignment && app.assignment.role && app.assignment.role.id) || null;
     const ack = app.member_state && app.member_state.briefingAck;
-    return { roleId, acked: !!(roleId && ack && ack[roleId]) };
+    return { roleId, acked: !!(roleId && ack && ack[roleId]), canAck: true };
   }
+  // A row the lead added (People > Change role). That student has no account
+  // tied to this project, so there's no briefing for them to read in the app.
   const roleId = m.teamRoleId || null;
-  return { roleId, acked: !!(roleId && m.briefingAck && m.briefingAck[roleId]) };
+  return { roleId, acked: !!(roleId && m.briefingAck && m.briefingAck[roleId]), canAck: false };
 }
 
 const NO_TEAM_ROLE = 'No role yet';
@@ -985,7 +1115,8 @@ function TeamOverview({ p, goTab, linkApps = [] }) {
   const members = p.people.filter((x) => x.st === 'Active' || x.st === 'Onboarding');
   const appsById = new Map(linkApps.map((a) => [a.id, a]));
   const memberRoles = members.map((m) => teamRoleFor(m, appsById));
-  const needsBriefing = memberRoles.filter((r) => r.roleId && !r.acked);
+  const needsBriefing = memberRoles.filter((r) => r.roleId && r.canAck && !r.acked);
+  const matches = openLinkSuggestions(p);
 
   return (
     <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
@@ -1078,7 +1209,8 @@ function TeamOverview({ p, goTab, linkApps = [] }) {
           <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
             {unassigned.length ? <NeedCard title={`${plural(unassigned.length, 'task')} without an owner`} sub="Assign them on the task board" onClick={() => goTab('tasks')} /> : null}
             {needsBriefing.length ? <NeedCard title={`${plural(needsBriefing.length, 'member')} not briefed`} sub="They haven't read their role briefing" onClick={() => goTab('people')} /> : null}
-            {!unassigned.length && !needsBriefing.length ? (
+            {matches.length ? <NeedCard title={`${plural(matches.length, 'possible match', 'possible matches')} on the team`} sub="Same name as someone you added. Check on the Team tab" onClick={() => goTab('people')} /> : null}
+            {!unassigned.length && !needsBriefing.length && !matches.length ? (
               <div style={S('padding:14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#57504A')}>Nothing waiting on you. Every task has an owner and everyone has read their briefing.</div>
             ) : null}
           </div>
@@ -1148,6 +1280,33 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
 
   const count = (st) => p.people.filter((x) => x.st === st).length;
   const summary = `${count('Active')} active, ${count('Onboarding')} onboarding, ${count('Waitlist')} on the waitlist`;
+  const matches = openLinkSuggestions(stored);
+  const team = isTeam(stored);
+  const appsById = new Map(linkApps.map((a) => [a.id, a]));
+
+  function linkMatch(m) {
+    if (confirmLinkSuggestion(stored.id, m.appId, m.row.id)) {
+      toast({ title: 'Linked', message: `${m.row.n} is one row now, tied to the account they joined with.`, tone: 'ok' });
+    } else {
+      toast({ title: "Couldn't link them", message: 'One of the rows changed. Check the roster and try again.', tone: 'warn' });
+    }
+  }
+
+  function keepSeparate(m) {
+    dismissLinkSuggestion(stored.id, m.appId);
+    toast({ title: 'Kept separate', message: `${m.row.n} stays as 2 rows.`, tone: 'ok', timeout: 2200 });
+  }
+
+  function teamRolePicker(person) {
+    const app = person.appId ? appsById.get(person.appId) : null;
+    openModal({
+      title: `Role for ${person.n}`,
+      subtitle: app && app.status === 'accepted' ? 'They see the role and its briefing on their project page.' : 'Shows on the Team tab and in your roster download.',
+      Body: function RoleBody({ api }) {
+        return <TeamRoleForm api={api} project={stored} person={person} app={app && app.status === 'accepted' ? app : null} />;
+      },
+    });
+  }
 
   function addStudent() {
     openModal({
@@ -1184,7 +1343,15 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
       title: person.n,
       subtitle: schoolLine(person),
       Body: function ProfileBody({ api }) {
-        return <PersonProfile api={api} project={p} person={person} onNote={() => { api.close(); noteFor(person); }} />;
+        return (
+          <PersonProfile
+            api={api}
+            project={p}
+            person={person}
+            onNote={() => { api.close(); noteFor(person); }}
+            onRole={team ? () => { api.close(); teamRolePicker(person); } : null}
+          />
+        );
       },
     });
   }
@@ -1193,6 +1360,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
     menuFromEvent(
       e,
       [
+        ...(team ? [{ key: 'role', label: person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role', icon: 'flag' }, { sep: true }] : []),
         { key: 'active', label: 'Mark active', icon: 'check', disabled: person.st === 'Active' },
         { key: 'waitlist', label: 'Move to waitlist', icon: 'clock', disabled: person.st === 'Waitlist' },
         { key: 'inactive', label: 'Mark inactive', icon: 'minus', disabled: person.st === 'Inactive' },
@@ -1210,6 +1378,10 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
           consent: [person.consent ? 'Consent form marked missing' : 'Consent form marked received', () => updatePerson(p.id, person.id, { consent: !person.consent })],
           trained: [person.trained ? 'Training marked not done' : 'Training marked done', () => updatePerson(p.id, person.id, { trained: !person.trained })],
         }[key];
+        if (key === 'role') {
+          teamRolePicker(person);
+          return;
+        }
         if (key === 'remove') {
           const ok = await confirmDialog({
             title: `Remove ${person.n} from the roster?`,
@@ -1277,6 +1449,33 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   return (
     <div style={S('margin-top:22px')}>
       <p style={S('margin:0;padding:2px 2px 0;font:450 14px/1.4 Geist;color:#57504A')}>{summary}</p>
+
+      {matches.length ? (
+        <section aria-label="Possible matches on your roster" style={S('margin-top:16px;padding:16px 20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3;display:flex;flex-direction:column;gap:14px')}>
+          {matches.map((m, i) => {
+            const where = schoolLine(m.row);
+            return (
+              <div key={m.appId} className="vu-stack vu-stack-gap" style={s('display:flex;align-items:center;justify-content:space-between;gap:16px', i ? 'padding-top:14px;border-top:1px solid #EFE3DC' : '')}>
+                <div style={S('min-width:0')}>
+                  <h2 style={S(`margin:0;${LABEL}`)}>Same person?</h2>
+                  <p style={S('margin:6px 0 0;font:450 13px/1.5 Geist;color:#57504A')}>
+                    {m.added.n} joined through your join link. Your roster already has someone you added with that name{where ? ` (${where})` : ''}.
+                    Link them only if it's the same student. Their account gets that row's hours, notes and attendance.
+                  </p>
+                </div>
+                <div style={S('display:flex;gap:9px;flex:none;flex-wrap:wrap')}>
+                  <Pressable label={`Link to ${m.row.n}`} onClick={() => linkMatch(m)} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
+                    Link to {m.row.n}
+                  </Pressable>
+                  <Pressable label={`Keep ${m.row.n} separate`} onClick={() => keepSeparate(m)} className={cx(H.secondary, H.press)} style={S(BTN_SECONDARY)}>
+                    Keep separate
+                  </Pressable>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
 
       <div style={S('margin-top:16px;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
         <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
@@ -1470,7 +1669,71 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   );
 }
 
-function PersonProfile({ api, project, person, onNote }) {
+/** Pick a team role for one roster row. A member who joined through the link
+    gets it on their application (the same place Tasks writes it), so they see
+    the role and its briefing. A row the lead added keeps it on the roster. */
+function TeamRoleForm({ api, project, person, app }) {
+  const roles = taskRoles(project);
+  const current = app ? (app.assignment && app.assignment.role && app.assignment.role.id) || '' : person.teamRoleId || '';
+  const [roleId, setRoleId] = useState(roles.some((r) => r.id === current) ? current : '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function save() {
+    const role = roles.find((r) => r.id === roleId) || null;
+    if (app) {
+      setBusy(true);
+      setErr('');
+      let res;
+      try {
+        res = await setMemberAssignment(app.id, { role: role ? { id: role.id, name: role.name, briefing: role.briefing, color: role.color } : null });
+      } catch (e) {
+        res = { ok: false, error: e };
+      }
+      setBusy(false);
+      if (!res.ok) {
+        console.error('[lead] could not save team role', res.error);
+        setErr("Couldn't save the role. Check your connection and try again.");
+        return;
+      }
+      window.dispatchEvent(new Event('vu:applications-changed'));
+    } else {
+      updatePerson(project.id, person.id, { teamRoleId: role ? role.id : null });
+    }
+    api.close();
+    toast({ title: role ? 'Role saved' : 'Role cleared', message: role ? `${person.n} is now ${role.name}` : person.n, tone: 'ok', timeout: 2200 });
+  }
+
+  if (!roles.length) {
+    return (
+      <div>
+        <div style={S('font:450 14px/1.5 Geist;color:#57504A')}>This team has no roles yet. Add one on the Tasks tab first.</div>
+        <div style={S('margin-top:18px;display:flex;justify-content:flex-end')}>
+          <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
+            Close
+          </Pressable>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Select label="Team role" value={roleId} options={[{ v: '', l: NO_TEAM_ROLE }, ...roles.map((r) => ({ v: r.id, l: r.name }))]} onChange={setRoleId} />
+      {err ? <div role="alert" style={S('margin-top:10px;font:450 13px/1.4 Geist;color:#A8482A')}>{err}</div> : null}
+      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
+          Cancel
+        </Pressable>
+        <Pressable label="Save role" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={s(MODAL_PRIMARY, busy ? 'opacity:.6;cursor:default' : '')}>
+          {busy ? 'Saving role' : 'Save role'}
+        </Pressable>
+      </div>
+    </div>
+  );
+}
+
+function PersonProfile({ api, project, person, onNote, onRole }) {
   const st = tone(PERSON_TONE, person.st);
   const facts = [
     { l: isTeam(project) ? 'Role' : 'Position', v: person.role },
@@ -1540,6 +1803,11 @@ function PersonProfile({ api, project, person, onNote }) {
         <Pressable label="Add a note" onClick={onNote} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
           Add a note
         </Pressable>
+        {onRole ? (
+          <Pressable label={person.role === NO_TEAM_ROLE ? `Give ${person.n} a role` : `Change ${person.n}'s role`} onClick={onRole} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
+            {person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role'}
+          </Pressable>
+        ) : null}
         <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
           Close
         </Pressable>

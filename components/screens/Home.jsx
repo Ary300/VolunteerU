@@ -17,7 +17,7 @@ import VolunteerApplications from '../VolunteerApplications.jsx';
 import MemberProjects from '../MemberProjects.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
 import HomeCharts from '../HomeCharts.jsx';
-import { useSnapshot, getState, update } from '../../lib/store.js';
+import { useSnapshot } from '../../lib/store.js';
 import { activeProject, taskProgress, getOpportunity } from '../../lib/db.js';
 import { searchListings, loadMyApplications, loadOwnerApplications, loadListingsByIds, listingShifts, myShiftSignUps } from '../../lib/listings.js';
 import { shiftDates } from '../../lib/calendar.js';
@@ -503,16 +503,6 @@ export default function Home() {
   // Bumped by "Try again"; it also remounts the project and application
   // lists below so they fetch again.
   const [appsAttempt, setAppsAttempt] = useState(0);
-  // Read once per visit: the greeting says "Welcome back" only after the
-  // first time this account opened Home.
-  const [returning] = useState(() => Boolean(getState().meta && getState().meta.homeVisitedAt));
-
-  useEffect(() => {
-    const meta = getState().meta || {};
-    if (meta.homeVisitedAt) return;
-    update((st) => { st.meta = { ...(st.meta || {}), homeVisitedAt: new Date().toISOString() }; });
-  }, []);
-
   useEffect(() => {
     let alive = true;
     setApps(null);
@@ -549,13 +539,11 @@ export default function Home() {
   const zip = (state.onboarding && state.onboarding.zip) || state.account.zip || '';
   const nonprofitNear = [region, zip].filter(Boolean).join(' ');
   const org = isOrgAccount(state);
-  // Their first name, else the first word of the full name; never a dangling comma.
-  const greetName = ((state.account.firstName || '').trim() || (state.account.name || '').trim().split(/\s+/)[0] || '').trim();
 
   return (
     <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
       <h1 style={S('margin:0 0 18px;font:600 26px/1.1 Geist;letter-spacing:-0.035em;color:#1A1714')}>
-        {[returning ? 'Welcome back' : 'Welcome', greetName].filter(Boolean).join(', ')}
+        {region ? `Find volunteer work near ${region}` : 'Find volunteer work'}
       </h1>
       <SearchCard region={region} />
 

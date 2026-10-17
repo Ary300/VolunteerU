@@ -1,15 +1,20 @@
 'use client';
 
 /* ==========================================================================
-   AppShell.jsx, the signed-in chrome (design: the `inApp` two-column grid)
+   AppShell.jsx, the app chrome (design: the `inApp` two-column grid)
+
+   Signed out (Discover is public), the sidebar keeps the same layout but
+   drops the account's own links and offers Sign in / Create account, both
+   carrying ?next= back to the page the visitor is on.
    ========================================================================== */
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../lib/style.js';
 import { Avatar, Icon } from './ui.jsx';
-import { useSnapshot, updateEphemeral, eph } from '../lib/store.js';
+import { useSnapshot, useHydrated, updateEphemeral, eph } from '../lib/store.js';
+import { sameSitePath } from '../lib/safePath.js';
 import { menuFromEvent, confirmDialog, toast, hasOverlay } from '../lib/overlays.js';
 import { signOut, effectiveStreak } from '../lib/db.js';
 import { Logo } from './Logo.jsx';
@@ -41,6 +46,67 @@ const SIDE_NAV = [
   { k: 'lead', label: 'Lead a project', icon: 'flag', href: '/lead' },
   { k: 'profile', label: 'Profile', icon: 'user', href: '/profile' },
 ];
+
+/* What a visitor who isn't signed in sees: the public pages only. */
+const SIDE_NAV_SIGNED_OUT = [
+  { k: 'home', label: 'Home', icon: 'home', href: '/' },
+  { k: 'discover', label: 'Discover', icon: 'search', href: '/discover' },
+];
+
+/** `?next=` pointing back at this page, so signing in returns the visitor here. */
+function nextQuery(pathname, search) {
+  const back = sameSitePath(`${pathname}${search ? `?${search}` : ''}`);
+  return back ? `?next=${encodeURIComponent(back)}` : '';
+}
+
+function AuthLinks({ pathname, search, compact }) {
+  const q = nextQuery(pathname, search);
+  if (compact) {
+    return (
+      <Link
+        href={`/signin${q}`}
+        className={cx(H.secondary, H.press)}
+        style={S('margin-left:auto;display:inline-flex;align-items:center;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;white-space:nowrap')}
+      >
+        Sign in
+      </Link>
+    );
+  }
+  return (
+    <div style={S('display:flex;flex-direction:column;gap:8px;padding:0 4px')}>
+      <p style={S('margin:0 0 4px;padding:0 6px;font:450 13px/1.4 Geist;color:#6B635C')}>Sign in to apply and save opportunities.</p>
+      <Link
+        href={`/signup${q}`}
+        className={cx(H.primary, H.press)}
+        style={S('display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;background:#C2603C;color:#fff;font:600 14px/1 Geist')}
+      >
+        Create account
+      </Link>
+      <Link
+        href={`/signin${q}`}
+        className={cx(H.secondary, H.press)}
+        style={S('display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 14px/1 Geist')}
+      >
+        Sign in
+      </Link>
+    </div>
+  );
+}
+
+/* useSearchParams needs a Suspense boundary; the fallback keeps the links
+   usable (path only) for the moment before the query string is read. */
+function AuthLinksWithQuery({ pathname, compact }) {
+  const params = useSearchParams();
+  return <AuthLinks pathname={pathname} search={params ? params.toString() : ''} compact={compact} />;
+}
+
+function SignedOutLinks({ pathname, compact }) {
+  return (
+    <Suspense fallback={<AuthLinks pathname={pathname} search="" compact={compact} />}>
+      <AuthLinksWithQuery pathname={pathname} compact={compact} />
+    </Suspense>
+  );
+}
 
 const navItemStyle = (on) =>
   s(
@@ -82,6 +148,13 @@ export default function AppShell({ children }) {
   const pathname = usePathname() || '';
   const router = useRouter();
   const { state, ephemeral } = useSnapshot();
+  const hydrated = useHydrated();
+  const authed = !!state.session.authed;
+  // Before the store hydrates nobody is known yet, so neither the account
+  // button nor the sign-in links show.
+  const signedOut = hydrated && !authed;
+  const navItems = signedOut ? SIDE_NAV_SIGNED_OUT : SIDE_NAV;
+  const homeHref = signedOut ? '/' : '/app';
   const activeKey = navKeyFor(pathname);
   const streak = effectiveStreak();
   const unread = (state.ui && state.ui.unreadNotifs) || 0;
@@ -184,21 +257,25 @@ export default function AppShell({ children }) {
         >
           <Icon name={ephemeral.sidebarOpen ? 'x' : 'menu'} size={18} />
         </button>
-        <Link href="/app" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:8px;color:#1A1714')}>
+        <Link href={homeHref} aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:8px;color:#1A1714')}>
           <Logo size={22} title="" />
           <span style={S('font:600 15px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</span>
         </Link>
-        <Link
-          href="/notifications"
-          aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
-          aria-current={pathname.startsWith('/notifications') ? 'page' : undefined}
-          style={S('margin-left:auto;position:relative;width:36px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;display:grid;place-items:center;color:#57504A')}
-        >
-          <Icon name="bell" size={17} />
-          {unread ? (
-            <span aria-hidden="true" style={S('position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#C2603C;color:#fff;font:600 9px/16px Geist;text-align:center')}>{unread}</span>
-          ) : null}
-        </Link>
+        {signedOut ? (
+          <SignedOutLinks pathname={pathname} compact />
+        ) : authed ? (
+          <Link
+            href="/notifications"
+            aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
+            aria-current={pathname.startsWith('/notifications') ? 'page' : undefined}
+            style={S('margin-left:auto;position:relative;width:36px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;display:grid;place-items:center;color:#57504A')}
+          >
+            <Icon name="bell" size={17} />
+            {unread ? (
+              <span aria-hidden="true" style={S('position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#C2603C;color:#fff;font:600 9px/16px Geist;text-align:center')}>{unread}</span>
+            ) : null}
+          </Link>
+        ) : null}
       </div>
 
       <div
@@ -208,12 +285,12 @@ export default function AppShell({ children }) {
         style={S('position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid #E8E1D9;background:#fff;padding:24px 16px;display:flex;flex-direction:column;justify-content:space-between;gap:18px')}
       >
         <div>
-          <Link href="/app" aria-label="VolunteerU home" className="vu-hide-mobile" style={S('display:flex;align-items:center;gap:9px;padding:0 8px 22px;cursor:pointer;color:inherit')}>
+          <Link href={homeHref} aria-label="VolunteerU home" className="vu-hide-mobile" style={S('display:flex;align-items:center;gap:9px;padding:0 8px 22px;cursor:pointer;color:inherit')}>
             <Logo size={24} title="" />
             <div style={S('font:600 16px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
           </Link>
           <nav aria-label="Sections" style={S('display:flex;flex-direction:column;gap:2px')}>
-            {SIDE_NAV.map((n) => {
+            {navItems.map((n) => {
               const on = activeKey === n.k;
               return (
                 <Link
@@ -233,7 +310,7 @@ export default function AppShell({ children }) {
           </nav>
 
           {(() => {
-            const mine = state.projects.filter((p) => !p.archived);
+            const mine = authed ? state.projects.filter((p) => !p.archived) : [];
             if (!mine.length) return null;
             return (
               <div style={S('margin-top:18px')}>
@@ -264,6 +341,7 @@ export default function AppShell({ children }) {
             );
           })()}
 
+          {authed ? (<>
           <div style={S('height:1px;background:#EFE9E2;margin:18px 8px')} />
           <div style={S('display:flex;flex-direction:column;gap:2px')}>
             {(() => {
@@ -297,8 +375,12 @@ export default function AppShell({ children }) {
               );
             })()}
           </div>
+          </>) : null}
         </div>
 
+        {signedOut ? (
+          <SignedOutLinks pathname={pathname} />
+        ) : authed ? (
         <div>
           <WeeksInARow weeks={streak} />
           <button
@@ -323,6 +405,7 @@ export default function AppShell({ children }) {
             </span>
           </button>
         </div>
+        ) : null}
       </div>
 
       {ephemeral.sidebarOpen ? (

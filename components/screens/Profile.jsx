@@ -102,16 +102,23 @@ export function badgeStatus(b, facts) {
   return { on: false, line: 'Run 1 student project' };
 }
 
+/* Activity and organization names are typed by the student and by project
+   leads, so a text cell that starts like a formula (=, +, -, @, tab, CR) gets a
+   leading quote and every cell is quoted before a spreadsheet opens the file.
+   Plain numbers pass through as numbers. Same rule as the lead roster export;
+   switch to the shared helper once lib/ has one (see db.hoursCSV). */
 function csvEscape(v) {
-  const t = String(v == null ? '' : v);
-  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  const raw = String(v == null ? '' : v);
+  const plainNumber = typeof v === 'number' || /^-?\d+(\.\d+)?$/.test(raw);
+  const t = !plainNumber && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${t.replace(/"/g, '""')}"`;
 }
 
 /** Every hour on the profile, with its status spelled out, newest first. */
 export function hoursCSV(serviceEntries, hoursLog) {
   const head = ['Date', 'Activity', 'Organization', 'Hours', 'Status'];
   const all = [
-    ...(serviceEntries || []).map((e) => ({ date: e.date, row: [e.date, e.activity, e.org, e.hrs, e.verified ? 'Confirmed by organizer' : 'Waiting on organizer'] })),
+    ...(serviceEntries || []).map((e) => ({ date: e.date, row: [e.date, e.activity || e.name, e.org, e.hrs, e.verified ? 'Confirmed by organizer' : 'Waiting on organizer'] })),
     ...(hoursLog || []).map((h) => ({ date: h.date, row: [h.date, h.name, h.org, h.hrs, h.verified ? 'Confirmed by organizer' : 'Logged on your own'] })),
   ];
   const rows = sortByLogDate(all).map((x) => x.row);

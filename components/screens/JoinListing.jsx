@@ -113,8 +113,26 @@ function friendlyError(e) {
   return "Your application didn't send. Check your connection and try again.";
 }
 
-export default function JoinListing({ id }) {
+/* Listing ids are UUIDs. Anything else on /join is a typo or an old link. */
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/* A retired /opportunity, /apply or /projects link (the old built-in
+   catalogue) lands here with ?old=1. Public, so a signed-out visitor never
+   meets a sign-in step just to learn the link is old. */
+function OutdatedLink({ signedIn }) {
+  const href = signedIn ? '/discover' : '/#search';
+  return (
+    <div style={S('padding:48px 32px;text-align:center;border-radius:18px;border:1px solid #E8E1D9;background:#fff')}>
+      <h1 style={S('margin:0;font:600 22px/1.2 Geist;letter-spacing:-0.03em')}>This link is out of date</h1>
+      <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C')}>Search for the opportunity by name to find its current page.</div>
+      <Link href={href} className={H.press} style={S(`margin-top:18px;${PRIMARY_BTN};height:44px;font-size:14px`)}>Search opportunities</Link>
+    </div>
+  );
+}
+
+export default function JoinListing({ id, outdated = false }) {
   const router = useRouter();
+  const stale = outdated && !UUID_RX.test(String(id || ''));
   const [listing, setListing] = useState(undefined); // undefined=loading, null=missing
   const [me, setMe] = useState(undefined);
   const [app, setApp] = useState(null);
@@ -133,7 +151,8 @@ export default function JoinListing({ id }) {
     (async () => {
       const [l, uid] = await Promise.all([getListing(id), myId()]);
       if (!alive) return;
-      if (uid && !l) {
+      // A malformed id can't match any application's listing_id (a UUID).
+      if (uid && !l && UUID_RX.test(String(id || ''))) {
         // A hidden listing may be a project this member was in that got
         // archived. Check before showing "This link isn't active".
         let gone = null;
@@ -311,6 +330,9 @@ export default function JoinListing({ id }) {
 
   if (listing === undefined) {
     return <Shell><div role="status" style={S('padding:60px 0;text-align:center;font:450 15px/1.5 Geist;color:#8A8179')}>Loading</div></Shell>;
+  }
+  if (stale) {
+    return <Shell><OutdatedLink signedIn={!!me} /></Shell>;
   }
   if (listing === null && archivedApp) {
     return <Shell><ArchivedProject app={archivedApp} /></Shell>;

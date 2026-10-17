@@ -4,7 +4,7 @@
    Misc.jsx, notifications, saved, friends going, peer project page
    ========================================================================== */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
 import { ImageSlot, Pressable, EmptyState, ErrorState, SkeletonRows, Icon } from '../ui.jsx';
@@ -14,13 +14,13 @@ import {
   markNotificationsSeen, getNotificationsSeenAt,
   getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus,
 } from '../../lib/db.js';
-import { loadMyNotifications, loadMyApplications, loadListingsByIds } from '../../lib/listings.js';
+import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications } from '../../lib/listings.js';
 import { nextShiftInfo } from './JoinListing.jsx';
 
 const MONO = "'Geist Mono',monospace";
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const TONE_DOT = { ok: '#3F6B4E', warn: '#8A5A20', danger: '#A8482A', brand: '#C2603C', accepted: '#3F6B4E', declined: '#A8482A', rating: '#C2603C', announcement: '#5B6BB0' };
+const TONE_DOT = { ok: '#3F6B4E', warn: '#8A5A20', danger: '#A8482A', brand: '#C2603C', accepted: '#3F6B4E', declined: '#A8482A', rating: '#C2603C', announcement: '#5B6BB0', application: '#8A5A20' };
 
 const PAGE = 'padding:32px 40px 96px';
 const TITLE = 'margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em';
@@ -57,13 +57,51 @@ function VerifiedChip() {
 
 /* ---- notification centre -------------------------------------------------- */
 
+/** One "New application" item per pending application to the signed-in
+    owner's listings, linked to that project's Applications tab when the
+    listing belongs to one of their workspaces. */
+function ownerApplicationItems(apps, projects) {
+  const pidFor = new Map((projects || []).filter((p) => p.listingId).map((p) => [p.listingId, p.id]));
+  return (apps || [])
+    .filter((a) => a && a.status === 'pending')
+    .map((a) => {
+      const who = String(a.applicant_name || '').trim() || 'A volunteer';
+      const project = a.listings && a.listings.name;
+      const pid = pidFor.get(a.listing_id);
+      return {
+        id: `app-new-${a.id}`,
+        type: 'application',
+        title: project ? `${who} applied to ${project}` : `${who} applied`,
+        body: [a.position, a.note].filter(Boolean).map(String).join(', ').slice(0, 280),
+        at: a.created_at || null,
+        href: pid ? `/lead/${encodeURIComponent(pid)}/applications` : '/lead',
+      };
+    });
+}
+
+/** Feed items newest first, one per id, capped like loadMyNotifications. */
+function mergeFeed(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const n of lists.flat()) {
+    if (!n || seen.has(n.id)) continue;
+    seen.add(n.id);
+    out.push(n);
+  }
+  out.sort((x, y) => String(y.at || '').localeCompare(String(x.at || '')));
+  return out.slice(0, 40);
+}
+
 export function Notifications() {
   const router = useRouter();
   const { state } = useSnapshot();
-  // A lead also gets messages from their volunteers (see loadMyNotifications),
-  // so the subtitle names those alongside their own application updates.
-  const leads = (state.projects || []).some((p) => !p.archived);
+  // A lead's feed is new applications and messages from their volunteers, so
+  // the subtitle and empty state describe that instead of a volunteer's.
+  const openProjects = (state.projects || []).filter((p) => p && !p.archived);
+  const leads = openProjects.length > 0;
+  const homeProject = openProjects.find((p) => p.id === state.activeProjectId) || openProjects[0] || null;
   const [notifs, setNotifs] = useState(null);
+  const [ownerApps, setOwnerApps] = useState([]);
   const [failed, setFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
   // Snapshot the prior "seen" time on mount so items that arrived since then
@@ -80,16 +118,26 @@ export function Notifications() {
     let alive = true;
     setNotifs(null);
     setFailed(false);
-    loadMyNotifications()
-      .then((n) => { if (alive) setNotifs(n || []); })
+    // Both reads throw on failure, so an outage shows the error state instead
+    // of "No notifications yet".
+    Promise.all([loadMyNotifications(), loadOwnerApplications({ throwOnError: true })])
+      .then(([n, owned]) => {
+        if (!alive) return;
+        setOwnerApps(owned || []);
+        setNotifs(n || []);
+      })
       .catch((err) => {
         console.error('[notifications] load failed', err);
-        if (alive) { setFailed(true); setNotifs([]); }
+        if (alive) { setFailed(true); setOwnerApps([]); setNotifs([]); }
       });
     return () => { alive = false; };
   }, [nonce]);
 
-  const list = notifs || [];
+  // Built at render so the links follow the workspace once it syncs in.
+  const list = useMemo(
+    () => (notifs ? mergeFeed(notifs, ownerApplicationItems(ownerApps, state.projects)) : []),
+    [notifs, ownerApps, state.projects],
+  );
 
   let body;
   if (failed) {
@@ -102,10 +150,10 @@ export function Notifications() {
         icon="bell"
         title="No notifications yet"
         body={leads
-          ? 'When a volunteer messages you or an organization replies to your application, it shows up here.'
+          ? "Share your project's join link so volunteers can apply."
           : "Apply to an opportunity and the organization's reply shows up here."}
-        cta="Search opportunities"
-        onCta={() => router.push('/discover')}
+        cta={leads ? 'Open your project' : 'Search opportunities'}
+        onCta={() => router.push(leads && homeProject ? `/lead/${encodeURIComponent(homeProject.id)}/overview` : '/discover')}
       />
     );
   } else {
@@ -135,7 +183,7 @@ export function Notifications() {
       <h1 style={S(TITLE)}>Notifications</h1>
       <p style={S(LEDE)}>
         {leads
-          ? 'Messages from your volunteers, plus replies and updates on anything you\'ve applied to.'
+          ? 'New applications and messages from volunteers on your projects.'
           : 'Application decisions and updates from organizations you\'ve joined.'}
       </p>
       <div style={S('margin-top:26px;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>{body}</div>
