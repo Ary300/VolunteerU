@@ -4,7 +4,7 @@
    AppFrame.jsx, client boundary for every signed-in screen
 
    Every screen reads state that only exists in the browser (localStorage) and
-   URL search params, so there is nothing meaningful for the server to render.
+   URL search params, so the server has nothing useful to render.
    Gating on mount gives one render path instead of two: no hydration mismatch,
    no postponed Suspense boundary to resume, and a real skeleton while the
    store hydrates.
