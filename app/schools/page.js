@@ -1,4 +1,4 @@
-import { PlainFrame } from '../../components/AppFrame.jsx';
+import { Suspense } from 'react';
 import { Schools } from '../../components/screens/PublicPages.jsx';
 
 export const metadata = {
@@ -7,8 +7,8 @@ export const metadata = {
 
 export default function Page() {
   return (
-    <PlainFrame>
+    <Suspense fallback={null}>
       <Schools />
-    </PlainFrame>
+    </Suspense>
   );
 }

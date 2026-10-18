@@ -1,986 +1,959 @@
 'use client';
 
 /* ==========================================================================
-   Landing.jsx, design screen: `isLanding`
-   The hero searches live data for everyone, signed in or not: opportunities
-   from the listings table (live rows are public) and registered nonprofits
-   from /api/nonprofits (ProPublica / IRS records). Everything below the hero
-   is product illustration with sample names, and it makes no claim the code
-   can't back up.
+   Landing.jsx, design screen: `isLanding` (photo-first direction)
+   The hero search and the category row query live data for everyone,
+   signed in or not: opportunities from the listings table (live rows are
+   public) and registered nonprofits from /api/nonprofits (ProPublica / IRS
+   records). Listing cards show only a listing's own cover, and the page
+   photos further down are picked around whatever the listings use.
    ========================================================================== */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Avatar, Icon } from '../ui.jsx';
+import { S } from '../../lib/style.js';
+import { C, F, CATEGORIES } from '../../lib/tokens.js';
+import { useSnapshot } from '../../lib/store.js';
+import { Button, Icon } from '../ui.jsx';
+import { SearchBar, CategoryRow, ListingCard, NonprofitRow, DateBlock, whenParts, Sep, WHEN_OPTIONS } from '../vu/index.js';
 import { MarketingHeader, MarketingFooter, useMarketingLinks, scrollToAnchor } from '../Marketing.jsx';
-import { searchListings, searchWebNonprofits, parseState } from '../../lib/listings.js';
-import { PEXELS } from '../../lib/seed.js';
-import { nextShiftInfo } from './JoinListing.jsx';
+import { searchListings, searchWebNonprofits, parseState, listingShifts } from '../../lib/listings.js';
+import { inferYear, shiftDates } from '../../lib/calendar.js';
+import { whenWindow } from '../DiscoverListings.jsx';
+import { pickPhotos, PHOTOS, DONATION_PHOTOS } from '../../lib/photos.js';
+import { shiftLabel } from './JoinListing.jsx';
 
-const MONO = "'Geist Mono',monospace";
-const MAX_OPPS = 3;
-const MAX_ORGS = 4;
-
-/* Stock photo for a listing posted without a cover, by cause. A cause with no
-   fitting photo gets no thumbnail rather than an empty image box. */
-const CAUSE_PHOTO = {
-  'Food & hunger': PEXELS.food2,
-  Education: PEXELS.reading3,
-  Environment: PEXELS.trail,
-  Homelessness: PEXELS.shelter,
-  Seniors: PEXELS.seniors,
+const PAGE = 6; // rows per "page" of the list under the grid
+const GRID_COLS = 4; // .lp-grid columns at desktop width
+const GRID_MAX = 8; // two rows of cards; the rest of the listings are rows
+const MAX_ORGS = 8;
+/* The hero photo is fixed above the fold, so it is the one page photo that
+   counts against listings: a listing never repeats it, and the "VOLUNTEER"
+   tee shoot it belongs to shows at most twice on the page. */
+const HERO_PHOTO = 'food2';
+/* The other page art is chosen after the listings, so a listing's own cover
+   always shows and the art takes the first photo in its list that no
+   listing on the page uses. None of these are from the tee shoot. */
+const ART_CHOICES = {
+  // A group at work, nobody posing.
+  shift: ['reading4', 'reading', 'shelter', 'reading3'],
+  lead: ['shelter', 'reading2', 'reading', 'reading4'],
+  // A volunteer filling in a sign-in sheet; then a sorting table.
+  hours: ['outdoor', 'reading5', 'shelter', 'reading2'],
 };
+/* trail.jpg is left out on purpose: its subject poses for the camera with
+   crossed arms, which reads as stock. A listing may still use it as a cover.
+   The pair fills first so it keeps both photos when choices run short. */
+const ART_ORDER = ['shift', 'lead', 'hours'];
+/* Crops for the wide 16:10 art frame, where the card crop would cut heads. */
+const ART_POS = { reading5: 'center 12%' };
+/* Photos from one Pexels shoot show the same people at the same table, so
+   page art takes at most one photo per shoot and none from the hero's.
+   lead.jpg (masked models bumping elbows on a studio backdrop) is never
+   page art: it is the most staged photo in the set.
+   lib/photos.js tags the tee shoot; the donation-drive (7156xxx) and
+   park-cleanup (367134xx) shoots are tagged here as well. */
+const ART_SHOOTS = {
+  ...Object.fromEntries(DONATION_PHOTOS.map((k) => [k, 'donations'])),
+  trail: 'park',
+  outdoor: 'park',
+};
+const shootOf = (key) => (PHOTOS[key] && PHOTOS[key].shoot) || ART_SHOOTS[key] || key;
 
-const CAUSE_CHIPS = ['Food & hunger', 'Education', 'Environment', 'Animals', 'Homelessness', 'Seniors', 'Health', 'Arts'];
+/* Page art for the photo keys the listings already show. A slot takes a
+   photo from a shoot no listing on the page shows. Only the first pair
+   photo may fall back to a shoot a card shows, so the same models never
+   turn up again further down the page. A photo never repeats. When the pair
+   gets one photo it runs as `wide`, one frame across both columns, so the
+   columns stay level. With no hours photo that section runs as text. */
+const FALLBACK_SLOTS = new Set(['shift']);
+function pickArt(taken) {
+  const used = new Set([HERO_PHOTO, ...taken]);
+  const artShoots = new Set([shootOf(HERO_PHOTO)]);
+  const cardShoots = new Set(taken.map(shootOf));
+  const out = {};
+  for (const slot of ART_ORDER) {
+    const open = ART_CHOICES[slot].filter((k) => PHOTOS[k] && !used.has(k) && !artShoots.has(shootOf(k)));
+    const fresh = open.find((k) => !cardShoots.has(shootOf(k)));
+    const key = fresh || (FALLBACK_SLOTS.has(slot) ? open[0] : null) || null;
+    if (!key) {
+      out[slot] = null;
+      continue;
+    }
+    used.add(key);
+    artShoots.add(shootOf(key));
+    out[slot] = { ...PHOTOS[key], key, pos: ART_POS[key] || PHOTOS[key].pos };
+  }
+  out.wide = null;
+  if (!out.shift !== !out.lead) {
+    out.wide = out.shift || out.lead;
+    out.shift = null;
+    out.lead = null;
+  }
+  return out;
+}
 
-/* Responsive rules live in classes, so they hold after a client-side
-   navigation too (inline-style attribute selectors only match server HTML). */
+/* Split listings into the card grid and the rows under it. Each grid row of
+   GRID_COLS holds at most one listing without a photo, after the photos,
+   so the grid is never a wall of date tiles. Every other listing without a
+   photo becomes a row. Order inside each group is kept. */
+function gridAndRows(list, photos) {
+  const has = (l) => Boolean(photos.get(l.id));
+  const withPhoto = list.filter(has);
+  const without = list.filter((l) => !has(l));
+  const grid = [];
+  let p = 0;
+  let t = 0;
+  while (p < withPhoto.length && grid.length < GRID_MAX) {
+    const tile = t < without.length ? 1 : 0;
+    const take = Math.min(GRID_COLS - tile, withPhoto.length - p, GRID_MAX - grid.length - tile);
+    grid.push(...withPhoto.slice(p, p + take));
+    p += take;
+    if (tile && grid.length < GRID_MAX) grid.push(without[t++]);
+  }
+  // Photo listings past two rows of cards lead their row with a thumbnail.
+  return { grid, rows: [...withPhoto.slice(p), ...without.slice(t)] };
+}
+/* With no search yet, a spread of causes from IRS records. */
+const DEFAULT_ORG_QUERIES = ['food bank', 'animal shelter', 'public library', 'homeless shelter'];
+
+/* Signed-out visitors start in Carmel, Indiana, where VolunteerU is built. */
+const HOME_AREA = 'Carmel, IN';
+const HOME_CITY = 'Carmel';
+/* Real Carmel nonprofits: ProPublica pages for "Carmel" in Indiana, kept to
+   rows whose city is Carmel. Churches, political groups, sports clubs and
+   boosters are left out of the default list since they rarely take student
+   volunteers; a search still finds them. */
+const CARMEL_PAGES = [0, 1, 2];
+const CARMEL_SKIP = /church|baptist|baha|lutheran|methodist|presbyterian|wesleyan|catholic|assembly|ministr|democrat|republican|building corp|golf|lacrosse|baseball|hockey|rugby|wrestling|swim|basketball|soccer|football|runners|teachers assoc|fop|lodge|\bpto\b|booster|club|diwali|christkindl/i;
+const CAUSE_ORDER = ['Environment', 'Education', 'Human services', 'Youth', 'Health', 'Arts', 'Civic', 'Disaster relief', 'Food & hunger', 'Homelessness', 'Animals', 'Nonprofit'];
+/* Listings in or near Carmel sort first in the default view. */
+const CARMEL_RE = /\bcarmel\b/i;
+const NEARBY_RE = /\b(indiana|indianapolis|fishers|westfield|noblesville|zionsville|hamilton county)\b|,\s*in\b/i;
+
 const LANDING_CSS = `
-.lp-hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,500px); gap:52px; align-items:start; }
-.lp-search { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(0,1fr) auto; }
-.lp-search-field + .lp-search-field { border-left:1px solid #EFE9E2; }
-.lp-search-field { position:relative; }
-.lp-search-field:focus-within::after { content:''; position:absolute; inset:4px; border:2px solid #C2603C; border-radius:12px; pointer-events:none; }
-.lp-section { padding:140px 32px 150px; }
-.lp-big { font:600 104px/.94 Geist; letter-spacing:-0.06em; }
-.lp-2col { display:grid; grid-template-columns:1fr 1fr; }
-.lp-3col { display:grid; grid-template-columns:repeat(3,1fr); }
-.lp-4col { display:grid; grid-template-columns:repeat(4,1fr); }
-.lp-split { display:grid; grid-template-columns:1fr 1fr; gap:48px; align-items:center; }
-.lp-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:28px 36px; }
-.lp-step { display:grid; grid-template-columns:30px minmax(0,1fr); align-items:baseline; }
-.lp-attend { display:grid; grid-template-columns:1.6fr 1fr .6fr; gap:10px; align-items:center; }
-.lp-block-top { padding-top:130px; }
-.lp-band-gap { margin-top:130px; }
+.lp-hero { position:relative; height:580px; margin-top:8px; }
+.lp-hero-img { position:absolute; inset:0; border-radius:24px; overflow:hidden; background:${C.ink}; }
+.lp-hero-img img { width:100%; height:100%; object-fit:cover; object-position:50% 30%; display:block; }
+.lp-hero-img::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(20,24,22,0) 25%, rgba(20,24,22,.66) 100%), linear-gradient(90deg, rgba(20,24,22,.5) 0%, rgba(20,24,22,0) 60%); }
+.lp-hero-copy { position:absolute; z-index:1; left:56px; bottom:104px; max-width:780px; color:#fff; }
+.lp-hero-copy h1 { margin:0; font:700 76px/.98 ${F.display}; letter-spacing:-0.035em; text-wrap:balance; }
+.lp-hero-copy p { margin:18px 0 0; max-width:540px; font:400 19px/1.45 ${F.body}; color:rgba(255,255,255,.92); text-wrap:pretty; }
+.lp-hero-search { position:absolute; left:40px; right:200px; bottom:-42px; z-index:2; }
+.lp-under { margin-top:66px; padding-left:68px; display:flex; align-items:center; gap:10px 24px; flex-wrap:wrap; font:500 14px/1.4 ${F.body}; color:${C.ink2}; }
+.lp-under a { color:${C.ink}; font-weight:600; text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; }
+.lp-hint { font:500 14px/1.4 ${F.body}; color:${C.emberDeep}; }
+.lp-cats { margin-top:44px; }
+.lp-sec { margin-top:56px; scroll-margin-top:96px; }
+.lp-sec-head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+.lp-sec-head h2 { margin:0; min-width:0; font:650 28px/1.12 ${F.display}; letter-spacing:-0.022em; color:${C.ink}; }
+.lp-sub { margin:8px 0 0; font:400 14px/1.4 ${F.body}; color:${C.ink2}; }
+.lp-link { flex:none; font:600 15px/1 ${F.body}; color:${C.ink}; text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; white-space:nowrap; }
+.lp-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:40px 24px; margin-top:22px; }
+.lp-more { margin-top:32px; }
+.lp-skel-ph { aspect-ratio:4/3; border-radius:16px; background:${C.mist}; }
+.lp-skel-bar { height:12px; border-radius:4px; background:${C.mist}; margin-top:12px; }
+.lp-np { margin-top:14px; column-gap:56px; }
+.lp-pair { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; margin-top:24px; }
+.lp-pair-ph { aspect-ratio:16/10; border-radius:16px; overflow:hidden; background:${C.mist}; }
+.lp-pair-ph img { width:100%; height:100%; object-fit:cover; display:block; }
+.lp-pair-ph.is-wide { aspect-ratio:21/8; margin-top:24px; }
+.lp-pair-ph.is-wide + .lp-pair { margin-top:0; }
+.lp-pair h3 { margin:20px 0 0; font:650 28px/1.12 ${F.display}; letter-spacing:-0.022em; }
+.lp-pair p { margin:8px 0 14px; max-width:520px; font:400 16px/1.5 ${F.body}; color:${C.ink2}; text-wrap:pretty; }
+.lp-h1 { margin:0; font:700 40px/1.05 ${F.display}; letter-spacing:-0.03em; color:${C.ink}; }
+.lp-band { margin-top:104px; scroll-margin-top:76px; }
+.lp-how { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:72px; align-items:center; padding:64px 0; border-top:1px solid ${C.line}; border-bottom:1px solid ${C.line}; }
+.lp-how-p { margin:14px 0 0; max-width:460px; font:400 17px/1.5 ${F.body}; color:${C.ink2}; text-wrap:pretty; }
+/* No photo: the FAQ's rhythm, heading left and the copy under a hairline
+   in the right column, so the two sections line up. */
+.lp-how--text { grid-template-columns:minmax(0,4fr) minmax(0,8fr); align-items:start; padding:0; border:0; }
+.lp-how--text .lp-how-copy { padding-top:22px; box-shadow:inset 0 1px 0 ${C.line}; }
+.lp-how--text .lp-how-p { margin:0; max-width:640px; }
+.lp-start { scroll-margin-top:96px; }
+.lp-rows { margin-top:48px; }
+.lp-rows.is-only { margin-top:22px; }
+.lp-rows h3 + .lp-list { margin-top:12px; }
+.lp-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:48px; border-top:0; }
+.lp-list > li:nth-child(-n+2) { border-top:1px solid ${C.line}; }
+.lp-row-end { color:${C.ink3}; }
+.lp-faq { display:grid; grid-template-columns:minmax(0,4fr) minmax(0,8fr); gap:72px; margin-top:112px; }
+.lp-q { display:flex; width:100%; align-items:center; justify-content:space-between; gap:24px; padding:22px 0; text-align:left; font:600 17px/1.3 ${F.body}; color:${C.ink}; background:none; border:0; cursor:pointer; }
+.lp-q svg { flex:none; color:${C.ink3}; transition:transform .2s ease; }
+.lp-q[aria-expanded="true"] svg { transform:rotate(180deg); }
+.lp-a { padding:0 0 22px; margin-top:-8px; max-width:640px; font:400 15px/1.55 ${F.body}; color:${C.ink2}; text-wrap:pretty; }
+.lp-cta { margin-top:112px; padding-top:56px; border-top:1px solid ${C.line}; display:flex; align-items:center; justify-content:space-between; gap:24px 48px; flex-wrap:wrap; }
+.lp-cta p { margin:10px 0 0; font:400 17px/1.5 ${F.body}; color:${C.ink2}; }
+.lp-cta-btns { display:flex; align-items:center; gap:12px 24px; flex-wrap:wrap; }
+@media (hover:hover) {
+  .lp-link:hover, .lp-under a:hover { text-decoration-thickness:2px; }
+  .lp-q:hover span { text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; }
+}
+@media (prefers-reduced-motion: reduce) { .lp-q svg { transition:none; } }
 @media (max-width: 1179px) {
-  .lp-hero { grid-template-columns:1fr; gap:36px; }
-  .lp-section { padding:88px 24px 96px; }
-  .lp-big { font-size:64px; }
-  .lp-4col, .lp-steps { grid-template-columns:1fr 1fr; }
-  .lp-block-top { padding-top:80px; }
-  .lp-band-gap { margin-top:80px; }
+  .lp-hero { height:540px; }
+  .lp-hero-copy { left:36px; right:36px; }
+  .lp-hero-copy h1 { font-size:60px; }
+  .lp-hero-search { left:24px; right:24px; }
+  .lp-under { padding-left:28px; }
+  .lp-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .lp-how { grid-template-columns:minmax(0,1fr); gap:40px; }
+  .lp-how--text { gap:24px; }
+  .lp-list { grid-template-columns:minmax(0,1fr); border-top:1px solid ${C.line}; }
+  .lp-list > li:nth-child(-n+2) { border-top:0; }
+  .lp-faq { grid-template-columns:minmax(0,1fr); gap:24px; margin-top:88px; }
 }
 @media (max-width: 900px) {
-  .lp-2col, .lp-3col, .lp-split { grid-template-columns:1fr; }
-  .lp-split { gap:28px; }
-  .lp-col-rule { border-right:0 !important; border-bottom:1px solid #F1EBE4; }
+  .lp-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .lp-pair { grid-template-columns:minmax(0,1fr); gap:48px; }
+  .lp-pair-ph.is-wide { aspect-ratio:16/9; }
+  .lp-pair-ph.is-wide + .lp-pair { gap:32px; }
 }
-@media (max-width: 720px) {
-  .lp-search { grid-template-columns:1fr; }
-  .lp-search-field + .lp-search-field { border-left:0; border-top:1px solid #EFE9E2; }
-  .lp-search-go { margin:0 8px 8px !important; width:auto !important; }
-  .lp-section { padding:64px 16px 72px; }
-  .lp-hero-wrap { padding:40px 16px 48px !important; }
-  .lp-pad { padding-left:16px !important; padding-right:16px !important; }
-  .lp-big { font-size:44px; }
-  .lp-h1 { font-size:38px !important; }
-  .lp-h2 { font-size:32px !important; }
-  .lp-4col, .lp-steps { grid-template-columns:1fr; }
-  .lp-steps { gap:20px; }
-  .lp-tight { padding:16px !important; }
-  .lp-cta { padding:40px 20px !important; }
-  .lp-block-top { padding-top:56px; }
-  .lp-band-gap { margin-top:56px; }
-  .lp-final { padding-top:56px !important; padding-bottom:56px !important; }
+@media (max-width: 719px) {
+  .lp-hero { height:auto; margin-top:4px; }
+  .lp-hero-img { position:relative; height:470px; border-radius:16px; }
+  .lp-hero-img img { object-position:58% 30%; }
+  /* The headline sits over the volunteers' white shirts here, so the scrim
+     starts dark enough at the top to keep the shirt lettering out of it. */
+  .lp-hero-img::after { background:linear-gradient(180deg, rgba(20,24,22,.42) 0%, rgba(20,24,22,.74) 36%, rgba(20,24,22,.9) 100%); }
+  .lp-hero-copy { left:20px; right:20px; bottom:92px; }
+  .lp-hero-copy h1 { font-size:40px; line-height:1; }
+  .lp-hero-copy p { margin-top:12px; font-size:16px; }
+  .lp-hero-search { position:relative; left:auto; right:auto; bottom:auto; margin:-72px 12px 0; }
+  .lp-under { margin-top:16px; padding-left:0; justify-content:center; gap:8px 16px; font-size:13px; }
+  .lp-cats { margin-top:28px; }
+  .lp-cats .vu-cats { margin:0 -16px; padding:0 16px; scroll-padding:0 16px; }
+  .lp-sec { margin-top:40px; }
+  .lp-sec-head h2 { font-size:23px; }
+  .lp-grid { display:flex; gap:12px; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; margin:16px -16px 0; padding:0 16px; scroll-padding:0 16px; }
+  .lp-grid::-webkit-scrollbar { display:none; }
+  .lp-grid > * { flex:0 0 248px; scroll-snap-align:start; }
+  .lp-more { margin-top:20px; }
+  .lp-more .vu-btn { width:100%; }
+  .lp-np { column-gap:0; }
+  .lp-h1 { font-size:30px; }
+  .lp-pair h3 { font-size:22px; margin-top:16px; }
+  .lp-pair p { font-size:15px; margin-bottom:14px; }
+  .lp-pair-ph { aspect-ratio:4/3; border-radius:16px; }
+  .lp-pair-ph.is-wide { aspect-ratio:4/3; margin-top:20px; }
+  .lp-band { margin-top:56px; }
+  .lp-how { padding:40px 0; }
+  .lp-how--text { padding:0; }
+  .lp-how-p { font-size:15px; }
+  .lp-rows { margin-top:32px; }
+  .lp-rows.is-only { margin-top:16px; }
+  .lp-row-end { display:none; }
+  .lp-faq { margin-top:56px; }
+  .lp-q { font-size:16px; padding:18px 0; }
+  .lp-cta { margin-top:56px; padding-top:40px; }
+  .lp-cta p { font-size:15px; }
+  .lp-cta-btns { width:100%; justify-content:center; }
+  .lp-cta-btns > .vu-btn:first-child { width:100%; justify-content:center; }
 }
 `;
+
+/* ---- helpers --------------------------------------------------------------- */
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/* "Sat, Oct 24" -> Date (year nearest today), or null. */
+function shiftDate(label) {
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(String(label || ''));
+  const mo = m ? MONTHS.indexOf(m[1]) : -1;
+  if (mo < 0) return null;
+  const day = Number(m[2]);
+  return new Date(inferYear(mo, day), mo, day);
+}
+
+/* When a shift starts: its start time, or the start of its day when the
+   label has no readable time. Same reading as Discover's shiftStart. */
+function shiftStartAt(sh, now) {
+  const dts = shiftDates(sh, undefined, now);
+  return dts ? dts.start : shiftDate(sh.d);
+}
+
+/* Does a start time fall inside the "When" window the visitor picked? The
+   window is Discover's whenWindow, so "This week" means the same thing on
+   Landing, Discover and Home: from today 00:00 until 7 x 24 hours from now. */
+function inWindow(at, when, now = new Date()) {
+  if (!at) return false;
+  const win = when ? whenWindow(when, now) : null;
+  return !win || (at >= win[0] && at < win[1]);
+}
+
+/* The listing's soonest upcoming shift inside the window, or null. */
+function nextShift(listing, when, now = new Date()) {
+  const rows = listingShifts(listing, now)
+    .map((sh) => ({ sh, day: shiftStartAt(sh, now) }))
+    .filter((x) => x.day && inWindow(x.day, when, now))
+    .sort((a, b) => a.day - b.day);
+  return rows[0] || null;
+}
+
+/* Upcoming listings first (soonest shift), then the rest newest first. */
+function arrange(rows, when) {
+  const now = new Date();
+  const dated = [];
+  const undated = [];
+  for (const l of rows || []) {
+    const n = nextShift(l, when, now);
+    if (n) dated.push({ ...l, _next: n });
+    else if (!when) undated.push(l);
+  }
+  dated.sort((a, b) => a._next.day - b._next.day);
+  return dated.concat(undated);
+}
+
+/* Carmel listings first, then the rest of central Indiana, then everything
+   else, keeping the date order inside each group. */
+function localRank(l) {
+  const where = `${l.site || ''} ${l.location || ''}`;
+  if (CARMEL_RE.test(where)) return 0;
+  return NEARBY_RE.test(where) ? 1 : 2;
+}
+function localFirst(rows) {
+  return rows.map((l, i) => ({ l, i, r: localRank(l) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.l);
+}
 
 /* ProPublica returns names in capitals. */
 function titleCase(str) {
   return String(str || '').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/* "Sat, Oct 24 · 1:00-4:00 PM" reads "Sat, Oct 24 at 1–4 PM", the same label
-   the join page shows. A shift that already happened isn't shown as next. */
-function sessionLabel(label) {
-  const shift = nextShiftInfo(label);
-  if (!shift) return '';
-  return shift.past ? 'No upcoming shift posted yet' : shift.label;
+function cardProps(l, photo) {
+  const student = l.org_class === 'student' || Boolean(l.is_student_led);
+  const place = String(l.site || l.location || '').trim();
+  const first = place.split(',')[0].trim();
+  const org = /remote|online|virtual/i.test(first) ? place : first;
+  const more = l._next ? listingShifts(l).length - 1 : 0;
+  return {
+    href: `/join/${l.id}`,
+    title: l.name,
+    org: student ? undefined : org || undefined,
+    verified: !student && Boolean(l.verified),
+    byline: student ? org || undefined : undefined,
+    studentProject: student,
+    // Undated listings pass '' so the tile reads "No dates yet".
+    when: l._next ? shiftLabel(l._next.sh) : '',
+    moreDates: more > 0 ? more : 0,
+    online: l.delivery === 'remote',
+    photo,
+    cause: l.cause,
+  };
 }
 
-function describeSearch({ q, near, cause }) {
-  const what = cause || (q ? `“${q}”` : 'Everything');
-  return near ? `${what} near ${near}` : what;
+const whenText = (v) => ((WHEN_OPTIONS.find((o) => o.v === v) || {}).l || '').toLowerCase();
+
+function describe({ q, near, when, cat }) {
+  const c = CATEGORIES.find((x) => x.key === cat);
+  let what = q ? `“${q}”` : c && c.key !== 'near' ? `${c.label} opportunities` : 'Opportunities';
+  if (near) what += ` near ${near}`;
+  if (when) what += ` ${whenText(when)}`;
+  return what;
 }
 
-/* ---- FAQ ------------------------------------------------------------------ */
+/* "Nothing for “library” near Zzyzx", "Nothing this weekend". */
+function noneTitle({ q, near, when, cat }) {
+  const c = CATEGORIES.find((x) => x.key === cat);
+  const what = q ? `“${q}”` : c && c.key !== 'near' ? c.label.toLowerCase() : '';
+  return ['Nothing', what ? `for ${what}` : '', near ? `near ${near}` : '', when ? whenText(when) : ''].filter(Boolean).join(' ');
+}
 
-const FAQS = [
-  {
-    q: 'Is it free?',
-    a: 'Yes. Students and organizations don’t pay anything to use VolunteerU.',
-  },
-  {
-    q: 'Where do the nonprofits come from?',
-    a: 'IRS records, through ProPublica’s Nonprofit Explorer. Each one links to its ProPublica page with the address, so you can contact them about volunteering.',
-  },
-  {
-    q: 'How do my hours get confirmed?',
-    a: 'After a shift, log your hours on that project. Once the organizer approves them, they count as confirmed. Hours you log on your own stay in a separate total.',
-  },
-  {
-    q: 'Do I need a 501(c)(3) to start a student project?',
-    a: 'No. Anyone 13 or older can start one. If a school, library or nonprofit supervises it, you can ask for a verified badge from your project page.',
-  },
-  {
-    q: 'What does the verified badge mean?',
-    a: 'Someone on the VolunteerU team reviewed the organization and its staff contact by hand. Owners can’t give themselves the badge.',
-  },
-];
+/* Next shift between today and 7 days from now. Undated listings can't be
+   "open this week". */
+function inWeek(l) {
+  return Boolean(l._next && inWindow(l._next.day, 'week'));
+}
 
-/* A plain, standard FAQ accordion. One row open at a time. */
-function Faq({ items }) {
-  const [open, setOpen] = useState(0);
+/* ---- data ------------------------------------------------------------------ */
+
+function listingFilters({ q, near, cat }) {
+  const c = CATEGORIES.find((x) => x.key === cat);
+  return { q, near, causes: c && c.cause ? [c.cause] : [], place: cat === 'online' ? 'online' : 'all' };
+}
+
+/* One page of ProPublica results for "Carmel" in Indiana. */
+async function carmelPage(page) {
+  const res = await fetch(`/api/nonprofits?q=${HOME_CITY}&state=IN&page=${page}`);
+  if (!res.ok) throw new Error(`nonprofits ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data && data.organizations) ? data.organizations : [];
+}
+
+/* Carmel nonprofits, one per cause in turn so the list mixes causes. */
+async function loadCarmelOrgs(max) {
+  const pages = await Promise.all(CARMEL_PAGES.map(carmelPage));
+  const seen = new Set();
+  const rows = pages.flat().filter((o) => {
+    if (!o || seen.has(o.ein)) return false;
+    seen.add(o.ein);
+    return String(o.city || '').toLowerCase() === 'carmel' && o.cause !== 'Religion' && !CARMEL_SKIP.test(o.name || '');
+  });
+  const byCause = new Map();
+  for (const o of rows) {
+    const k = CAUSE_ORDER.includes(o.cause) ? o.cause : 'Nonprofit';
+    byCause.set(k, [...(byCause.get(k) || []), o]);
+  }
+  const queues = CAUSE_ORDER.map((k) => byCause.get(k) || []).filter((l) => l.length);
+  const out = [];
+  for (let i = 0; out.length < max && queues.some((l) => l[i]); i++) {
+    for (const l of queues) if (l[i] && out.length < max) out.push(l[i]);
+  }
+  return out;
+}
+
+async function loadOrgs({ q, near, cat }, homeRegion) {
+  const c = CATEGORIES.find((x) => x.key === cat);
+  const place = near || homeRegion || '';
+  if (!q && !near && !(c && c.cause) && homeRegion === HOME_AREA) return loadCarmelOrgs(MAX_ORGS);
+  if (q || (c && c.cause)) {
+    const rows = await searchWebNonprofits({ q, near: place, causes: c && c.cause ? [c.cause] : [], throwOnError: true });
+    return rows.slice(0, MAX_ORGS);
+  }
+  const lists = await Promise.all(DEFAULT_ORG_QUERIES.map((term) => searchWebNonprofits({ q: term, near: place, throwOnError: true })));
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; out.length < MAX_ORGS && i < 4; i++) {
+    for (const list of lists) {
+      const o = list[i];
+      if (o && !seen.has(o.ein) && out.length < MAX_ORGS) {
+        seen.add(o.ein);
+        out.push(o);
+      }
+    }
+  }
+  return out;
+}
+
+/* ---- sections -------------------------------------------------------------- */
+
+function SkeletonCards() {
   return (
-    <div style={S('border-top:1px solid #E8E1D9')}>
-      {items.map((f, i) => {
-        const on = open === i;
-        const panelId = `lp-faq-${i}`;
-        return (
-          <div key={f.q} style={S('border-bottom:1px solid #E8E1D9')}>
-            <h3 style={S('margin:0')}>
-              <button
-                type="button"
-                aria-expanded={on}
-                aria-controls={panelId}
-                onClick={() => setOpen(on ? -1 : i)}
-                className={H.press}
-                style={S('display:flex;width:100%;align-items:center;justify-content:space-between;gap:24px;padding:22px 6px;background:none;border:0;cursor:pointer;text-align:left;color:#1A1714')}
-              >
-                <span style={S('font:600 19px/1.3 Geist;letter-spacing:-0.025em')}>{f.q}</span>
-                <span aria-hidden="true" style={s('color:#C2603C;flex:none;transition:transform .2s ease', on ? 'transform:rotate(45deg)' : '')}>
-                  <Icon name="plus" size={20} />
-                </span>
-              </button>
-            </h3>
-            <div id={panelId} role="region" hidden={!on}>
-              <div style={S('padding:0 6px 24px;font:450 16px/1.65 Geist;color:#57504A;max-width:720px;text-wrap:pretty')}>{f.a}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ---- hero result rows ------------------------------------------------------ */
-
-function ListingRow({ l }) {
-  const when = sessionLabel(l.next_session);
-  const student = l.org_class === 'student' || l.is_student_led;
-  const photo = l.cover || CAUSE_PHOTO[l.cause] || '';
-  return (
-    <Link
-      href={`/join/${l.id}`}
-      className="lp-row"
-      style={S('display:flex;align-items:center;gap:14px;padding:14px 18px;border-top:1px solid #F1EBE4;color:inherit;text-decoration:none;transition:background .16s ease')}
-    >
-      {photo ? (
-        <div style={S('width:52px;height:52px;border-radius:11px;overflow:hidden;flex:none')}>
-          <ImageSlot src={photo} shape="rounded" radius={11} alt="" />
-        </div>
-      ) : null}
-      <div style={S('min-width:0;flex:1')}>
-        <div style={S('display:flex;align-items:center;gap:8px;min-width:0')}>
-          <div className="vu-trunc" style={S('font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</div>
-          {l.verified ? (
-            <span style={S('display:inline-flex;align-items:center;gap:4px;flex:none;font:500 12px/1 Geist;color:#3F6B4E')}>
-              <Icon name="check-circle" size={13} />
-              Verified
-            </span>
-          ) : null}
-        </div>
-        <div className="vu-trunc" style={S('margin-top:5px;font:450 13px/1.35 Geist;color:#6B635C')}>
-          {[student ? 'Student project' : '', l.site || l.location || ''].filter(Boolean).join(', ')}
-        </div>
-        {when ? <div style={S('margin-top:4px;font:450 13px/1.35 Geist;color:#6B635C')}>{when}</div> : null}
-      </div>
-      <span aria-hidden="true" style={S('color:#A9A097;flex:none')}>
-        <Icon name="chevron-right" size={16} />
-      </span>
-    </Link>
-  );
-}
-
-function NonprofitRow({ o }) {
-  const place = [titleCase(o.city), o.state].filter(Boolean).join(', ');
-  return (
-    <a
-      href={o.url || `https://projects.propublica.org/nonprofits/organizations/${o.ein}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="lp-row"
-      style={S('display:flex;align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #F1EBE4;color:inherit;text-decoration:none;transition:background .16s ease')}
-    >
-      <span aria-hidden="true" style={S('width:36px;height:36px;border-radius:10px;background:#F6F2EE;color:#8A8179;display:grid;place-items:center;flex:none')}>
-        <Icon name="building" size={16} />
-      </span>
-      <div style={S('min-width:0;flex:1')}>
-        <div className="vu-trunc" style={S('font:600 15px/1.25 Geist;letter-spacing:-0.015em;color:#1A1714')}>{titleCase(o.name)}</div>
-        <div className="vu-trunc" style={S('margin-top:4px;font:450 13px/1.35 Geist;color:#6B635C')}>
-          {[place, o.cause && o.cause !== 'Nonprofit' ? o.cause : ''].filter(Boolean).join(', ')}
-        </div>
-      </div>
-      <span style={S('display:inline-flex;align-items:center;gap:4px;flex:none;font:500 12px/1 Geist;color:#A8482A')}>
-        ProPublica
-        <Icon name="external" size={13} label="opens in a new tab" />
-      </span>
-    </a>
-  );
-}
-
-function SkeletonList({ n = 3 }) {
-  return (
-    <div aria-hidden="true">
-      {Array.from({ length: n }).map((_, i) => (
-        <div key={i} style={S('display:flex;align-items:center;gap:14px;padding:14px 18px;border-top:1px solid #F1EBE4')}>
-          <div style={S('width:52px;height:52px;border-radius:11px;background:#F3EEE8;flex:none')} />
-          <div style={S('flex:1')}>
-            <div style={S('height:13px;width:62%;border-radius:4px;background:#F1EBE4')} />
-            <div style={S('margin-top:9px;height:11px;width:44%;border-radius:4px;background:#F6F2EE')} />
-          </div>
+    <div className="lp-grid" aria-hidden="true">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i}>
+          <div className="lp-skel-ph" />
+          <div className="lp-skel-bar" style={{ width: '70%' }} />
+          <div className="lp-skel-bar" style={{ width: '45%', marginTop: 8 }} />
         </div>
       ))}
     </div>
   );
 }
 
-function ListLabel({ children }) {
-  return <div style={S('padding:14px 18px 10px;font:600 13px/1.2 Geist;color:#57504A')}>{children}</div>;
+function Notice({ title, body, action }) {
+  return (
+    <div style={S(`margin-top:22px;padding:28px 0;box-shadow:inset 0 1px 0 ${C.line}, inset 0 -1px 0 ${C.line}`)}>
+      <div style={S(`font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{title}</div>
+      {body ? <p style={S(`margin:6px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>{body}</p> : null}
+      {action ? <div style={S('margin-top:16px')}>{action}</div> : null}
+    </div>
+  );
+}
+
+/* What the results section shows, computed once in Landing so the page art
+   below can avoid the photos the listings use. */
+function useResultsView({ state, query, later, local }) {
+  const searched = Boolean(query.q || query.near || query.when || query.cat !== 'near');
+  const home = local && !searched;
+  const all = state.items;
+  const ranked = useMemo(() => (home ? localFirst(all || []) : all || []), [home, all]);
+  // With no search, the grid shows what's open this week; "Show later dates"
+  // opens it up to every listing.
+  const week = !searched && !later;
+  const pool = useMemo(() => (week ? ranked.filter(inWeek) : ranked), [week, ranked]);
+  const laterCount = week ? ranked.length - pool.length : 0;
+  // Only a listing's own cover, never a stock photo, so each card matches
+  // its /join page and Discover. Without one the card shows a DateTile.
+  const photos = useMemo(() => pickPhotos(pool, { seed: false, used: [HERO_PHOTO] }), [pool]);
+  const split = useMemo(() => gridAndRows(pool, photos), [pool, photos]);
+  const taken = useMemo(() => [...photos.values()].filter(Boolean).map((p) => p.key), [photos]);
+  return { searched, home, week, pool, photos, laterCount, grid: split.grid, rows: split.rows, taken };
+}
+
+/* A listing as a row: date, title, then time and who runs it. Listings with
+   their own photo that didn't fit in the grid lead with a thumbnail. */
+function ListingRow({ l, photo }) {
+  const c = cardProps(l, photo);
+  const when = whenParts({ when: c.when, moreDates: c.moreDates, hasPhoto: Boolean(photo), online: c.online }).map((x) => x.text);
+  const who = c.studentProject ? ['Student project', c.byline].filter(Boolean).join(' · ') : c.org || '';
+  const meta = [...when, who].filter(Boolean);
+  const dated = Boolean(l._next);
+  const lead = photo ? (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img className="vu-row-thumb" src={photo.sm || photo.src} alt="" loading="lazy" decoding="async" style={photo.pos ? { objectPosition: photo.pos } : undefined} />
+  ) : dated ? (
+    <DateBlock date={l._next.sh.d} size="md" />
+  ) : null;
+  return (
+    <li>
+      <Link href={c.href} className={lead ? 'vu-row' : 'vu-row vu-row--nolead'}>
+        {lead}
+        <span style={S('min-width:0')}>
+          <span className="vu-row-t">{c.title}</span>
+          {meta.length ? (
+            <span className="vu-row-m">
+              {meta.map((m, i) => (
+                <span key={i}>
+                  {i ? <Sep /> : null}
+                  {m}
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </span>
+        <span className="vu-row-end lp-row-end" aria-hidden="true">
+          <Icon name="chevron-right" size={18} color={C.ink3} />
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear, shown, onMore, onLater, onNonprofits, discoverHref, authed, sectionRef }) {
+  const { searched, home, week, pool, photos, laterCount, grid, rows } = view;
+  const visibleRows = useMemo(() => rows.slice(0, shown), [rows, shown]);
+  const nearHome = home && pool.some((l) => localRank(l) < 2);
+  const title = searched
+    ? describe(query)
+    : week
+      ? (nearHome || (home && !pool.length) ? 'Open this week around Carmel' : 'Open this week')
+      : nearHome ? 'Open around Carmel' : 'Open on VolunteerU';
+  const rowsTitle = searched ? 'More results' : week ? 'More this week' : 'More opportunities';
+  let body;
+  if (state.status === 'loading') body = <SkeletonCards />;
+  else if (state.status === 'error') {
+    body = <Notice title="Couldn’t load opportunities" body="Check your connection and try again." action={<Button variant="outline" icon="refresh" onClick={onRetry}>Try again</Button>} />;
+  } else if (!pool.length) {
+    body = searched ? (
+      <Notice
+        title={noneTitle(query)}
+        body={query.when ? 'No shifts are scheduled then yet. Try any day.' : query.near ? 'Try another word, or search every state.' : 'Try a broader word, like “food bank” or “library”.'}
+        action={
+          query.when ? <Button variant="outline" onClick={onAnyDay}>Show any day</Button>
+            : query.near ? <Button variant="outline" onClick={onWiden}>Search all states</Button>
+              : <Button variant="outline" onClick={onClear}>Clear search</Button>
+        }
+      />
+    ) : (
+      <Notice
+        title={home ? 'Nothing posted near Carmel this week' : 'Nothing posted this week'}
+        body={laterCount ? `${laterCount} ${laterCount === 1 ? 'opportunity has' : 'opportunities have'} later dates. The nonprofits below take volunteers too.` : 'Organizations and student projects show up here once they post. The nonprofits below take volunteers too.'}
+        action={
+          <div style={S('display:flex;gap:12px;flex-wrap:wrap')}>
+            {laterCount ? <Button variant="outline" onClick={onLater}>Show later dates</Button> : null}
+            <Button variant="outline" onClick={onNonprofits}>Search nonprofits</Button>
+          </div>
+        }
+      />
+    );
+  } else {
+    body = (
+      <>
+        {grid.length ? (
+          <ul className="lp-grid">
+            {grid.map((l, i) => (
+              <li key={l.id}>
+                <ListingCard {...cardProps(l, photos.get(l.id))} eager={i < GRID_COLS} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {visibleRows.length ? (
+          <div className={grid.length ? 'lp-rows' : 'lp-rows is-only'}>
+            {grid.length ? <h3 className="vu-t-h3s">{rowsTitle}</h3> : null}
+            <ul className="vu-list lp-list" aria-label={grid.length ? rowsTitle : title}>
+              {visibleRows.map((l) => <ListingRow key={l.id} l={l} photo={photos.get(l.id)} />)}
+            </ul>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+  let more = null;
+  if (state.status === 'done' && rows.length > shown) {
+    more = <Button variant="outline" onClick={onMore}>Show more opportunities</Button>;
+  } else if (state.status === 'done' && pool.length && laterCount) {
+    more = <Button variant="outline" onClick={onLater}>Show later dates</Button>;
+  }
+  return (
+    <section ref={sectionRef} id="lp-results" className="lp-sec" aria-labelledby="lp-results-h" aria-busy={state.status === 'loading' ? 'true' : 'false'}>
+      <div className="lp-sec-head">
+        <h2 id="lp-results-h" aria-live="polite">{title}</h2>
+        {authed && pool.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null}
+      </div>
+      {body}
+      {more ? <div className="lp-more">{more}</div> : null}
+    </section>
+  );
+}
+
+function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discoverHref }) {
+  const rows = shownRows || state.rows;
+  const near = query.near || homeRegion;
+  const c = CATEGORIES.find((x) => x.key === query.cat);
+  const what = query.q ? `Nonprofits for “${query.q}”` : c && c.cause ? `${c.label} nonprofits` : 'Registered nonprofits';
+  const nationwide = near && !parseState(near);
+  const home = near === HOME_AREA && !query.q && !query.near && !(c && c.cause);
+  const title = home ? 'Nonprofits in Carmel' : near && !nationwide ? `${what} near ${near}` : what;
+  const sub = home
+    ? 'From IRS nonprofit records for Carmel, Indiana. Each one opens its ProPublica page with the address.'
+    : nationwide
+    ? `From IRS nonprofit records, all states. Add a state to “${near}” to narrow it.`
+    : near
+      ? 'From IRS nonprofit records. Each one opens its ProPublica page with the address.'
+      : 'From IRS nonprofit records. Search a city or state to see ones near you.';
+  let body;
+  if (state.status === 'loading') {
+    body = <div aria-hidden="true" className="vu-np-grid lp-np">{Array.from({ length: 4 }).map((_, i) => <div key={i} style={S(`height:73px;box-shadow:inset 0 -1px 0 ${C.line}`)} />)}</div>;
+  } else if (state.status === 'error') {
+    body = <p className="lp-sub" style={S('margin-top:18px')}>Nonprofit search is down right now. Opportunities still work.</p>;
+  } else if (!rows.length) {
+    body = <p className="lp-sub" style={S('margin-top:18px')}>No nonprofits matched. Try a broader word, like “food bank”.</p>;
+  } else {
+    body = (
+      <div className="vu-np-grid lp-np">
+        {rows.map((o) => (
+          <NonprofitRow
+            key={o.ein}
+            name={titleCase(o.name)}
+            parts={[o.cause && o.cause !== 'Nonprofit' ? o.cause.replace('&', 'and') : '', [titleCase(o.city), o.state].filter(Boolean).join(', ')]}
+            href={o.url || `https://projects.propublica.org/nonprofits/organizations/${o.ein}`}
+            external
+          />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <section id="lp-np" className="lp-sec" style={S('margin-top:88px')} aria-labelledby="lp-np-h" aria-busy={state.status === 'loading' ? 'true' : 'false'}>
+      <div className="lp-sec-head">
+        <div style={S('min-width:0')}>
+          <h2 id="lp-np-h">{title}</h2>
+          <p className="lp-sub">{sub}</p>
+        </div>
+        {authed && rows.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null}
+      </div>
+      {body}
+    </section>
+  );
+}
+
+/* A page photo. Decorative: the heading next to it says what it shows. */
+function ArtPhoto({ photo, wide = false }) {
+  if (!photo) return null;
+  return (
+    <div className={wide ? 'lp-pair-ph is-wide' : 'lp-pair-ph'}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={photo.src} alt="" loading="lazy" decoding="async" style={{ objectPosition: photo.pos }} />
+    </div>
+  );
+}
+
+/* Two ways in. The second half is the page's one "Start a student project"
+   button and the #student-projects anchor the header and footer link to. */
+function VolunteerOrLead({ goSearch, startProject, art }) {
+  return (
+    <section className="lp-sec" style={S('margin-top:104px')} aria-labelledby="lp-vol-h">
+      <h2 id="lp-vol-h" className="lp-h1">Volunteer or lead</h2>
+      <ArtPhoto photo={art.wide} wide />
+      <div className="lp-pair">
+        <div>
+          <ArtPhoto photo={art.shift} />
+          <h3>Sign up for a shift</h3>
+          <p>Search opportunities posted by organizations and other students, plus registered nonprofits nearby. Afterward, log your hours and the organizer confirms them.</p>
+          <Button variant="ghost" extra="padding:0;border:0" onClick={goSearch}>Search opportunities</Button>
+        </div>
+        <div id="student-projects" className="lp-start">
+          <ArtPhoto photo={art.lead} />
+          <h3>Run a student project</h3>
+          <p>Start a tutoring circle, a cleanup or a food drive with friends. You don’t need a 501(c)(3). Publish it so students nearby can apply, then take attendance at each shift and approve everyone’s hours.</p>
+          <Button variant="dark" onClick={startProject}>Start a student project</Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const HOURS_COPY = 'Sign up for a shift, go, and log your hours afterward. The organizer confirms them in the app, so there’s no paper form to chase. From your profile you can download your hours as a CSV for your school counselor.';
+
+/* Hours: plain copy and a photo between two rules, or with no photo the
+   FAQ's two columns. The anchor id stays #how-it-works for the header link
+   in both, so the link's target never moves when the art changes. */
+function HoursSection({ art }) {
+  const heading = <h2 id="lp-how-h" className="lp-h1">Log your hours</h2>;
+  return (
+    <section id="how-it-works" className="lp-band" aria-labelledby="lp-how-h">
+      <div className="mk-wrap">
+        {art.hours ? (
+          <div className="lp-how">
+            <div>
+              {heading}
+              <p className="lp-how-p">{HOURS_COPY}</p>
+            </div>
+            <ArtPhoto photo={art.hours} />
+          </div>
+        ) : (
+          <div className="lp-how lp-how--text">
+            {heading}
+            <div className="lp-how-copy">
+              <p className="lp-how-p">{HOURS_COPY}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const FAQS = [
+  { q: 'Is it free?', a: 'Yes. Students and organizations don’t pay anything to use VolunteerU.' },
+  { q: 'Where do the nonprofits come from?', a: 'IRS records, through ProPublica’s Nonprofit Explorer. Each one links to its ProPublica page with the address, so you can contact them about volunteering.' },
+  { q: 'How do my hours get confirmed?', a: 'After a shift, log your hours on that project. Once the organizer approves them, they count as confirmed. Hours you log on your own stay in a separate total.' },
+  { q: 'Do I need a 501(c)(3) to start a student project?', a: 'No. Anyone 13 or older can start one. If a school, library or nonprofit supervises it, you can ask for a verified badge from your project page.' },
+  { q: 'What does the verified badge mean?', a: 'Someone on the VolunteerU team reviewed the organization and its staff contact by hand. Owners can’t give themselves the badge.' },
+];
+
+/* A plain FAQ accordion. One row open at a time. */
+function Faq() {
+  const [open, setOpen] = useState(0);
+  return (
+    <section className="lp-faq" aria-labelledby="lp-faq-h">
+      <h2 id="lp-faq-h" className="lp-h1">Questions</h2>
+      <div style={S(`box-shadow:inset 0 1px 0 ${C.line}`)}>
+        {FAQS.map((f, i) => {
+          const on = open === i;
+          const panelId = `lp-faq-${i}`;
+          return (
+            <div key={f.q} style={S(`box-shadow:inset 0 -1px 0 ${C.line}`)}>
+              <h3 style={S('margin:0')}>
+                <button type="button" className="lp-q" aria-expanded={on} aria-controls={panelId} onClick={() => setOpen(on ? -1 : i)}>
+                  <span>{f.q}</span>
+                  <Icon name="chevron-down" size={20} />
+                </button>
+              </h3>
+              <div id={panelId} role="region" aria-label={f.q} hidden={!on}>
+                <p className="lp-a">{f.a}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function FinalCta({ goSearch, authed, signUp }) {
+  return (
+    <section className="lp-cta" aria-labelledby="lp-cta-h">
+      <div style={S('min-width:0')}>
+        <h2 id="lp-cta-h" className="lp-h1">Find a shift near you</h2>
+        <p>Free for students 13 and up. Search works without an account.</p>
+      </div>
+      <div className="lp-cta-btns">
+        <Button variant="primary" icon="search" onClick={goSearch}>Search opportunities</Button>
+        {authed ? null : <Button variant="ghost" onClick={signUp}>Sign up free</Button>}
+      </div>
+    </section>
+  );
 }
 
 /* ---- the page ------------------------------------------------------------- */
 
+const EMPTY_QUERY = { q: '', near: '', when: '', cat: 'near' };
+
 export default function Landing() {
   const router = useRouter();
   const links = useMarketingLinks();
-  const whatRef = useRef(null);
+  const { state: store } = useSnapshot();
+  const homeRegion = links.authed ? String((store.prefs && store.prefs.location) || '').trim() : HOME_AREA;
   const resultsRef = useRef(null);
   const reqRef = useRef(0);
 
   const [what, setWhat] = useState('');
   const [where, setWhere] = useState('');
+  const [when, setWhen] = useState('');
   const [hint, setHint] = useState('');
-  const [latest, setLatest] = useState(null); // null while loading
-  const [result, setResult] = useState(null); // { status, opps, orgs, ran }
+  const [query, setQuery] = useState(EMPTY_QUERY);
+  const [opps, setOpps] = useState({ status: 'loading', items: [] });
+  const [orgs, setOrgs] = useState({ status: 'loading', rows: [] });
+  const [shown, setShown] = useState(PAGE);
+  const [later, setLater] = useState(false);
+  const view = useResultsView({ state: opps, query, later, local: homeRegion === HOME_AREA });
+  const takenSig = view.taken.join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const art = useMemo(() => pickArt(view.taken), [takenSig]);
+
+  async function run(next, { scroll = false } = {}) {
+    const id = ++reqRef.current;
+    setQuery(next);
+    setShown(PAGE);
+    setLater(false);
+    setOpps({ status: 'loading', items: [] });
+    setOrgs({ status: 'loading', rows: [] });
+    if (scroll) showResults();
+    searchListings(listingFilters(next))
+      .then((rows) => { if (id === reqRef.current) setOpps({ status: 'done', items: arrange(rows, next.when) }); })
+      .catch((err) => {
+        console.warn('[landing] opportunity search failed', err);
+        if (id === reqRef.current) setOpps({ status: 'error', items: [] });
+      });
+    loadOrgs(next, homeRegion)
+      .then((rows) => { if (id === reqRef.current) setOrgs({ status: 'done', rows }); })
+      .catch((err) => {
+        console.warn('[landing] nonprofit search failed', err);
+        if (id === reqRef.current) setOrgs({ status: 'error', rows: [] });
+      });
+  }
 
   useEffect(() => {
-    let alive = true;
-    searchListings({})
-      .then((rows) => { if (alive) setLatest((rows || []).slice(0, MAX_OPPS)); })
-      .catch((err) => {
-        console.error('[landing] could not load newest listings', err);
-        if (alive) setLatest([]);
-      });
-    return () => { alive = false; };
-  }, []);
+    run(EMPTY_QUERY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [homeRegion]);
 
-  const showResults = () => {
+  function showResults() {
     const el = resultsRef.current;
     if (!el || typeof window === 'undefined') return;
-    const rect = el.getBoundingClientRect();
-    if (rect.top < 64 || rect.top > window.innerHeight * 0.6) {
+    const top = el.getBoundingClientRect().top;
+    if (top < 64 || top > window.innerHeight * 0.6) {
       const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
     }
-  };
+  }
 
-  async function runSearch({ q = '', near = '', cause = '' }) {
-    const term = q.trim();
-    const place = near.trim();
-    if (!term && !place && !cause) {
+  const onSearch = ({ what: q, where: near, when: w }) => {
+    if (!q && !near && !w && query.cat === 'near') {
       setHint('Enter a cause, a kind of place or a city.');
-      if (whatRef.current) whatRef.current.focus();
       return;
     }
     setHint('');
-    const id = ++reqRef.current;
-    const ran = { q: term, near: place, cause };
-    setResult({ status: 'loading', opps: [], orgs: [], ran });
-    showResults();
-    try {
-      const [opps, orgs] = await Promise.all([
-        searchListings({ q: cause ? '' : term, causes: cause ? [cause] : [], near: place }),
-        searchWebNonprofits({ q: cause ? '' : term, near: place, causes: cause ? [cause] : [] }),
-      ]);
-      if (id !== reqRef.current) return;
-      setResult({ status: 'done', opps: (opps || []).slice(0, MAX_OPPS), orgs: (orgs || []).slice(0, MAX_ORGS), ran });
-    } catch (err) {
-      console.error('[landing] search failed', err);
-      if (id !== reqRef.current) return;
-      setResult({ status: 'error', opps: [], orgs: [], ran });
-    }
-  }
-
-  const onSubmit = (e) => {
-    e.preventDefault();
-    runSearch({ q: what, near: where });
+    run({ q, near, when: w, cat: q ? 'near' : query.cat }, { scroll: true });
   };
 
-  const searchCause = (cause) => {
+  const onCategory = (key) => {
     setWhat('');
-    runSearch({ q: '', near: where, cause });
+    setHint('');
+    run({ q: '', near: where.trim(), when, cat: key }, { scroll: true });
   };
 
   const clearSearch = () => {
-    reqRef.current += 1;
-    setResult(null);
     setWhat('');
     setWhere('');
-    if (whatRef.current) whatRef.current.focus();
+    setWhen('');
+    run(EMPTY_QUERY);
   };
 
-  /* "Search opportunities" buttons: signed in, open Discover; signed out,
-     bring the hero search into view and put the cursor in it. */
+  /* "Search opportunities": signed in, open Discover; signed out, bring the
+     hero search into view and put the cursor in it. */
   const goSearch = (e) => {
-    if (links.authed) { router.push('/discover'); return; }
+    if (links.authed) {
+      router.push(links.search);
+      return;
+    }
     scrollToAnchor(e, '/#search');
   };
+  const startProject = () => router.push(links.startProject);
 
-  const discoverHref = (() => {
-    const r = result && result.ran;
-    if (!r) return '/discover';
+  // Same search in Discover. The nonprofits link opens its Nonprofits segment.
+  const discoverUrl = (extra) => {
     const p = new URLSearchParams();
-    if (r.q) p.set('q', r.q);
-    if (r.cause) p.set('causes', r.cause);
-    if (r.near) p.set('near', r.near);
+    const c = CATEGORIES.find((x) => x.key === query.cat);
+    if (query.q) p.set('q', query.q);
+    if (c && c.cause) p.set('causes', c.cause);
+    if (query.near) p.set('near', query.near);
+    if (query.cat === 'online') p.set('place', 'online');
+    Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); });
     const qs = p.toString();
     return qs ? `/discover?${qs}` : '/discover';
-  })();
+  };
+  const discoverHref = discoverUrl({ when: query.when });
 
-  const primaryBtn = 'display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;flex:none;border-radius:12px;font:600 15px/1 Geist;letter-spacing:-0.01em;cursor:pointer';
-
-  /* ---- hero card body ---- */
-  let cardTitle = 'Newest on VolunteerU';
-  let cardBody;
-  if (!result) {
-    if (latest === null) cardBody = <SkeletonList n={3} />;
-    else if (latest.length) cardBody = latest.map((l) => <ListingRow key={l.id} l={l} />);
-    else {
-      cardBody = (
-        <div style={S('padding:22px 18px 24px;border-top:1px solid #F1EBE4')}>
-          <div style={S('font:600 16px/1.3 Geist')}>Nothing posted yet</div>
-          <div style={S('margin-top:6px;font:450 14px/1.5 Geist;color:#6B635C')}>Search nonprofits near you instead.</div>
-          <button
-            type="button"
-            onClick={() => { setWhat('food bank'); runSearch({ q: 'food bank', near: where }); }}
-            className={cx('lp-btn', H.press)}
-            style={S(`${primaryBtn};margin-top:14px;height:40px;padding:0 16px;font-size:14px`)}
-          >
-            Search food banks
-          </button>
-        </div>
-      );
-    }
-  } else {
-    cardTitle = describeSearch(result.ran);
-    if (result.status === 'loading') {
-      cardBody = <SkeletonList n={3} />;
-    } else if (result.status === 'error') {
-      cardBody = (
-        <div style={S('padding:22px 18px 24px;border-top:1px solid #F1EBE4')}>
-          <div style={S('font:600 16px/1.3 Geist')}>Search didn’t go through</div>
-          <div style={S('margin-top:6px;font:450 14px/1.5 Geist;color:#6B635C')}>Check your connection and try again.</div>
-          <button type="button" onClick={() => runSearch(result.ran)} className={cx('lp-btn', H.press)} style={S(`${primaryBtn};margin-top:14px;height:40px;padding:0 16px;font-size:14px`)}>
-            Try again
-          </button>
-        </div>
-      );
-    } else if (!result.opps.length && !result.orgs.length) {
-      const r = result.ran;
-      cardBody = (
-        <div style={S('padding:22px 18px 24px;border-top:1px solid #F1EBE4')}>
-          <div style={S('font:600 16px/1.3 Geist')}>Nothing for {describeSearch(r)}</div>
-          <div style={S('margin-top:6px;font:450 14px/1.5 Geist;color:#6B635C')}>
-            {r.near ? 'Try another word, or search every state.' : 'Try a broader word, like “food bank” or “library”.'}
-          </div>
-          {r.near ? (
-            <button type="button" onClick={() => { setWhere(''); runSearch({ ...r, near: '' }); }} className={cx('lp-btn', H.press)} style={S(`${primaryBtn};margin-top:14px;height:40px;padding:0 16px;font-size:14px`)}>
-              Search all states
-            </button>
-          ) : (
-            <button type="button" onClick={clearSearch} className={cx('lp-btn', H.press)} style={S(`${primaryBtn};margin-top:14px;height:40px;padding:0 16px;font-size:14px`)}>
-              Clear search
-            </button>
-          )}
-        </div>
-      );
-    } else {
-      cardBody = (
-        <>
-          {result.opps.length ? (
-            <div>
-              <ListLabel>Opportunities on VolunteerU</ListLabel>
-              {result.opps.map((l) => <ListingRow key={l.id} l={l} />)}
-            </div>
-          ) : null}
-          {result.orgs.length ? (
-            <div style={S(result.opps.length ? 'border-top:1px solid #F1EBE4' : '')}>
-              <ListLabel>{result.ran.near && !parseState(result.ran.near) ? 'Nonprofits from IRS records, all states' : 'Nonprofits from IRS records'}</ListLabel>
-              {result.orgs.map((o) => <NonprofitRow key={o.ein} o={o} />)}
-            </div>
-          ) : null}
-        </>
-      );
-    }
-  }
+  const orgRows = orgs.rows.slice(0, MAX_ORGS);
+  const showNonprofits = () => {
+    const el = typeof document !== 'undefined' ? document.getElementById('lp-np') : null;
+    if (!el) return;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  };
+  const nonprofitsHref = discoverUrl({ view: 'nonprofits' });
 
   return (
-    <div className="vu-screen vu-landing" style={S('width:100%;overflow-x:clip;padding-bottom:56px')}>
+    <div className="vu-screen vu-landing" style={S(`width:100%;overflow-x:clip;background:${C.white}`)}>
       <style dangerouslySetInnerHTML={{ __html: LANDING_CSS }} />
       <MarketingHeader />
 
-      {/* ---- hero ---- */}
-      <div id="vu-main" className="lp-hero-wrap" style={S('max-width:1180px;margin:0 auto;padding:96px 32px 104px')}>
-        <div className="lp-hero">
-          <div id="search" style={S('scroll-margin-top:96px;padding-top:24px')}>
-            <h1 className="lp-h1" style={S('margin:0;font:600 60px/1.02 Geist;letter-spacing:-0.045em;text-wrap:balance;max-width:560px')}>
-              Find somewhere to volunteer this week
-            </h1>
-            <p style={S('margin:22px 0 0;max-width:480px;font:400 18px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-              Search nonprofits and open volunteer spots near you, from food banks to tutoring circles other students run.
-            </p>
-
-            <form role="search" aria-label="Search opportunities and nonprofits" onSubmit={onSubmit} noValidate style={S('margin-top:32px')}>
-              <div className="lp-search" style={S('border-radius:16px;border:1px solid #E4DDD4;background:#fff;box-shadow:0 1px 2px rgba(30,20,10,.05);align-items:center')}>
-                <label className="lp-search-field" htmlFor="lp-what" style={S('display:block;padding:12px 16px;cursor:text;min-width:0')}>
-                  <span style={S('display:block;font:600 12px/1 Geist;color:#1A1714')}>What</span>
-                  <input
-                    id="lp-what"
-                    ref={whatRef}
-                    type="search"
-                    value={what}
-                    onChange={(e) => { setWhat(e.target.value); if (hint) setHint(''); }}
-                    placeholder="Food bank, tutoring, shelter"
-                    aria-describedby={hint ? 'lp-search-hint' : undefined}
-                    autoComplete="off"
-                    enterKeyHint="search"
-                    style={S('display:block;width:100%;margin-top:6px;padding:0;border:0;outline:none;background:transparent;font:450 15px/1.3 Geist;color:#1A1714')}
-                  />
-                </label>
-                <label className="lp-search-field" htmlFor="lp-where" style={S('display:block;padding:12px 16px;cursor:text;min-width:0')}>
-                  <span style={S('display:block;font:600 12px/1 Geist;color:#1A1714')}>Where</span>
-                  <input
-                    id="lp-where"
-                    type="text"
-                    value={where}
-                    onChange={(e) => { setWhere(e.target.value); if (hint) setHint(''); }}
-                    placeholder="City, state or ZIP"
-                    autoComplete="address-level2"
-                    enterKeyHint="search"
-                    style={S('display:block;width:100%;margin-top:6px;padding:0;border:0;outline:none;background:transparent;font:450 15px/1.3 Geist;color:#1A1714')}
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className={cx('lp-btn lp-search-go', H.press)}
-                  style={S(`${primaryBtn};height:48px;padding:0 20px;margin:0 8px 0 4px`)}
-                >
-                  <Icon name="search" size={16} stroke={2} />
-                  {result && result.status === 'loading' ? 'Searching' : 'Search'}
-                </button>
-              </div>
-              <div id="lp-search-hint" aria-live="polite" style={S('min-height:20px;margin-top:8px;font:500 13px/1.4 Geist;color:#A8482A')}>
-                {hint}
-              </div>
-            </form>
-
-            <div style={S('margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:450 15px/1.4 Geist;color:#57504A')}>
-              <Link href={links.startProject} className="lp-link" style={S('display:inline-flex;align-items:center;gap:5px;font-weight:600')}>
-                Or start a student project
-                <Icon name="arrow-right" size={14} />
-              </Link>
-            </div>
-
-            <div style={S('display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:28px;font:450 13px/1.4 Geist;color:#6B635C')}>
-              {['Free for students', 'For ages 13 and up'].map((t) => (
-                <div key={t} style={S('display:flex;align-items:center;gap:7px')}>
-                  <span style={S('color:#C2603C')}>
-                    <Icon name="check" size={14} stroke={2.25} />
-                  </span>
-                  {t}
-                </div>
-              ))}
+      <main id="vu-main" tabIndex={-1} style={S('outline:none')}>
+        <div className="mk-wrap">
+        <section id="search" className="lp-hero" aria-labelledby="lp-hero-h" style={S('scroll-margin-top:92px')}>
+          <div className="lp-hero-img">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={PHOTOS.food2.src} alt="Students in volunteer shirts sorting donated food" fetchPriority="high" />
+            <div className="lp-hero-copy">
+              <h1 id="lp-hero-h">Find somewhere to volunteer in Carmel this week</h1>
+              <p>Open shifts and nonprofits around Carmel, Hamilton County and Indianapolis.</p>
             </div>
           </div>
-
-          <div ref={resultsRef} id="lp-results" style={S('scroll-margin-top:88px;min-width:0')}>
-            <div style={S('border-radius:20px;overflow:hidden;background:#fff;border:1px solid #E8E1D9;box-shadow:0 30px 60px -40px rgba(70,45,28,.35), 0 2px 6px rgba(70,45,28,.05)')}>
-              <div style={S('padding:12px 16px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;background:#FCFAF8')}>
-                <div aria-hidden="true" style={S('display:flex;align-items:center;gap:8px')}>
-                  <div style={S('width:9px;height:9px;border-radius:50%;background:#E4DAD0')} />
-                  <div style={S('width:9px;height:9px;border-radius:50%;background:#E4DAD0')} />
-                  <div style={S('width:9px;height:9px;border-radius:50%;background:#E4DAD0')} />
-                </div>
-                <div aria-hidden="true" style={S(`font:500 11px/1 ${MONO};color:#8A8179`)}>volunteeru / discover</div>
-                <div style={S('width:44px')} />
-              </div>
-              <div aria-live="polite" aria-busy={(result && result.status === 'loading') || (!result && latest === null) ? 'true' : 'false'}>
-                <div style={S('padding:18px 18px 12px;display:flex;align-items:baseline;justify-content:space-between;gap:12px')}>
-                  <h2 className="vu-trunc" style={S('margin:0;font:600 19px/1.25 Geist;letter-spacing:-0.03em;min-width:0')}>{cardTitle}</h2>
-                  {result ? (
-                    <button type="button" onClick={clearSearch} className="lp-link" style={S('flex:none;background:none;border:0;padding:4px 0;cursor:pointer;font:500 13px/1 Geist')}>
-                      Clear
-                    </button>
-                  ) : null}
-                </div>
-                {cardBody}
-              </div>
-              <div style={S('padding:14px 18px;border-top:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-                <div style={S('font:450 13px/1.4 Geist;color:#6B635C')}>
-                  {links.authed ? 'Discover filters by cause, who posted it and in person or online.' : 'Sign up to apply and save opportunities.'}
-                </div>
-                <Link href={links.authed ? discoverHref : links.signUp} className="lp-link" style={S('display:inline-flex;align-items:center;gap:5px;font:600 13px/1 Geist')}>
-                  {links.authed ? 'Open in Discover' : 'Sign up to apply'}
-                  <Icon name="arrow-right" size={13} />
-                </Link>
-              </div>
-            </div>
+          <div className="lp-hero-search">
+            <SearchBar
+              what={what}
+              onWhat={(v) => { setWhat(v); if (hint) setHint(''); }}
+              where={where}
+              onWhere={(v) => { setWhere(v); if (hint) setHint(''); }}
+              when={when}
+              onWhen={setWhen}
+              wherePlaceholder="Carmel, IN"
+              onSubmit={onSearch}
+              busy={opps.status === 'loading' && query !== EMPTY_QUERY}
+              label="Search opportunities and nonprofits"
+            />
           </div>
-        </div>
-      </div>
+        </section>
 
-      {/* ---- browse by cause (replaces the testimonial strip) ---- */}
-      <div style={S('padding:30px 0 32px;border-top:1px solid #EFE9E2;border-bottom:1px solid #EFE9E2;background:#fff')}>
-        <div className="lp-pad" style={S('max-width:1180px;margin:0 auto;padding:0 32px;display:flex;align-items:center;gap:20px;flex-wrap:wrap')}>
-          <h2 style={S('margin:0;font:600 15px/1.2 Geist;color:#1A1714;flex:none')}>Browse by cause</h2>
-          <div style={S('display:flex;gap:8px;flex-wrap:wrap')}>
-            {CAUSE_CHIPS.map((c) => {
-              const on = Boolean(result && result.ran && result.ran.cause === c);
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => searchCause(c)}
-                  className={cx('lp-chip', H.press)}
-                  style={s(
-                    'padding:9px 14px;border-radius:999px;font:500 14px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease',
-                    on ? 'background:#1F1B18;border:1px solid #1F1B18;color:#fff' : 'background:#FCFAF8;border:1px solid #E8E1D9;color:#332D28'
-                  )}
-                >
-                  {c}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* ---- two ways in ---- */}
-      <div className="lp-pad lp-block-top" style={S('max-width:1180px;margin:0 auto;padding-left:32px;padding-right:32px')}>
-        <div style={S('text-align:center;max-width:680px;margin:0 auto')}>
-          <h2 className="lp-h2" style={S('margin:0;font:600 52px/1.02 Geist;letter-spacing:-0.05em')}>Volunteer or lead</h2>
-          <p style={S('margin:16px auto 0;max-width:460px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-            Most students start by signing up for a shift. Some go on to run a student project of their own.
-          </p>
-        </div>
-        <div className="lp-2col" style={S('gap:18px;margin-top:40px')}>
-          {[
-            {
-              key: 'join',
-              t: 'Sign up for a shift',
-              b: 'Search opportunities posted by organizations and other students, plus nonprofits from IRS records.',
-              img: PEXELS.reading,
-              rows: ['Filter by cause, and by in person or online', 'See who runs it and whether we’ve verified them', 'Log your hours afterward for the organizer to confirm'],
-              cta: 'Search opportunities',
-              onClick: goSearch,
-            },
-            {
-              key: 'start',
-              t: 'Run a student project',
-              b: 'Start a tutoring circle, a cleanup or a food drive, then publish it so students nearby can apply.',
-              img: PEXELS.outdoor,
-              rows: ['Add positions and choose who you accept', 'Take attendance and approve hours', 'Assign tasks and message your team'],
-              cta: 'Start a student project',
-              onClick: () => router.push(links.startProject),
-            },
-          ].map((p) => (
-            <div key={p.key} className={H.card} style={S('border-radius:18px;border:1px solid #E8E1D9;background:#fff;padding:20px;display:flex;flex-direction:column;transition:border-color .16s ease')}>
-              <div style={S('height:220px;border-radius:12px;overflow:hidden')}>
-                <ImageSlot src={p.img} shape="rounded" radius={12} alt="" />
-              </div>
-              <h3 style={S('margin:20px 0 0;font:600 26px/1.08 Geist;letter-spacing:-0.038em')}>{p.t}</h3>
-              <div style={S('margin-top:10px;font:450 15px/1.55 Geist;color:#6B635C;text-wrap:pretty')}>{p.b}</div>
-              <ul style={S('margin:18px 0 0;padding:16px 0 0;list-style:none;border-top:1px solid #F1EBE4;display:flex;flex-direction:column;gap:10px;flex:1')}>
-                {p.rows.map((r) => (
-                  <li key={r} style={S('display:flex;gap:10px;align-items:flex-start;font:450 14px/1.5 Geist;color:#332D28')}>
-                    <span style={S('color:#C2603C;margin-top:3px')}>
-                      <Icon name="check" size={14} stroke={2.25} />
-                    </span>
-                    {r}
-                  </li>
-                ))}
-              </ul>
-              <button
-                type="button"
-                onClick={p.onClick}
-                className={cx('lp-btn', H.press)}
-                style={S(`${primaryBtn};margin-top:20px;height:46px;padding:0 18px;font-size:14px`)}
-              >
-                {p.cta}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ---- how it works ---- */}
-      <div id="how-it-works" className="lp-band-gap" style={S('border-top:1px solid #EFE9E2;scroll-margin-top:72px')}>
-        <div className="lp-section" style={S('max-width:1180px;margin:0 auto')}>
-          <h2 className="lp-big" style={S('margin:0;max-width:900px')}>How it works</h2>
-          <p style={S('margin:28px 0 0;max-width:560px;font:400 20px/1.55 Geist;color:#57504A;text-wrap:pretty')}>
-            Pick an opportunity, go, and the organizer confirms your hours afterward.
-          </p>
-
-          <ol className="lp-3col" style={S('gap:20px;margin:56px 0 0;padding:0;list-style:none')}>
-            {[
-              { n: '1', t: 'Search', b: 'Type a cause or a place. You’ll see opportunities posted on VolunteerU and registered nonprofits nearby.' },
-              { n: '2', t: 'Apply', b: 'Pick a position, add a note if you want, and send it. The organizer accepts you or passes.' },
-              { n: '3', t: 'Log your hours', b: 'After the shift, log your hours on the project. They count as confirmed once the organizer approves them.' },
-            ].map((c) => (
-              <li key={c.n} className="lp-tight" style={S('padding:28px 26px;border-radius:18px;background:#FCFAF8;border:1px solid #F1EBE4')}>
-                <div style={S(`font:500 13px/1 ${MONO};color:#A8482A`)}>{c.n}</div>
-                <h3 style={S('margin:16px 0 0;font:600 26px/1.08 Geist;letter-spacing:-0.04em')}>{c.t}</h3>
-                <div style={S('margin-top:12px;font:450 16px/1.6 Geist;color:#6B635C;text-wrap:pretty')}>{c.b}</div>
-              </li>
-            ))}
-          </ol>
-
-          {/* hours, secondary */}
-          <div className="lp-split" style={S('margin-top:110px')}>
-            <div>
-              <h3 className="lp-h2" style={S('margin:0;font:600 40px/1.04 Geist;letter-spacing:-0.04em')}>Your hours, in one place</h3>
-              <p style={S('margin:16px 0 0;max-width:440px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-                Confirmed hours and hours you logged on your own are kept as separate totals. Download them as a spreadsheet from Settings whenever you need them.
-              </p>
-              <button
-                type="button"
-                onClick={goSearch}
-                className={cx('lp-btn', H.press)}
-                style={S(`${primaryBtn};margin-top:28px;height:48px;padding:0 22px`)}
-              >
-                <Icon name="search" size={16} stroke={2} />
-                Search opportunities
-              </button>
-            </div>
-            <div aria-label="Example of the hours list" role="img" style={S('border-radius:18px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
-              <div style={S('padding:18px 22px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-                <div style={S('font:600 16px/1.2 Geist')}>Your hours</div>
-                <div style={S(`font:500 13px/1 ${MONO};color:#57504A`)}>4 confirmed, 2 waiting</div>
-              </div>
-              {[
-                { org: 'Riverbend Food Bank', d: 'Sat, Oct 10', hrs: '3', ok: true },
-                { org: 'Northside Reading Circle', d: 'Sat, Oct 3', hrs: '1', ok: true },
-                { org: 'Millbrook Park Cleanup', d: 'Sun, Sep 27', hrs: '2', ok: false },
-              ].map((e) => (
-                <div key={e.org} style={S('padding:15px 22px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-                  <div style={S('min-width:0')}>
-                    <div className="vu-trunc" style={S('font:500 14px/1.3 Geist;color:#1A1714')}>{e.org}</div>
-                    <div style={S('margin-top:4px;font:450 12px/1 Geist;color:#6B635C')}>{e.d}</div>
-                  </div>
-                  <div style={S('display:flex;align-items:center;gap:10px;flex:none')}>
-                    <span style={s('display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;font:500 12px/1 Geist', e.ok ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20')}>
-                      {e.ok ? <Icon name="check" size={12} stroke={2.25} /> : <Icon name="clock" size={12} />}
-                      {e.ok ? 'Confirmed' : 'Waiting on organizer'}
-                    </span>
-                    <span style={S(`font:600 14px/1 ${MONO};color:#1A1714;min-width:44px;text-align:right`)}>{e.hrs} h</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ---- student projects ---- */}
-      <div id="student-projects" style={S('border-top:1px solid #EFE9E2;background:#fff;scroll-margin-top:72px')}>
-        <div className="lp-section" style={S('max-width:1180px;margin:0 auto')}>
-          <h2 className="lp-big" style={S('margin:0;max-width:940px')}>Start a student project</h2>
-          <p style={S('margin:28px 0 0;max-width:600px;font:400 20px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-            Run a tutoring circle, a cleanup or a drive with friends. You don’t need a 501(c)(3). Set it up, add the positions you need, and publish it so other students can find it.
-          </p>
-
-          <ol className="lp-steps" style={S('margin:52px 0 0;padding:0;list-style:none')}>
-            {[
-              { n: '1', t: 'Describe it', b: 'Name, cause and where it happens.' },
-              { n: '2', t: 'Add positions', b: 'Each role, how many people you need and what they’ll do.' },
-              { n: '3', t: 'Publish', b: 'It shows up in Discover, and you get a link to share.' },
-              { n: '4', t: 'Run it', b: 'Take attendance at each shift, then approve everyone’s hours.' },
-            ].map((t) => (
-              <li key={t.n} className="lp-step">
-                <div aria-hidden="true" style={S(`font:500 15px/1 ${MONO};color:#A8482A`)}>{t.n}</div>
-                <div>
-                  <h3 style={S('margin:0;font:600 19px/1.25 Geist;letter-spacing:-0.025em')}>{t.t}</h3>
-                  <div style={S('margin-top:6px;font:450 15px/1.55 Geist;color:#6B635C;text-wrap:pretty')}>{t.b}</div>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          {/* found in discover */}
-          <div className="lp-split" style={S('margin-top:96px')}>
-            <div aria-label="Example of a student project page" role="img" style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-              <div style={S('padding:20px')}>
-                <div style={S('height:170px;border-radius:12px;overflow:hidden')}>
-                  <ImageSlot src={PEXELS.reading2} shape="rounded" radius={12} alt="" />
-                </div>
-                <div style={S('margin-top:16px;font:600 20px/1.2 Geist;letter-spacing:-0.03em')}>Northside Reading Circle</div>
-                <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#6B635C')}>Student project, Rivertown Public Library</div>
-                <div style={S('margin-top:16px;display:flex;gap:8px;flex-wrap:wrap')}>
-                  {['Tutor, 3 open', 'Photos, 1 open', '1 hour a week'].map((c, i) => (
-                    <span key={c} style={s('padding:6px 10px;border-radius:8px;font:500 12px/1 Geist', i === 2 ? 'background:#F5E7E0;color:#A8482A' : 'background:#F6F2EE;color:#57504A')}>{c}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div>
-              <h3 className="lp-h2" style={S('margin:0;font:600 36px/1.06 Geist;letter-spacing:-0.045em')}>Students find it in Discover</h3>
-              <p style={S('margin:14px 0 0;max-width:430px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-                Publishing puts your project in Discover for students searching nearby. You also get one link to post in a group chat or on a flyer.
-              </p>
-            </div>
-          </div>
-
-          {/* verification */}
-          <div className="lp-split" style={S('margin-top:72px')}>
-            <div>
-              <h3 className="lp-h2" style={S('margin:0;font:600 36px/1.06 Geist;letter-spacing:-0.045em')}>Ask for a verified badge</h3>
-              <p style={S('margin:14px 0 0;max-width:430px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-                If a school, library or nonprofit supervises your project, add their name and a staff contact, then request a review. Someone on our team checks it by hand. Until then your project shows without the badge.
-              </p>
-            </div>
-            <div aria-label="Example of a verification request" role="img" style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-              <div style={S('padding:16px 22px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:600 15px/1.2 Geist')}>Verification</div>
-              {[
-                { l: 'Supervising organization', v: 'Rivertown Public Library' },
-                { l: 'Staff contact', v: 'Ms. Alvarez, branch librarian' },
-              ].map((r) => (
-                <div key={r.l} style={S('padding:15px 22px;border-bottom:1px solid #F1EBE4')}>
-                  <div style={S('font:450 12px/1.2 Geist;color:#6B635C')}>{r.l}</div>
-                  <div style={S('margin-top:5px;font:500 15px/1.3 Geist;color:#1A1714')}>{r.v}</div>
-                </div>
-              ))}
-              <div style={S('padding:15px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-                <div style={S('font:450 13px/1.3 Geist;color:#6B635C')}>Status</div>
-                <span style={S('display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;background:#FDF3E7;color:#8A5A20;font:500 12px/1 Geist')}>
-                  <Icon name="clock" size={12} />
-                  Waiting for review
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ---- running a project ---- */}
-      <div style={S('background:#fff;border-top:1px solid #EFE9E2')}>
-        <div className="lp-section" style={S('max-width:1180px;margin:0 auto')}>
-          <div style={S('text-align:center;max-width:660px;margin:0 auto')}>
-            <h2 className="lp-h2" style={S('margin:0;font:600 56px/1.02 Geist;letter-spacing:-0.045em')}>Run your project</h2>
-            <p style={S('margin:20px auto 0;max-width:520px;font:400 19px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-              Applications, your roster, attendance and hours sit in one place. When you approve someone’s hours, they show up on that volunteer’s profile.
-            </p>
-          </div>
-
-          <div aria-label="Example of the applications and attendance views" role="img" style={S('margin-top:56px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
-            <div style={S('padding:18px 24px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:600 15px/1.2 Geist')}>Northside Reading Circle</div>
-            <div className="lp-2col">
-              <div className="lp-col-rule" style={S('border-right:1px solid #F1EBE4')}>
-                <div style={S('padding:14px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
-                  <div style={S('font:600 13px/1 Geist;color:#57504A')}>New applications</div>
-                  <div style={S(`font:500 12px/1 ${MONO};color:#A8482A`)}>4</div>
-                </div>
-                {[
-                  { n: 'Ana Ruiz', role: 'Tutor', when: '2 hours ago' },
-                  { n: 'Marcus Bell', role: 'Tutor', when: 'Yesterday' },
-                  { n: 'Sofia Chen', role: 'Photos', when: 'Yesterday' },
-                  { n: 'Noah Kim', role: 'Tutor', when: '2 days ago' },
-                ].map((a) => (
-                  <div key={a.n} style={S('padding:14px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:14px')}>
-                    <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
-                      <div style={S('width:32px;height:32px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <Avatar name={a.n} fs={12} />
-                      </div>
-                      <div style={S('min-width:0')}>
-                        <div style={S('font:500 14px/1.2 Geist')}>{a.n}</div>
-                        <div style={S('margin-top:4px;font:450 12px/1.2 Geist;color:#6B635C')}>{a.role}, {a.when}</div>
-                      </div>
-                    </div>
-                    <span style={S('flex:none;padding:5px 9px;border-radius:7px;background:#F5E7E0;color:#A8482A;font:500 12px/1 Geist')}>New</span>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={S('padding:14px 24px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between')}>
-                  <div style={S('font:600 13px/1 Geist;color:#57504A')}>Attendance, Sat, Oct 10</div>
-                  <div style={S('font:500 12px/1 Geist;color:#3F6B4E')}>Hours approved</div>
-                </div>
-                {[
-                  { n: 'Ana Ruiz', st: 'Present', tone: 'ok', hrs: '1.0' },
-                  { n: 'Marcus Bell', st: 'Present', tone: 'ok', hrs: '1.0' },
-                  { n: 'Grace Liu', st: 'Late', tone: 'warn', hrs: '0.8' },
-                  { n: 'Jalen Brooks', st: 'Present', tone: 'ok', hrs: '1.0' },
-                  { n: 'Priya Shah', st: 'Absent', tone: 'bad', hrs: '0.0' },
-                ].map((a) => (
-                  <div key={a.n} className="lp-attend" style={S('padding:13px 24px;border-bottom:1px solid #F1EBE4')}>
-                    <div style={S('font:500 14px/1.2 Geist')}>{a.n}</div>
-                    <div>
-                      <span style={s('padding:4px 8px;border-radius:6px;font:500 12px/1 Geist', a.tone === 'ok' ? 'background:#EAF3EC;color:#3F6B4E' : a.tone === 'warn' ? 'background:#FDF3E7;color:#8A5A20' : 'background:#F5E7E0;color:#A8482A')}>{a.st}</span>
-                    </div>
-                    <div style={S(`font:500 13px/1 ${MONO};text-align:right`)}>{a.hrs} h</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="lp-4col" style={S('gap:24px 36px;margin-top:40px')}>
-            {[
-              { t: 'Applications', b: 'Read each application, then accept or decline it.' },
-              { t: 'Roster', b: 'Everyone on your team, with their position and hours.' },
-              { t: 'Attendance', b: 'Mark who came to each shift and how long they stayed.' },
-              { t: 'Hours', b: 'Approve logged hours so they count as confirmed.' },
-            ].map((a) => (
-              <div key={a.t}>
-                <h3 style={S('margin:0;font:600 19px/1.25 Geist;letter-spacing:-0.025em')}>{a.t}</h3>
-                <div style={S('margin-top:6px;font:450 15px/1.55 Geist;color:#6B635C;text-wrap:pretty')}>{a.b}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* task board */}
-          <div style={S('max-width:620px;margin:130px auto 0;text-align:center')}>
-            <h3 className="lp-h2" style={S('margin:0;font:600 42px/1.04 Geist;letter-spacing:-0.04em')}>Assign the work</h3>
-            <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-              Set up roles with a short briefing, then give each task an owner. Everyone sees what they own and what’s left.
-            </p>
-          </div>
-          <div aria-label="Example task board" role="img" style={S('margin-top:48px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
-            <div style={S('padding:18px 24px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-              <div style={S('font:600 15px/1.2 Geist')}>Fall fundraiser</div>
-              <div style={S(`font:500 12px/1 ${MONO};color:#57504A`)}>6 tasks, 3 roles</div>
-            </div>
-            <div className="lp-3col">
-              {[
-                { name: 'Tutoring', color: '#5B6BB0', brief: 'Run the reading sessions', tasks: [
-                  { t: 'Prep the week 3 worksheets', who: 'Ana Ruiz', st: 'Doing', tone: 'warn' },
-                  { t: 'Pair up the new tutors', who: 'You', st: 'Done', tone: 'ok' },
-                ] },
-                { name: 'Outreach', color: '#C2603C', brief: 'Recruit and post', tasks: [
-                  { t: 'Post to 3 school pages', who: 'Marcus Bell', st: 'Doing', tone: 'warn' },
-                  { t: 'Email the library contact', who: 'Sofia Chen', st: 'To do', tone: 'mute' },
-                ] },
-                { name: 'Photos', color: '#3F6B4E', brief: 'Take pictures on the day', tasks: [
-                  { t: 'Shoot the Saturday session', who: 'Jalen Brooks', st: 'To do', tone: 'mute' },
-                  { t: 'Upload to the shared drive', who: 'Jalen Brooks', st: 'Done', tone: 'ok' },
-                ] },
-              ].map((role, i) => (
-                <div key={role.name} className={i < 2 ? 'lp-col-rule' : undefined} style={S(`padding:24px 22px 32px${i < 2 ? ';border-right:1px solid #F1EBE4' : ''}`)}>
-                  <div style={S('display:flex;align-items:center;gap:9px')}>
-                    <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${role.color}`)} />
-                    <div style={S('font:600 15px/1 Geist')}>{role.name}</div>
-                    <div style={S(`margin-left:auto;font:500 12px/1 ${MONO};color:#6B635C`)}>{role.tasks.length}</div>
-                  </div>
-                  <div style={S('margin-top:8px;font:450 13px/1.4 Geist;color:#6B635C')}>{role.brief}</div>
-                  <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:12px')}>
-                    {role.tasks.map((t) => (
-                      <div key={t.t} style={S('padding:18px 16px;border-radius:14px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                        <div style={S('font:500 14px/1.35 Geist;color:#1A1714')}>{t.t}</div>
-                        <div style={S('margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
-                          <div style={S('display:flex;align-items:center;gap:7px;min-width:0')}>
-                            <div style={S('width:20px;height:20px;border-radius:50%;overflow:hidden;flex:none')}>
-                              <Avatar name={t.who} fs={9} />
-                            </div>
-                            <div className="vu-trunc" style={S('font:450 12px/1 Geist;color:#6B635C')}>{t.who}</div>
-                          </div>
-                          <span style={s('padding:4px 8px;border-radius:6px;font:500 12px/1 Geist;flex:none', t.tone === 'ok' ? 'background:#EAF3EC;color:#3F6B4E' : t.tone === 'warn' ? 'background:#FDF3E7;color:#8A5A20' : 'background:#F6F2EE;color:#57504A')}>{t.st}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* messaging */}
-          <div style={S('max-width:620px;margin:130px auto 0;text-align:center')}>
-            <h3 className="lp-h2" style={S('margin:0;font:600 42px/1.04 Geist;letter-spacing:-0.04em')}>Keep your team posted</h3>
-            <p style={S('margin:16px auto 0;max-width:480px;font:400 17px/1.6 Geist;color:#57504A;text-wrap:pretty')}>
-              Post announcements to your whole team, and message any applicant directly.
-            </p>
-          </div>
-          <div aria-label="Example team announcements" role="img" style={S('margin:48px auto 0;max-width:760px;border-radius:20px;border:1px solid #E8E1D9;overflow:hidden;background:#fff')}>
-            <div style={S('padding:16px 24px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:600 15px/1.2 Geist')}>Team announcements</div>
-            <div className="lp-tight" style={S('padding:24px;display:flex;flex-direction:column;gap:16px;background:#FCFAF8')}>
-              {[
-                { who: 'Ana Ruiz', text: 'Rooms are booked for all 4 Saturdays.', w: '9:14 AM' },
-                { you: true, text: 'Thanks. I posted the sign-up link under Outreach.', w: '9:16 AM' },
-                { who: 'Marcus Bell', text: '2 new tutors applied overnight. Should I accept them?', w: '9:20 AM' },
-                { you: true, text: 'Yes, accept both and add them to Tutoring.', w: '9:21 AM' },
-              ].map((m, i) => (m.you ? (
-                <div key={i} style={S('align-self:flex-end;max-width:78%')}>
-                  <div style={S('padding:12px 16px;border-radius:16px 16px 4px 16px;background:#C2603C;color:#fff;font:450 14px/1.45 Geist')}>{m.text}</div>
-                  <div style={S('margin-top:5px;text-align:right;font:450 12px/1 Geist;color:#6B635C')}>You, {m.w}</div>
-                </div>
-              ) : (
-                <div key={i} style={S('align-self:flex-start;max-width:78%;display:flex;gap:10px')}>
-                  <div style={S('width:28px;height:28px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <Avatar name={m.who} fs={11} />
-                  </div>
-                  <div>
-                    <div style={S('padding:12px 16px;border-radius:16px 16px 16px 4px;background:#fff;border:1px solid #EDE6DE;font:450 14px/1.45 Geist;color:#332D28')}>{m.text}</div>
-                    <div style={S('margin-top:5px;font:450 12px/1 Geist;color:#6B635C')}>{m.who}, {m.w}</div>
-                  </div>
-                </div>
-              )))}
-            </div>
-          </div>
-
-          <div style={S('margin-top:56px;display:flex;justify-content:center')}>
-            <button
-              type="button"
-              onClick={() => router.push(links.startProject)}
-              className={cx('lp-btn', H.press)}
-              style={S(`${primaryBtn};height:50px;padding:0 26px;font-size:16px`)}
-            >
-              Start a student project
+        <div className="lp-under">
+          {hint ? <span className="lp-hint" role="alert">{hint}</span> : <span>Free for students 13 and up</span>}
+          <a href={links.startProject} onClick={(e) => { e.preventDefault(); startProject(); }}>Or start a student project</a>
+          {query !== EMPTY_QUERY ? (
+            <button type="button" onClick={clearSearch} style={S(`background:none;border:0;padding:0;cursor:pointer;font:600 14px/1.4 ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px`)}>
+              Clear search
             </button>
-          </div>
+          ) : null}
         </div>
-      </div>
 
-      {/* ---- questions ---- */}
-      <div className="lp-pad lp-block-top" style={S('max-width:860px;margin:0 auto;padding-left:32px;padding-right:32px')}>
-        <h2 className="lp-h2" style={S('margin:0 0 28px;font:600 46px/1.02 Geist;letter-spacing:-0.05em;text-align:center')}>Questions</h2>
-        <Faq items={FAQS} />
-      </div>
-
-      {/* ---- final CTA ---- */}
-      <div className="lp-pad lp-final" style={S('max-width:1180px;margin:0 auto;padding:96px 32px')}>
-        <div className="lp-cta" style={S('border-radius:26px;border:1px solid #EDE6DE;background:#fff;padding:60px 48px;text-align:center')}>
-          <h2 className="lp-h2" style={S('margin:0;font:600 44px/1.06 Geist;letter-spacing:-0.045em;text-wrap:balance')}>
-            Search opportunities near you
-          </h2>
-          <p style={S('margin:16px auto 0;max-width:470px;font:400 17px/1.6 Geist;color:#57504A')}>
-            Free for students. You need to be 13 or older to sign up.
-          </p>
-          <div style={S('display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:28px')}>
-            <button type="button" onClick={goSearch} className={cx('lp-btn', H.press)} style={S(`${primaryBtn};height:48px;padding:0 24px`)}>
-              <Icon name="search" size={16} stroke={2} />
-              Search opportunities
-            </button>
-            {links.authed ? null : (
-              <button type="button" onClick={() => router.push(links.signUp)} className={cx('lp-btn-ghost', H.press)} style={S(`${primaryBtn};height:48px;padding:0 24px`)}>
-                Sign up free
-              </button>
-            )}
-          </div>
+        <div className="lp-cats">
+          <CategoryRow className="vu-hide-mobile" value={query.cat} onChange={onCategory} label="Browse by cause" />
+          <CategoryRow className="vu-show-mobile" value={query.cat} onChange={onCategory} label="Browse by cause" short />
         </div>
-      </div>
+
+        <Opportunities
+          sectionRef={resultsRef}
+          state={opps}
+          view={view}
+          query={query}
+          shown={shown}
+          onMore={() => setShown((n) => n + PAGE)}
+          onLater={() => { setLater(true); setShown(PAGE); }}
+          onNonprofits={showNonprofits}
+          onRetry={() => run(query)}
+          onWiden={() => { setWhere(''); run({ ...query, near: '' }); }}
+          onAnyDay={() => { setWhen(''); run({ ...query, when: '' }); }}
+          onClear={clearSearch}
+          discoverHref={discoverHref}
+          authed={links.authed}
+        />
+
+        <Nonprofits state={orgs} rows={orgRows} query={query} homeRegion={homeRegion} authed={links.authed} discoverHref={nonprofitsHref} />
+
+        <VolunteerOrLead goSearch={goSearch} startProject={startProject} art={art} />
+        </div>
+
+        <HoursSection art={art} />
+
+        <div className="mk-wrap">
+          <Faq />
+          <FinalCta goSearch={goSearch} authed={links.authed} signUp={() => router.push(links.signUp)} />
+        </div>
+      </main>
 
       <MarketingFooter />
     </div>

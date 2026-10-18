@@ -9,36 +9,50 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { S, s, cx, H } from '../lib/style.js';
+import { S } from '../lib/style.js';
+import { C, F } from '../lib/tokens.js';
 import { useSnapshot } from '../lib/store.js';
+import { Button } from './ui.jsx';
 import { Logo } from './Logo.jsx';
 
-const MONO = "'Geist Mono',monospace";
-
-/* Flat button fills and the responsive rules for the marketing pages. Lives
-   here because every marketing page renders MarketingHeader. */
+/* Layout and states for the marketing chrome and the shared page frame
+   (.mk-wrap). Lives here because every marketing page renders
+   MarketingHeader. Inline styles can't do hover, focus or media queries. */
 const MARKETING_CSS = `
-.lp-btn { background:#C2603C; border:1px solid #A8482A; color:#fff; transition:background .16s ease, transform .16s ease; }
-.lp-btn-ghost { background:#fff; border:1px solid #E4DDD4; color:#1A1714; transition:background .16s ease, border-color .16s ease; }
-.lp-link { color:#C2603C; text-decoration:none; }
+.mk-wrap { max-width:1440px; margin:0 auto; padding:0 64px; }
+.mk-head { position:sticky; top:0; z-index:60; background:#fff; box-shadow:inset 0 -1px 0 ${C.line}; }
+.mk-head-row { height:76px; display:flex; align-items:center; gap:40px; }
+.mk-brand { display:flex; align-items:center; gap:10px; flex:none; color:${C.ink}; font:700 21px/1 ${F.display}; letter-spacing:-0.02em; }
+.mk-nav { display:flex; gap:28px; font:500 15px/1 ${F.body}; color:${C.ink2}; min-width:0; }
+.mk-nav a { color:inherit; white-space:nowrap; padding:6px 0; }
+.mk-nav a[aria-current="page"] { color:${C.ink}; font-weight:600; box-shadow:inset 0 -2px 0 ${C.ink}; }
+.mk-right { margin-left:auto; display:flex; align-items:center; gap:20px; flex:none; }
+.mk-signin { font:600 15px/1 ${F.body}; color:${C.ink}; white-space:nowrap; }
+.mk-foot { margin-top:96px; box-shadow:inset 0 1px 0 ${C.line}; }
+.mk-foot-row { padding-top:32px; padding-bottom:48px; display:flex; align-items:center; gap:28px; }
+.mk-foot-brand { display:flex; align-items:center; gap:8px; margin-right:auto; color:${C.ink}; font:700 17px/1 ${F.display}; letter-spacing:-0.02em; }
+.mk-foot-nav { display:flex; gap:28px; font:400 14px/1 ${F.body}; color:${C.ink2}; }
+.mk-foot-nav a { color:inherit; }
 @media (hover:hover) {
-  .lp-btn:hover { background:#B05434; }
-  .lp-btn-ghost:hover { background:#FBF7F3; border-color:#D8CEC3; }
-  .lp-link:hover { text-decoration:underline; text-underline-offset:3px; }
-  .lp-row:hover { background:#FCFAF8; }
-  .lp-chip:hover { border-color:#D8CEC3; background:#FBF7F3; }
+  .mk-nav a:not([aria-current="page"]):hover, .mk-foot-nav a:hover { color:${C.ink}; text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:1px; }
+  .mk-signin:hover { text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:1px; }
 }
-.lp-btn:active, .lp-btn-ghost:active { transform:scale(.985); }
-@media (prefers-reduced-motion: reduce) {
-  .lp-btn, .lp-btn-ghost { transition:none; }
-  .lp-btn:active, .lp-btn-ghost:active { transform:none; }
+@media (max-width: 1179px) {
+  .mk-wrap { padding:0 32px; }
+  .mk-head-row { gap:28px; }
+  .mk-nav { gap:20px; }
 }
-@media (max-width: 720px) {
-  .lp-head-nav { display:none !important; }
-  .lp-head-row { padding:12px 16px !important; }
-  .lp-head-right { gap:10px !important; }
-  .lp-foot { flex-direction:column !important; align-items:flex-start !important; gap:20px !important; padding:36px 16px !important; }
-  .lp-foot-nav { flex-wrap:wrap; gap:14px 20px !important; }
+@media (max-width: 900px) {
+  .mk-nav { display:none; }
+}
+@media (max-width: 719px) {
+  .mk-wrap { padding:0 16px; }
+  .mk-head-row { height:60px; gap:12px; }
+  .mk-brand { font-size:19px; gap:8px; }
+  .mk-right { gap:14px; }
+  .mk-foot { margin-top:64px; }
+  .mk-foot-row { flex-direction:column; align-items:flex-start; gap:20px; padding-top:32px; padding-bottom:40px; }
+  .mk-foot-nav { flex-wrap:wrap; gap:14px 22px; }
 }
 `;
 
@@ -50,13 +64,24 @@ export function MarketingStyles() {
 export function useMarketingLinks() {
   const { state } = useSnapshot();
   const authed = Boolean(state.session.authed);
+  // A signed-in account that hasn't finished onboarding gets sent there by
+  // the route guard anyway, and onboarding would then preselect whatever
+  // intent it saw last. The search and start buttons go there directly with
+  // the intent the student just clicked.
+  const onboarded = Boolean(state.onboarding && state.onboarding.completed);
   return {
     authed,
     opportunities: authed ? '/discover' : '/#search',
+    search: !authed ? '/#search' : onboarded ? '/discover' : '/onboarding?intent=join&next=%2Fdiscover',
     projects: authed ? '/lead' : '/#student-projects',
-    startProject: authed ? '/create' : '/signup?intent=start',
+    startProject: !authed ? '/signup?intent=start' : onboarded ? '/create' : '/onboarding?intent=start',
     signUp: '/signup',
   };
+}
+
+/* The landing search's What field (SearchBar generates its id). */
+function searchInput() {
+  return document.querySelector('#search input[type="search"]');
 }
 
 /* Smooth-scroll to an in-page anchor when it exists on this page; otherwise
@@ -66,11 +91,11 @@ export function scrollToAnchor(e, href) {
   if (!hash || typeof document === 'undefined') return;
   const el = document.getElementById(hash);
   if (!el) return;
-  e.preventDefault();
+  if (e && e.preventDefault) e.preventDefault();
   const reduce = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   if (hash === 'search') {
-    const input = document.getElementById('lp-what');
+    const input = searchInput();
     if (input) setTimeout(() => input.focus({ preventScroll: true }), reduce ? 0 : 350);
   }
   if (window.history && window.history.replaceState) window.history.replaceState(null, '', `#${hash}`);
@@ -87,47 +112,35 @@ export function MarketingHeader({ active = '' }) {
   ];
 
   return (
-    <div style={S('position:sticky;top:0;z-index:60;background:rgba(250,248,245,.92);backdrop-filter:blur(16px);border-bottom:1px solid rgba(232,225,217,.9)')}>
+    <header className="mk-head">
       <MarketingStyles />
-      <div
-        className="vu-pad-32 lp-head-row"
-        style={S('max-width:1180px;margin:0 auto;padding:16px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px')}
-      >
-        <div style={S('display:flex;align-items:center;gap:40px;min-width:0')}>
-          <Link href="/" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:9px;cursor:pointer;color:inherit;flex:none')}>
-            <Logo size={27} />
-            <div style={S('font:600 17px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
-          </Link>
-          <nav aria-label="Primary" className="vu-hide-mobile lp-head-nav" style={S('display:flex;gap:26px;font:450 14px/1 Geist;color:#57504A')}>
-            {nav.map((l) => (
-              <Link
-                key={l.key}
-                href={l.href}
-                className={H.toInk}
-                aria-current={active === l.key ? 'page' : undefined}
-                onClick={l.href.includes('#') ? (e) => scrollToAnchor(e, l.href) : undefined}
-                style={s('cursor:pointer;transition:color .16s ease;color:inherit;white-space:nowrap', active === l.key ? 'color:#1A1714;font-weight:500' : '')}
-              >
-                {l.label}
-              </Link>
-            ))}
-          </nav>
-        </div>
-        <div className="lp-head-right" style={S('display:flex;align-items:center;gap:14px;flex:none')}>
-          <Link href={links.authed ? '/app' : '/signin'} className={H.toBrand} style={S('font:500 14px/1 Geist;color:#1A1714;cursor:pointer;transition:color .16s ease;white-space:nowrap')}>
+      <div className="mk-wrap mk-head-row">
+        <Link href="/" aria-label="VolunteerU home" className="mk-brand">
+          <Logo size={30} title="" />
+          <span>VolunteerU</span>
+        </Link>
+        <nav aria-label="Primary" className="mk-nav">
+          {nav.map((l) => (
+            <Link
+              key={l.key}
+              href={l.href}
+              aria-current={active === l.key ? 'page' : undefined}
+              onClick={l.href.includes('#') ? (e) => scrollToAnchor(e, l.href) : undefined}
+            >
+              {l.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="mk-right">
+          <Link href={links.authed ? '/app' : '/signin'} className="mk-signin">
             {links.authed ? 'Open app' : 'Sign in'}
           </Link>
-          <button
-            type="button"
-            onClick={() => router.push(links.authed ? '/discover' : links.signUp)}
-            className={cx('lp-btn', H.press)}
-            style={S('display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:12px;font:600 14px/1 Geist;letter-spacing:-0.01em;cursor:pointer')}
-          >
+          <Button variant="dark" size="sm" onClick={() => router.push(links.authed ? links.search : links.signUp)}>
             {links.authed ? 'Search opportunities' : 'Sign up free'}
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </header>
   );
 }
 
@@ -141,30 +154,21 @@ export function MarketingFooter() {
     { label: 'Privacy', href: '/privacy' },
   ];
   return (
-    <div style={S('border-top:1px solid #EFE9E2;background:#FCFAF8')}>
-      <div
-        className="vu-pad-32 lp-foot"
-        style={S('max-width:1180px;margin:0 auto;padding:52px 32px;display:flex;align-items:center;justify-content:space-between;gap:24px')}
-      >
-        <Link href="/" aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:9px;cursor:pointer;color:inherit')}>
-          <Logo size={22} />
-          <div style={S('font:600 15px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
+    <footer className="mk-foot">
+      <div className="mk-wrap mk-foot-row">
+        <Link href="/" aria-label="VolunteerU home" className="mk-foot-brand">
+          <Logo size={22} title="" />
+          <span>VolunteerU</span>
         </Link>
-        <nav aria-label="Footer" className="lp-foot-nav" style={S('display:flex;gap:26px;font:450 13px/1 Geist;color:#6B635C')}>
+        <nav aria-label="Footer" className="mk-foot-nav">
           {footer.map((l) => (
-            <Link
-              key={l.label}
-              href={l.href}
-              className={H.toInk}
-              onClick={l.href.includes('#') ? (e) => scrollToAnchor(e, l.href) : undefined}
-              style={S('cursor:pointer;transition:color .16s ease;color:inherit')}
-            >
+            <Link key={l.label} href={l.href} onClick={l.href.includes('#') ? (e) => scrollToAnchor(e, l.href) : undefined}>
               {l.label}
             </Link>
           ))}
         </nav>
-        <div style={S(`font:500 11px/1 ${MONO};color:#8A8179`)}>© 2026</div>
+        <span style={S(`font:400 14px/1 ${F.body};color:${C.ink2}`)}>© 2026 VolunteerU, made in Carmel, Indiana</span>
       </div>
-    </div>
+    </footer>
   );
 }
