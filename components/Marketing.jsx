@@ -7,12 +7,13 @@
    instead of bouncing to a sign-in form.
    ========================================================================== */
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { C, F } from '../lib/tokens.js';
 import { useSnapshot } from '../lib/store.js';
-import { Button } from './ui.jsx';
+import { Button, IconButton } from './ui.jsx';
 import { Logo } from './Logo.jsx';
 
 /* Layout and states for the marketing chrome and the shared page frame
@@ -42,8 +43,16 @@ const MARKETING_CSS = `
   .mk-head-row { gap:28px; }
   .mk-nav { gap:20px; }
 }
+.mk-head-row .mk-menu-btn { display:none; flex:none; }
+.mk-menu { position:absolute; left:0; right:0; top:100%; background:#fff; border-bottom:1px solid ${C.line}; }
+.mk-menu ul { list-style:none; margin:0; padding:8px 0 16px; }
+.mk-menu a { display:block; padding:14px 0; font:500 16px/1.2 ${F.body}; color:${C.ink}; }
 @media (max-width: 900px) {
   .mk-nav { display:none; }
+  .mk-head-row .mk-menu-btn { display:inline-flex; margin-left:-4px; }
+}
+@media (min-width: 901px) {
+  .mk-menu { display:none; }
 }
 @media (max-width: 719px) {
   .mk-wrap { padding:0 16px; }
@@ -103,7 +112,22 @@ export function scrollToAnchor(e, href) {
 
 export function MarketingHeader({ active = '' }) {
   const router = useRouter();
+  const pathname = usePathname();
   const links = useMarketingLinks();
+  // Phones: the nav folds into a menu under the header.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuBtn = useRef(null);
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      setMenuOpen(false);
+      if (menuBtn.current) menuBtn.current.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
   const nav = [
     { key: 'opps', label: 'Opportunities', href: links.opportunities },
     { key: 'lead', label: 'Student projects', href: links.projects },
@@ -139,7 +163,38 @@ export function MarketingHeader({ active = '' }) {
             {links.authed ? 'Search opportunities' : 'Sign up free'}
           </Button>
         </div>
+        <IconButton
+          ref={menuBtn}
+          icon={menuOpen ? 'x' : 'menu'}
+          label={menuOpen ? 'Close menu' : 'Open menu'}
+          className="mk-menu-btn"
+          size={40}
+          iconSize={20}
+          aria-expanded={menuOpen}
+          aria-controls="mk-menu"
+          onClick={() => setMenuOpen((v) => !v)}
+        />
       </div>
+      {menuOpen ? (
+        <nav id="mk-menu" aria-label="Menu" className="mk-menu">
+          <ul className="mk-wrap">
+            {nav.map((l) => (
+              <li key={l.key}>
+                <Link
+                  href={l.href}
+                  aria-current={active === l.key ? 'page' : undefined}
+                  onClick={(e) => {
+                    setMenuOpen(false);
+                    if (l.href.includes('#')) scrollToAnchor(e, l.href);
+                  }}
+                >
+                  {l.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ) : null}
     </header>
   );
 }
@@ -149,6 +204,7 @@ export function MarketingFooter() {
   const footer = [
     { label: 'Opportunities', href: links.opportunities },
     { label: 'Student projects', href: links.projects },
+    { label: 'How it works', href: '/#how-it-works' },
     { label: 'For schools', href: '/schools' },
     { label: 'Safety', href: '/safety' },
     { label: 'Privacy', href: '/privacy' },
@@ -167,7 +223,7 @@ export function MarketingFooter() {
             </Link>
           ))}
         </nav>
-        <span style={S(`font:400 14px/1 ${F.body};color:${C.ink2}`)}>© 2026 VolunteerU, made in Carmel, Indiana</span>
+        <span style={S(`font:400 14px/1 ${F.body};color:${C.ink2}`)}>© 2026 VolunteerU, made in Indianapolis, Indiana</span>
       </div>
     </footer>
   );

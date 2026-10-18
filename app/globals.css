@@ -144,13 +144,11 @@ img { border-style:none; }
 @keyframes vu-toast-out { to { opacity:0; transform:translateY(6px) } }
 @keyframes vu-spin      { to { transform:rotate(360deg) } }
 @keyframes vu-shimmer   { 0%{background-position:-420px 0} 100%{background-position:420px 0} }
-@keyframes vu-shake     { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-3px)} 40%,60%{transform:translateX(3px)} }
 @keyframes vu-check     { from { transform:scale(.4); opacity:0 } to { transform:scale(1); opacity:1 } }
 @keyframes vu-slide     { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
 
 .vu-screen { animation:vu-screen-in var(--vu-dur-3) var(--vu-ease-out); }
 .vu-pop { animation:vu-check var(--vu-dur-2) var(--vu-ease-out); }
-.vu-shake { animation:vu-shake .4s var(--vu-ease); }
 .vu-spin {
   display:inline-block; width:14px; height:14px; flex:none;
   border:2px solid currentColor; border-top-color:transparent; border-radius:50%;
@@ -512,6 +510,31 @@ img { border-style:none; }
 .vu-pin-dot.is-on { z-index:3; box-shadow:0 0 0 3px #fff, 0 0 0 5px var(--ink); }
 .vu-pin-dot:focus-visible { border-radius:50%; }
 
+/* ---- Leaflet maps (components/map) ------------------------------------- */
+.vu-dmap .leaflet-container, .vu-addrmap .leaflet-container { font:400 12px/1.4 var(--f-body); background:#EEF1EC; }
+/* OpenStreetMap's tiles, quieted so the pins carry the color. */
+.vu-dmap .leaflet-tile-pane, .vu-addrmap .leaflet-tile-pane { filter:grayscale(.8) brightness(1.05) contrast(.9); }
+.vu-dmap .leaflet-container:focus-visible, .vu-addrmap .leaflet-container:focus-visible { outline:2px solid var(--ink); outline-offset:-4px; }
+/* Pins are Leaflet divIcons with no box of their own; the pill or dot inside is
+   centered on the point, as MapPin draws it. */
+.vu-lpin, .vu-lnp { background:none; border:0; cursor:pointer; }
+.vu-lpin .vu-pin, .vu-lpin .vu-pin-dot, .vu-lnp .vu-np-dot { position:absolute; left:0; top:0; transform:translate(-50%,-50%); }
+.vu-lpin:focus, .vu-lnp:focus { outline:none; }
+.vu-lpin:focus-visible .vu-pin, .vu-lpin:focus-visible .vu-pin-dot, .vu-lnp:focus-visible .vu-np-dot { outline:2px solid var(--ink); outline-offset:3px; }
+.vu-np-dot { display:block; width:12px; height:12px; border-radius:50%; background:#fff; border:2px solid var(--ink-3); box-shadow:0 1px 2px rgba(30,36,33,.18); }
+.vu-np-dot::before { content:""; position:absolute; inset:-10px; }
+@media (hover:hover) { .vu-lnp:hover .vu-np-dot { border-color:var(--ink); } }
+.vu-dmap .leaflet-control-attribution, .vu-addrmap .leaflet-control-attribution {
+  margin:0 8px 8px 0; padding:3px 8px; border-radius:var(--r-pill); background:rgba(255,255,255,.92);
+  font:400 11px/1.4 var(--f-body); color:var(--ink-2);
+}
+/* The small address map: a slimmer credit. The big map lifts its credit above
+   any part of the box that's still below the fold (--vu-map-hidden, MapCanvas). */
+.vu-addrmap .leaflet-control-attribution { margin:0 6px 6px 0; padding:2px 7px; font-size:10px; }
+.vu-dmap .leaflet-control-attribution { margin-bottom:calc(8px + var(--vu-map-hidden, 0px)); }
+.vu-dmap .leaflet-control-attribution a, .vu-addrmap .leaflet-control-attribution a { color:var(--ink-2); text-decoration:underline; text-underline-offset:2px; }
+.vu-dmap .leaflet-control-attribution a:focus-visible, .vu-addrmap .leaflet-control-attribution a:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
+
 /* ---- layout helpers ---------------------------------------------------- */
 .vu-page { padding:32px 48px 88px; min-width:0; }
 .vu-wrap { max-width:1180px; }
@@ -731,6 +754,7 @@ img { border-style:none; }
   background:#fff; font:600 13px/1 var(--f-body); color:var(--ink);
 }
 .vu-toast-act:hover { background:var(--mist); }
+.vu-toast-act + .vu-toast-act { margin-left:8px; }
 .vu-toast-x {
   flex:none; width:26px; height:26px; border-radius:10px; display:grid; place-items:center;
   color:rgba(255,255,255,.7);
@@ -822,9 +846,10 @@ img { border-style:none; }
   .vu-pad-32 { padding-left:16px !important; padding-right:16px !important; }
   .vu-dialog { max-height:calc(100vh - 24px); max-height:calc(100dvh - 24px); border-radius:16px; }
   .vu-scrim { padding:12px; align-items:flex-end; }
-  /* Phone dialogs sit at the bottom, so toasts move to the top while one is
-     open instead of covering the dialog's buttons. */
-  body:has(.vu-scrim) .vu-toasts { top:12px; bottom:auto; flex-direction:column; }
+  /* Phone dialogs sit at the bottom, so a toast that appears while one is
+     open gets its own stack at the top instead of covering the dialog's
+     buttons. Toasts already on screen stay where they are (OverlayHost). */
+  .vu-toasts.vu-toasts-top { top:12px; bottom:auto !important; flex-direction:column; }
 }
 
 /* ---- print (record export preview) ------------------------------------- */
@@ -851,6 +876,10 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 html[data-textsize="large"] body { font-size:17px; zoom:1.06; }
 html[data-textsize="xlarge"] body { font-size:18px; zoom:1.12; }
+/* The zoom scales 100vh too, so the sticky sidebar would run past the bottom
+   of the window and hide the account menu. Shrink it by the same factor. */
+html[data-textsize="large"] .vu-sidebar { height:calc((100vh - var(--vu-banner-h, 0px)) / 1.06); }
+html[data-textsize="xlarge"] .vu-sidebar { height:calc((100vh - var(--vu-banner-h, 0px)) / 1.12); }
 /* High contrast: secondary and faint text go to full ink, rules darken.
    React writes styles through the CSSOM, so the attribute holds the browser's
    rgb() serialization; both spellings are listed. */
@@ -1085,3 +1114,145 @@ html:has(.vu-pf-tabs){scroll-padding-top:calc(var(--vu-topbar-h,0px) + var(--vu-
 /* ---- Home, Upcoming rows: the title underlines like a link on hover ---- */
 .vu-home-up-t { text-underline-offset:3px; text-decoration-thickness:1px; }
 .vu-home-up:hover .vu-home-up-t { text-decoration-line:underline; }
+
+/* ==========================================================================
+   MOTION AND FEEDBACK
+   Owned by the feel pass: press states, delayed busy spinners, the route
+   progress bar, route fade-in, overlay enter and exit, static skeletons and
+   image fade-in. Keep this block at the end of the file so it wins over the
+   rules above. Every motion here collapses to nothing under
+   prefers-reduced-motion (see the block at the bottom of this section and
+   the global user-preference rules).
+   ========================================================================== */
+:root { --vu-press:80ms; --vu-enter:180ms; --vu-exit:120ms; --vu-route:150ms; }
+
+/* ---- press: answers on pointer-down, before the click lands ---- */
+.vu-btn:active:not(:disabled):not([data-disabled="true"]),
+.h-press:active:not(:disabled):not([data-disabled="true"]) {
+  transform:translateY(1px) !important;
+  transition-duration:var(--vu-press) !important;
+}
+.vu-btn.vu-btn-ghost:active, .vu-link:active { transform:none !important; opacity:.7; }
+.vu-btn-primary:active:not(:disabled) { background:var(--ember-press) !important; border-color:var(--ember-press) !important; }
+.vu-btn-dark:active:not(:disabled) { background:#2E3632 !important; border-color:#2E3632 !important; }
+.vu-btn-outline:active:not(:disabled), .vu-btn-danger:active:not(:disabled) { background:#E9ECE9 !important; }
+.vu-chip:active, .vu-cat:active, .vu-seg-item:active, .vu-tab:active, .vu-tab-item:active,
+.vu-nav-item:active, .vu-proj-item:active, .vu-menu-item:active, .vu-row:active, .vu-np:active {
+  transition-duration:var(--vu-press) !important;
+}
+.vu-nav-item:active, .vu-proj-item:active, .vu-menu-item:active { background:#E9ECE9; }
+.vu-seg-item:active:not(.is-on) { background:rgba(30,36,33,.06) !important; }
+.vu-card:active .vu-card-ph > img { filter:brightness(.9); }
+/* A button that is waiting stays put and readable; its spinner (if the wait
+   runs past 150ms) is the only thing that changes. */
+[data-busy="true"] { opacity:1; }
+.vu-spin { animation:vu-spin .7s linear infinite, vu-fade-in var(--vu-dur-1) var(--vu-ease) both; }
+
+/* ---- route progress bar (components/RouteProgress.jsx) ---- */
+.vu-progress {
+  position:fixed; top:0; left:0; right:0; height:3px; z-index:calc(var(--vu-z-toast) + 10);
+  pointer-events:none; opacity:0; transition:opacity 200ms var(--vu-ease);
+}
+.vu-progress-bar {
+  display:block; height:100%; width:100%; background:var(--ember);
+  transform-origin:0 50%; transform:scaleX(0);
+}
+.vu-progress[data-state="run"] { opacity:1; transition-duration:0s; }
+.vu-progress[data-state="run"] .vu-progress-bar { transform:scaleX(.82); transition:transform 6s cubic-bezier(.08,.9,.2,1); }
+.vu-progress[data-state="done"] { opacity:0; transition:opacity 200ms var(--vu-ease) 60ms; }
+.vu-progress[data-state="done"] .vu-progress-bar { transform:scaleX(1); transition:transform 140ms var(--vu-ease); }
+@media print { .vu-progress { display:none; } }
+
+/* ---- navigation: the tapped item lights up before the route arrives ---- */
+/* A button whose router.push is on its way (RouteProgress marks it). */
+.vu-btn-primary[data-nav-pending="true"] { background:var(--ember-press) !important; border-color:var(--ember-press) !important; }
+.vu-btn-dark[data-nav-pending="true"] { background:#2E3632 !important; border-color:#2E3632 !important; }
+.vu-btn-outline[data-nav-pending="true"], .vu-btn-danger[data-nav-pending="true"] { background:#E9ECE9 !important; }
+.vu-btn-ghost[data-nav-pending="true"] { opacity:.7; }
+.vu-nav-item[data-pending="true"] { background:var(--mist); color:var(--ink); font-weight:600; }
+.vu-nav-item[data-pending="true"] > .vu-nav-ic { color:var(--ember); }
+.vu-tab-item[data-pending="true"] { color:var(--ink); font-weight:600; }
+.vu-tab-item[data-pending="true"] svg { color:var(--ember); }
+nav:has([data-pending="true"]) .vu-nav-item[aria-current="page"]:not([data-pending="true"]) { background:transparent; color:var(--ink-2); font-weight:500; }
+nav:has([data-pending="true"]) .vu-nav-item[aria-current="page"]:not([data-pending="true"]) > .vu-nav-ic { color:inherit; }
+nav:has([data-pending="true"]) .vu-tab-item[aria-current="page"]:not([data-pending="true"]) { color:var(--ink-2); font-weight:500; }
+nav:has([data-pending="true"]) .vu-tab-item[aria-current="page"]:not([data-pending="true"]) svg { color:var(--ink-3); }
+
+/* ---- route fade-in: the main column, once per page ---- */
+@keyframes vu-route-in { from { opacity:0 } to { opacity:1 } }
+.vu-route-in { animation:vu-route-in var(--vu-route) var(--vu-ease) backwards; }
+
+/* ---- overlays: enter with a short fade and an 8px rise, leave faster ---- */
+@keyframes vu-enter-rise { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
+@keyframes vu-exit-drop  { from { opacity:1; transform:none } to { opacity:0; transform:translateY(6px) } }
+@keyframes vu-exit-fade  { from { opacity:1 } to { opacity:0 } }
+.vu-scrim { animation:vu-fade-in var(--vu-enter) var(--vu-ease); }
+.vu-dialog { animation:vu-enter-rise var(--vu-enter) var(--vu-ease-out); }
+.vu-menu { animation:vu-enter-rise 160ms var(--vu-ease-out); }
+/* The static copy OverlayHost leaves behind for a closing dialog. */
+.vu-ghost { position:fixed; inset:0; z-index:var(--vu-z-overlay); pointer-events:none; }
+.vu-ghost > .vu-scrim { pointer-events:none; animation:vu-exit-fade var(--vu-exit) var(--vu-ease) forwards; }
+.vu-ghost .vu-dialog { animation:vu-exit-drop var(--vu-exit) var(--vu-ease) forwards; }
+/* Menus and the welcome tour leave a still copy that fades (OverlayHost
+   leaveGhost); the tour's copy uses .vu-ghost above. */
+.vu-ghost-pop { pointer-events:none; }
+.vu-ghost-pop > .vu-menu { pointer-events:none; animation:vu-exit-fade 110ms var(--vu-ease) forwards; }
+/* Toasts slide up from the bottom edge. */
+.vu-toast { animation:vu-enter-rise 200ms var(--vu-ease-out); }
+.vu-toast[data-out="true"] { animation:vu-exit-drop var(--vu-exit) var(--vu-ease) forwards; }
+/* A leaving toast's slot folds shut as it fades, taking its gap with it, so
+   the toasts above slide into the space instead of snapping. */
+.vu-toast-slot {
+  display:grid; grid-template-rows:1fr;
+  transition:grid-template-rows var(--vu-exit) var(--vu-ease), margin var(--vu-exit) var(--vu-ease);
+}
+.vu-toast-fit { min-height:0; }
+.vu-toast-slot[data-out="true"] { grid-template-rows:0fr; margin-bottom:-10px; pointer-events:none; }
+.vu-toast-slot > .vu-toast-fit > .vu-toast { pointer-events:auto; }
+.vu-toast-slot[data-out="true"] > .vu-toast-fit > .vu-toast { pointer-events:none; }
+
+/* ---- tabs that live in the URL: the panel dims while the new one loads ---- */
+.vu-tabpanel { transition:opacity 120ms var(--vu-ease); }
+.vu-tabpanel[data-loading="true"] { opacity:.55; transition-delay:80ms; }
+
+/* ---- loading placeholders: flat mist blocks, never a moving sheen ---- */
+.vu-skel { background:var(--mist); animation:none; }
+.vu-ld { background:var(--mist); border-radius:10px; }
+.vu-ld-pill { border-radius:var(--r-pill); }
+.vu-ld-photo { border-radius:var(--r-photo); }
+.vu-ld-circle { border-radius:50%; }
+/* Skeleton layouts (components/RouteSkeletons.jsx) follow the real pages'
+   columns and breakpoints. */
+.vu-ld-split { margin-top:24px; display:grid; grid-template-columns:minmax(0, 1fr) 480px; gap:28px; align-items:start; }
+.vu-ld-rows2 { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:30px 32px; }
+.vu-ld-rail { display:grid; grid-template-columns:minmax(0, 1fr) 320px; gap:56px; align-items:start; }
+.vu-ld-leadhead { display:flex; align-items:flex-start; gap:20px; }
+@media (max-width: 1179px) {
+  .vu-ld-split, .vu-ld-rail { grid-template-columns:minmax(0, 1fr); }
+  .vu-ld-map { display:none; }
+}
+@media (max-width: 719px) {
+  :root { --vu-ld-sb-h:64px; --vu-ld-jl-title:63px; }
+  .vu-ld-hide-m { display:none !important; }
+  .vu-ld-rows2 { grid-template-columns:minmax(0, 1fr); gap:28px; }
+  .vu-ld-split { margin-top:16px; }
+}
+
+/* ---- images: fixed boxes on mist, the picture fades in ---- */
+@keyframes vu-img-in { from { opacity:0 } to { opacity:1 } }
+.vu-card-ph > img, .vu-jl-hero > img { animation:vu-img-in 200ms var(--vu-ease) backwards; }
+.vu-slot > img { transition:opacity 200ms var(--vu-ease); }
+
+/* ---- reduced motion: feedback stays (color), movement goes ---- */
+@media (prefers-reduced-motion: reduce) {
+  .vu-btn:active, .h-press:active, .vu-card-save:active { transform:none !important; }
+  .vu-progress, .vu-progress-bar { transition:none !important; }
+  .vu-route-in, .vu-dialog, .vu-menu, .vu-scrim, .vu-toast, .vu-card-ph > img, .vu-jl-hero > img { animation:none !important; }
+  .vu-ghost, .vu-ghost-pop { display:none; }
+  .vu-toast-slot, .vu-tabpanel { transition:none !important; }
+}
+html[data-motion="off"] .vu-btn:active, html[data-motion="off"] .h-press:active { transform:none !important; }
+html[data-motion="off"] .vu-route-in, html[data-motion="off"] .vu-dialog, html[data-motion="off"] .vu-menu,
+html[data-motion="off"] .vu-scrim, html[data-motion="off"] .vu-toast { animation:none !important; }
+html[data-motion="off"] .vu-ghost, html[data-motion="off"] .vu-ghost-pop { display:none; }
+html[data-motion="off"] .vu-toast-slot, html[data-motion="off"] .vu-tabpanel { transition:none !important; }

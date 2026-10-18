@@ -21,6 +21,7 @@ import { C, F, R, SH } from '../lib/tokens.js';
 import { Button } from './ui.jsx';
 import { useSnapshot, update } from '../lib/store.js';
 import { useOverlays } from '../lib/overlays.js';
+import { leaveGhost } from './OverlayHost.jsx';
 
 /** A main tab, as the phone tab bar or the desktop sidebar shows it. */
 const navAnchor = (href) => [`nav.vu-tabbar a[href="${href}"]`, `#vu-sidebar nav a[href="${href}"]`];
@@ -74,6 +75,12 @@ function unlockBody() {
   if (locks === 0) document.body.style.overflow = savedOverflow;
 }
 
+/* Pages someone reaches from a shared link (a nonprofit page, or its
+   not-found page for a bad EIN). The welcome tour points at the main tabs, so
+   it waits until the person opens one of them instead of covering the page
+   they came to see. */
+const WELCOME_HELD = [/^\/nonprofits(\/|$)/];
+
 /**
  * Which walkthrough may show right now: 'founder', 'welcome' or null.
  * The founder tour goes first on /lead for a lead who hasn't seen it; the
@@ -85,7 +92,7 @@ export function activeTour(state, pathname) {
   const onLead = /^\/lead(\/|$)/.test(pathname || '');
   const hasProject = (state.projects || []).some((p) => !p.archived);
   if (onLead && hasProject && !meta.founderTutorialSeen) return 'founder';
-  if (!meta.tutorialSeen) return 'welcome';
+  if (!meta.tutorialSeen && !WELCOME_HELD.some((re) => re.test(pathname || ''))) return 'welcome';
   return null;
 }
 
@@ -184,6 +191,7 @@ export function TourDialog({ steps, label, doneLabel = 'Done', onDone }) {
   const [geo, setGeo] = useState(null);
   const closingRef = useRef(false);
   const boxRef = useRef(null);
+  const rootRef = useRef(null);
   const primaryRef = useRef(null);
   const anchorRef = useRef(null);
   const doneRef = useRef(onDone);
@@ -252,6 +260,12 @@ export function TourDialog({ steps, label, doneLabel = 'Done', onDone }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Closing fades a still copy of the tour out instead of cutting it.
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    return () => leaveGhost(el, 'vu-ghost');
+  }, []);
+
   // Place before paint on every step, scrolling the anchor into view once.
   useLayoutEffect(() => {
     place(true);
@@ -292,7 +306,7 @@ export function TourDialog({ steps, label, doneLabel = 'Done', onDone }) {
     // moving to the top); the dimming itself is the clipped layer below. The
     // wrapper lets clicks through so only the dim, the blocker and the
     // popover take them, and the hole reaches the real control.
-    <div className="vu-scrim vu-tour" style={S('display:block;padding:0;background:transparent;pointer-events:none')}>
+    <div ref={rootRef} className="vu-scrim vu-tour" style={S('display:block;padding:0;background:transparent;pointer-events:none')}>
       {/* The dim layer, with a hole over the control the step is about. */}
       <div
         aria-hidden="true"

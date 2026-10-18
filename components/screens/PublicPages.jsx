@@ -115,7 +115,7 @@ export function Schools() {
           ['Clubs can post too', 'A club adviser or a student can run a student project and approve the hours their volunteers log.'],
           ['What a counselor can see today', 'There’s no counselor dashboard yet. Ask a student to download their hours from Settings, or look through their profile with them. Confirmed hours show the organization and the date of each shift.'],
           ['Safety', 'Students have to be 13 or older to sign up. Organizations and student projects get a verified badge only after someone on our team reviews them by hand, and an owner can’t give their own listing the badge. The safety page lists what we check and what we don’t.'],
-          ['Made in Carmel', 'A high school student in Carmel, Indiana built VolunteerU, and it’s free. It opens on Carmel and Hamilton County, and students anywhere in the US can search their own area.'],
+          ['Made in Indianapolis', 'A high school student in the Indianapolis area built VolunteerU, and it’s free. It opens on Indianapolis and central Indiana, and students anywhere in the US can search their own area.'],
           ['Getting started', 'Nothing to install. Students sign up with any email address. If your school wants to post its own opportunities, a staff member can sign up and post them as an organization.'],
         ]}
       />

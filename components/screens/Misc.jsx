@@ -16,10 +16,11 @@ import { useSnapshot } from '../../lib/store.js';
 import { toast } from '../../lib/overlays.js';
 import {
   markNotificationsSeen, getNotificationsSeenAt,
-  getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus,
+  getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus, copyText,
 } from '../../lib/db.js';
 import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications, listingShifts } from '../../lib/listings.js';
 import { nextShiftInfo, shiftLabel } from './JoinListing.jsx';
+import SavedNonprofits, { isNonprofitId } from '../SavedNonprofits.jsx';
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,7 +39,8 @@ function PageHead({ title, sub }) {
 
 /* An empty screen (CARDS.md 4.1): one sentence and, only where a next step
    helps, one underlined link 12px below. No heading, no box, no filled
-   button, so each screen's empty state reads as its own line of copy. */
+   button. Notifications uses it for the muted-feed line; Saved and Friends
+   have their own empty layouts below, so the screens don't share one. */
 function EmptyNote({ children, linkLabel, href }) {
   return (
     <div className="vu-empty" style={S(`padding-top:20px;border-top:1px solid ${C.line}`)}>
@@ -246,11 +248,18 @@ export function Notifications() {
             {`You turned off ${muted.join(' and ')}, so they don't show up here.`}
           </EmptyNote>
         ) : (
-          <EmptyNote>
-            {leads
-              ? 'When a volunteer applies to your project or sends you a message, it shows up here.'
-              : 'When an organization answers one of your applications, it shows up here.'}
-          </EmptyNote>
+          /* One plain line under the title, no rule or box. A volunteer
+             gets an inline link to go apply to something. */
+          <p className="vu-empty" style={S(`margin:-16px 0 0;max-width:620px;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
+            {leads ? (
+              'When a volunteer applies to your project or sends you a message, it shows up here.'
+            ) : (
+              <>
+                Replies to your applications show up here.{' '}
+                <Link href="/discover" className="vu-link-ul" style={S(`font-weight:600;color:${C.ink}`)}>Find a shift</Link>
+              </>
+            )}
+          </p>
         )}
       </div>
     );
@@ -306,7 +315,7 @@ function hasUpcomingShift(raw) {
     next shift falls back to the first published shift that hasn't ended,
     else no date (the tile then says "No dates yet"). No buttons under the
     card: the title opens /join/<id>, where Apply lives. */
-function liveCardProps(listing) {
+export function liveCardProps(listing) {
   const student = (listing.org_class || 'student') !== 'official';
   const isTeam = listing.org_type === 'team';
   const shifts = isTeam ? [] : listingShifts(listing);
@@ -368,9 +377,31 @@ function GoneRow({ id }) {
 
 /* ---- saved ------------------------------------------------------------- */
 
+/* Saved, nothing yet: the bookmark it's about in the allowed empty-state
+   circle, a short heading and the way to fill the list. */
+function SavedEmpty() {
+  return (
+    <div className="vu-empty" style={S('display:flex;align-items:flex-start;gap:16px')}>
+      <span aria-hidden="true" style={S(`flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:${C.mist};color:${C.ink2}`)}>
+        <Icon name="bookmark" size={20} />
+      </span>
+      <div style={S('min-width:0;padding-top:2px')}>
+        <h2 style={S(`margin:0;font:600 17px/1.3 ${F.body};color:${C.ink}`)}>Nothing saved yet</h2>
+        <p style={S(`margin:4px 0 0;max-width:460px;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>Tap the bookmark on any opportunity to keep it here.</p>
+        <p style={S('margin:12px 0 0')}>
+          <Link href="/discover" className="vu-link-ul" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>Browse Discover</Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function Saved() {
   const { state } = useSnapshot();
-  const ids = state.saved || [];
+  const allIds = state.saved || [];
+  // Nonprofits saved from their page ("np:<ein>") get their own list below.
+  const npIds = allIds.filter(isNonprofitId);
+  const ids = allIds.filter((id) => !isNonprofitId(id));
   const liveIds = ids.filter((id) => UUID_RX.test(String(id)));
   const [cache, setCache] = useState(() => new Map()); // listing id -> row | null
   const [apps, setApps] = useState(null); // listing id -> application
@@ -434,11 +465,7 @@ export function Saved() {
 
   let body;
   if (!ids.length) {
-    body = (
-      <EmptyNote linkLabel="Browse Discover" href="/discover">
-        Save an opportunity with its bookmark and it shows up here.
-      </EmptyNote>
-    );
+    body = npIds.length ? null : <SavedEmpty />;
   } else if (failed) {
     body = <ErrorState title="Couldn't load your saved list" body="Check your connection and try again." onRetry={() => setNonce((n) => n + 1)} />;
   } else if (loading && apps === null) {
@@ -495,11 +522,19 @@ export function Saved() {
   }
 
   const n = ids.length;
+  const nNp = npIds.length;
+  const subParts = [
+    n ? `${n} ${n === 1 ? 'opportunity' : 'opportunities'}` : '',
+    nNp ? `${nNp} ${nNp === 1 ? 'nonprofit' : 'nonprofits'}` : '',
+  ].filter(Boolean);
   return (
     <div className="vu-page">
       <div style={S('max-width:1040px')}>
-        <PageHead title="Saved" sub={n ? `${n} saved ${n === 1 ? 'opportunity' : 'opportunities'}` : ''} />
-        <div style={S('margin-top:28px')}>{body}</div>
+        <PageHead title="Saved" sub={subParts.length ? `${subParts.join(' and ')} saved` : ''} />
+        <div style={S('margin-top:28px')}>
+          {body}
+          <SavedNonprofits ids={npIds} withHeading={Boolean(n)} />
+        </div>
       </div>
     </div>
   );
@@ -567,17 +602,7 @@ export function Friends() {
   } else if (live.loading && !entries.length) {
     body = <SkeletonRows n={Math.min(liveIds.length, 3)} h={120} />;
   } else if (!entries.length) {
-    body = (
-      // Without a school on the account nobody can match, so the one step
-      // that helps is adding it. With one set, the sentence is enough.
-      accountSchool ? (
-        <EmptyNote>{`When students from ${accountSchool} sign up for shifts, they show up here.`}</EmptyNote>
-      ) : (
-        <EmptyNote linkLabel="Add your school in Settings" href="/settings/account">
-          Shifts that students from your school sign up for show up here.
-        </EmptyNote>
-      )
-    );
+    body = <FriendsEmpty school={accountSchool} />;
   } else {
     body = (
       <div className="vu-grid-3">
@@ -614,6 +639,37 @@ export function Friends() {
       {/* An empty page's sentence already says what shows up here. */}
       <PageHead title="Friends going" sub={entries.length || live.loading || live.failed ? `Shifts students from ${school} signed up for.` : ''} />
       <div style={S('margin-top:28px')}>{body}</div>
+    </div>
+  );
+}
+
+/* Friends going, nobody yet. The list matches on school, so without one
+   the useful step is adding it; with one, inviting friends is. Either way a
+   shift search sits next to it as a text button. */
+function FriendsEmpty({ school }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  async function copyInvite() {
+    setBusy(true);
+    const ok = await copyText(`${window.location.origin}/signup`);
+    setBusy(false);
+    toast(ok ? { title: 'Link copied', tone: 'ok' } : { title: "Couldn't copy", message: 'Select the text and copy it yourself.', tone: 'warn' });
+  }
+  return (
+    <div className="vu-empty" style={S(`display:flex;align-items:center;justify-content:space-between;gap:16px 32px;flex-wrap:wrap;padding:20px 0;border-top:1px solid ${C.line};border-bottom:1px solid ${C.line}`)}>
+      <p style={S(`margin:0;max-width:520px;font:400 15px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>
+        {school
+          ? `No one from ${school} has signed up for a shift yet. Send friends the sign-up link and their shifts show up here.`
+          : 'Add your school and the shifts your classmates sign up for show up here.'}
+      </p>
+      <div style={S('display:flex;align-items:center;gap:12px 20px;flex-wrap:wrap')}>
+        {school ? (
+          <Button size="sm" icon="link" busy={busy} onClick={copyInvite}>Copy invite link</Button>
+        ) : (
+          <Button size="sm" href="/settings/account">Add your school</Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => router.push('/discover')}>Find a shift</Button>
+      </div>
     </div>
   );
 }

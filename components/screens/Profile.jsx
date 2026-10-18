@@ -330,7 +330,8 @@ export default function Profile() {
 
   function savePdf() {
     toast({ title: 'Opening the print dialog', message: 'Pick "Save as PDF" as the destination.', tone: 'brand' });
-    setTimeout(() => window.print(), 400);
+    // Print once the toast has painted; the dialog blocks the page after that.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
   }
 
   /* A shift row's trash. Hours logged on your own come out of your saved
@@ -865,7 +866,7 @@ function ProfileEditForm({ api, account }) {
         <Field label="City (optional)" value={f.city} onChange={(v) => set('city', v)} maxLength={60} />
       </div>
       <div style={S(GAP)}>
-        <TextArea label="Bio" value={f.bio} onChange={(v) => set('bio', v)} placeholder="e.g. Junior at Carmel High. I help at the food bank most Saturdays." maxLength={400} minHeight={80} counter />
+        <TextArea label="Bio" value={f.bio} onChange={(v) => set('bio', v)} placeholder="e.g. Junior at North Central. I help at the food bank most Saturdays." maxLength={400} minHeight={80} counter />
       </div>
       <div style={S(GAP)}>
         <Field label="Skills and interests, separated by commas" value={f.skills} onChange={(v) => set('skills', v)} placeholder="e.g. Tutoring, Spanish, first aid" maxLength={160} />

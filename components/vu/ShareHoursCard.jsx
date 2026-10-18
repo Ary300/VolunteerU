@@ -4,15 +4,18 @@
    ShareHoursCard, the hour record a student screenshots or shares. It reads
    like a printed ticket: white, a 1px line, the logo and school year on top,
    the confirmed number, then a dashed tear line over the name, grade,
-   school and main cause. Copy caption and Copy VolunteerU link write to the
+   school and main cause. Save image draws the card as a PNG (lib/hoursCardImage.js).
+   Copy caption and Copy VolunteerU link write to the
    clipboard and say so. The link is the site itself, so the label names it. The number is confirmed hours only, never self-logged ones.
-   With nothing confirmed yet there's no card, just one sentence.
+   With nothing confirmed yet there's no card, just one sentence (bare
+   mode draws the card empty instead, for the landing page).
    ========================================================================== */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { S } from '../../lib/style.js';
 import { C, F, R, causeOf } from '../../lib/tokens.js';
-import { copyText } from '../../lib/db.js';
+import { copyText, download } from '../../lib/db.js';
+import { hoursCardPng } from '../../lib/hoursCardImage.js';
 import { toast } from '../../lib/overlays.js';
 import { Button } from '../ui.jsx';
 import { fmtHours } from './HoursSummary.jsx';
@@ -43,8 +46,11 @@ export function shareCaption(confirmed, link) {
  * @param {string} [props.mainCause]    any cause string; printed as "Mostly food and hunger"
  * @param {string} [props.link]         defaults to this site's origin
  * @param {string} [props.caption]      overrides the default caption
+ * @param {boolean} [props.bare]        the card alone, without the caption and copy buttons. With
+ *                                      nothing confirmed it still draws the card, empty, with a
+ *                                      sentence where the number goes (the landing page uses this)
  */
-export default function ShareHoursCard({ name, confirmed = 0, grade, school, schoolYear, mainCause, link, caption, className }) {
+export default function ShareHoursCard({ name, confirmed = 0, grade, school, schoolYear, mainCause, link, caption, bare = false, className }) {
   const [busy, setBusy] = useState('');
   const url = link || (typeof window !== 'undefined' ? window.location.origin : 'https://www.volunteeruapp.com');
   const text = caption || shareCaption(confirmed, url);
@@ -52,6 +58,44 @@ export default function ShareHoursCard({ name, confirmed = 0, grade, school, sch
   const year = schoolYear || schoolYearLabel();
   const n = Number(fmtHours(confirmed));
   const who = [grade ? `Grade ${grade}` : null, school || null, cause && cause.label !== 'Other' ? `Mostly ${cause.label.toLowerCase()}` : null].filter(Boolean);
+
+  const numRef = useRef(null);
+  const figRef = useRef(null);
+
+  // Save image: the card as a PNG. On a phone that can share files, the share
+  // sheet opens with the image and caption; elsewhere the PNG downloads.
+  const saveImage = async () => {
+    setBusy('image');
+    try {
+      const png = await hoursCardPng({
+        name: name || 'Your name',
+        hours: fmtHours(confirmed),
+        unit: `${n === 1 ? 'hour' : 'hours'} confirmed by organizers`,
+        year,
+        details: who,
+        displayFont: numRef.current ? getComputedStyle(numRef.current).fontFamily : '',
+        bodyFont: figRef.current ? getComputedStyle(figRef.current).fontFamily : '',
+      });
+      if (!png) throw new Error('no image');
+      const file = new File([png], 'volunteeru-hours.png', { type: 'image/png' });
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      if (coarse && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], text });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+      download('volunteeru-hours.png', png, 'image/png');
+      toast({ title: 'Image saved', message: 'Your hours card is in your downloads.', tone: 'ok' });
+    } catch (err) {
+      console.error('[share] could not make the card image', err);
+      toast({ title: "Couldn't save the image", message: 'Take a screenshot of the card instead.', tone: 'warn' });
+    } finally {
+      setBusy('');
+    }
+  };
 
   const copy = async (kind) => {
     setBusy(kind);
@@ -64,7 +108,7 @@ export default function ShareHoursCard({ name, confirmed = 0, grade, school, sch
     );
   };
 
-  if (!(n > 0)) {
+  if (!(n > 0) && !bare) {
     return (
       <div className={className}>
         <p style={S(`margin:0;font:400 15px/1.5 ${F.body};color:${C.ink2};max-width:420px`)}>Your card fills in once an organizer confirms your first hours.</p>
@@ -80,6 +124,7 @@ export default function ShareHoursCard({ name, confirmed = 0, grade, school, sch
   return (
     <div className={className}>
       <figure
+        ref={figRef}
         aria-label={`${name || 'Your'} hours card`}
         style={S(`margin:0;position:relative;overflow:hidden;border-radius:${R.card};background:#fff;border:1px solid ${C.line2};color:${C.ink};padding:22px 22px 20px`)}
       >
@@ -91,14 +136,19 @@ export default function ShareHoursCard({ name, confirmed = 0, grade, school, sch
           </span>
           <span style={S(`font:500 13px/1 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>{year}</span>
         </div>
+        {n > 0 ? (
         <div style={S('display:flex;align-items:flex-end;gap:14px;margin-top:24px')}>
-          <b style={S(`font:800 72px/.85 ${F.display};letter-spacing:-0.05em;font-variant-numeric:tabular-nums;color:${C.ink}`)}>{fmtHours(confirmed)}</b>
+          <b ref={numRef} style={S(`font:800 72px/.85 ${F.display};letter-spacing:-0.05em;font-variant-numeric:tabular-nums;color:${C.ink}`)}>{fmtHours(confirmed)}</b>
           <span style={S(`font:500 15px/1.3 ${F.body};color:${C.ink2};padding-bottom:2px;max-width:150px`)}>
             {n === 1 ? 'hour' : 'hours'} confirmed by organizers
           </span>
         </div>
+        ) : (
+          /* Empty card: no 0, just what will fill the space. */
+          <p style={S(`margin:28px 0 0;max-width:260px;font:500 17px/1.35 ${F.body};color:${C.ink2}`)}>Hours show up here once an organizer confirms them.</p>
+        )}
         <figcaption style={S(`margin-top:20px;padding-top:14px;border-top:1px dashed ${C.line2}`)}>
-          <span className="vu-trunc" style={S(`display:block;font:650 18px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{name || 'Your name'}</span>
+          <span className="vu-trunc" style={S(`display:block;font:650 18px/1.2 ${F.display};letter-spacing:-0.012em;color:${name ? C.ink : C.ink3}`)}>{name || 'Your name'}</span>
           {who.length ? (
             <span style={S(`display:block;margin-top:4px;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>
               {who.map((w, i) => (
@@ -111,15 +161,24 @@ export default function ShareHoursCard({ name, confirmed = 0, grade, school, sch
           ) : null}
         </figcaption>
       </figure>
+      {bare ? null : (
+      <>
       <p style={S(`margin:14px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2};overflow-wrap:anywhere`)}>{text}</p>
       <div style={S('display:flex;gap:10px;margin-top:14px;flex-wrap:wrap')}>
-        <Button variant="dark" icon="copy" busy={busy === 'caption'} onClick={() => copy('caption')}>
+        {n > 0 ? (
+          <Button variant="dark" icon="download" busy={busy === 'image'} onClick={saveImage}>
+            Save image
+          </Button>
+        ) : null}
+        <Button variant="outline" icon="copy" busy={busy === 'caption'} onClick={() => copy('caption')}>
           Copy caption
         </Button>
         <Button variant="outline" icon="link" busy={busy === 'link'} onClick={() => copy('link')}>
           Copy VolunteerU link
         </Button>
       </div>
+      </>
+      )}
     </div>
   );
 }

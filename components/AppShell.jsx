@@ -125,9 +125,21 @@ function CountPill({ n, tone }) {
   return <span className={tone === 'brand' ? 'vu-badge vu-badge--ember' : 'vu-badge'}>{n}</span>;
 }
 
-function NavItem({ href, on, icon, children, label, badge }) {
+/* A plain left click on a section that isn't open yet. */
+function isPlainClick(e) {
+  return !(e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey);
+}
+
+function NavItem({ href, on, icon, children, label, badge, pending, onPending }) {
   return (
-    <Link href={href} aria-current={on ? 'page' : undefined} aria-label={label} className="vu-nav-item">
+    <Link
+      href={href}
+      aria-current={on ? 'page' : undefined}
+      aria-label={label}
+      className="vu-nav-item"
+      data-pending={pending && !on ? 'true' : undefined}
+      onClick={(e) => { if (!on && onPending && isPlainClick(e)) onPending(href); }}
+    >
       <span aria-hidden="true" className="vu-nav-ic">
         <Icon name={icon} size={20} />
       </span>
@@ -140,7 +152,7 @@ function NavItem({ href, on, icon, children, label, badge }) {
 export function navKeyFor(pathname) {
   if (pathname === '/app') return 'home';
   if (/^\/crew/.test(pathname)) return 'crew';
-  if (/^\/(discover|volunteers|opportunity|apply|friends|projects)/.test(pathname)) return 'discover';
+  if (/^\/(discover|nonprofits|volunteers|opportunity|apply|friends|projects)/.test(pathname)) return 'discover';
   if (/^\/(lead|create)/.test(pathname)) return 'lead';
   // Settings is reached from the account menu and has no section of its own,
   // so nothing lights up there (CARDS 5). Profile stays for /profile only.
@@ -148,7 +160,7 @@ export function navKeyFor(pathname) {
   return '';
 }
 
-export default function AppShell({ children }) {
+export default function AppShell({ children, loading = false }) {
   const pathname = usePathname() || '';
   const router = useRouter();
   const { state, ephemeral } = useSnapshot();
@@ -162,6 +174,17 @@ export default function AppShell({ children }) {
   const activeKey = navKeyFor(pathname);
   const streak = effectiveStreak();
   const unread = (state.ui && state.ui.unreadNotifs) || 0;
+
+  // The section someone just tapped lights up on the press; the route itself
+  // can take a moment. Cleared on arrival (this shell remounts per page, and
+  // a same-page query change lands here too) or if the route never changes.
+  const [pendingHref, setPendingHref] = useState('');
+  useEffect(() => { setPendingHref(''); }, [pathname]);
+  useEffect(() => {
+    if (!pendingHref) return undefined;
+    const t = setTimeout(() => setPendingHref(''), 8000);
+    return () => clearTimeout(t);
+  }, [pendingHref]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -361,7 +384,7 @@ export default function AppShell({ children }) {
           </Link>
           <nav aria-label="Sections" style={S('display:flex;flex-direction:column;gap:2px')}>
             {navItems.map((n) => (
-              <NavItem key={n.k} href={n.href} on={activeKey === n.k} icon={n.icon}>
+              <NavItem key={n.k} href={n.href} on={activeKey === n.k} icon={n.icon} pending={pendingHref === n.href} onPending={setPendingHref}>
                 {n.label}
               </NavItem>
             ))}
@@ -392,12 +415,14 @@ export default function AppShell({ children }) {
             <>
               <div className="vu-nav-sep" />
               <div style={S('display:flex;flex-direction:column;gap:2px')}>
-                <NavItem href="/saved" on={pathname.startsWith('/saved')} icon="bookmark" badge={<CountPill n={savedCount} />}>
+                <NavItem href="/saved" on={pathname.startsWith('/saved')} icon="bookmark" badge={<CountPill n={savedCount} />} pending={pendingHref === '/saved'} onPending={setPendingHref}>
                   Saved
                 </NavItem>
                 <NavItem
                   href="/notifications"
                   on={pathname.startsWith('/notifications')}
+                  pending={pendingHref === '/notifications'}
+                  onPending={setPendingHref}
                   icon="bell"
                   label={`Notifications${unread ? `, ${unread} unread` : ''}`}
                   badge={<CountPill n={unread} tone="brand" />}
@@ -448,7 +473,7 @@ export default function AppShell({ children }) {
       ) : null}
 
       <div id="vu-main" className="vu-main-pad">
-        {children}
+        <div className="vu-route-in">{children}</div>
       </div>
 
       {/* phone and tablet tab bar (hidden at >= 1180px) */}
@@ -457,7 +482,14 @@ export default function AppShell({ children }) {
           {tabItems.map((n) => {
             const on = activeKey === n.k;
             return (
-              <Link key={n.k} href={n.href} aria-current={on ? 'page' : undefined} className="vu-tab-item">
+              <Link
+                key={n.k}
+                href={n.href}
+                aria-current={on ? 'page' : undefined}
+                data-pending={pendingHref === n.href && !on ? 'true' : undefined}
+                onClick={(e) => { if (!on && isPlainClick(e)) setPendingHref(n.href); }}
+                className="vu-tab-item"
+              >
                 <Icon name={n.icon} size={24} stroke={on ? 1.75 : 1.5} />
                 <span>{TAB_LABEL[n.k] || n.label}</span>
               </Link>
@@ -465,8 +497,8 @@ export default function AppShell({ children }) {
           })}
         </nav>
       ) : null}
-      <Tutorial />
-      <FounderTutorial />
+      {loading ? null : <Tutorial />}
+      {loading ? null : <FounderTutorial />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import JoinListing from '../../../components/screens/JoinListing.jsx';
 import { resolveCover } from '../../../lib/photos.js';
+import { supabaseUrl, supabaseAnonKey } from '../../../lib/supabaseConfig.js';
 
 /* /join/<id>, the page a shared listing link opens.
    The server reads the live listing once with the anon key (the same rows a
@@ -19,8 +20,8 @@ const DESCRIPTION_MAX = 200;
 /* The listing row, or null when it is missing, closed or the read failed.
    A failed read only costs the preview: the browser loads the page anyway. */
 const readListing = cache(async (id) => {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const base = supabaseUrl;
+  const key = supabaseAnonKey;
   if (!base || !key || !UUID_RX.test(String(id || ''))) return null;
   const url = `${base.replace(/\/+$/, '')}/rest/v1/listings?id=eq.${encodeURIComponent(id)}&select=*&limit=1`;
   try {
@@ -44,7 +45,7 @@ const readListing = cache(async (id) => {
 
 const text = (v, max = 400) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-/* Today in Carmel as [year, month, day], so the server's own zone (UTC on
+/* Today in Indianapolis as [year, month, day], so the server's own zone (UTC on
    the host) doesn't decide whether a shift has passed. */
 function todayParts(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: SITE_TZ, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now);
@@ -91,11 +92,31 @@ function orgName(listing) {
   return first && !/^(remote|online|virtual)\b/i.test(first) ? first : '';
 }
 
-/* Only the fields the server-drawn header reads, so the page doesn't carry
-   the whole row (owner id, review notes) in its HTML. */
+const arr = (v, max = 100) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object').slice(0, max) : []);
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const coord = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/* The public fields the listing page draws, so a signed-out visitor gets the
+   whole page from the server instead of a header and a placeholder (no
+   shift when the browser's own read lands). Never the whole row: no owner
+   id, no review notes. `full` tells JoinListing it can draw from this. */
 function previewOf(listing) {
   if (!listing) return null;
   return {
+    full: true,
+    positions: arr(listing.positions),
+    pipeline: arr(listing.pipeline),
+    task_roles: arr(listing.task_roles),
+    shifts: arr(listing.shifts, 200),
+    announcements: arr(listing.announcements, 50),
+    next_session: text(listing.next_session, 200),
+    events_hosted: num(listing.events_hosted),
+    approx_volunteers: num(listing.approx_volunteers),
+    website: text(listing.website, 500),
+    delivery: ['in_person', 'remote', 'hybrid'].includes(listing.delivery) ? listing.delivery : 'in_person',
+    location: text(listing.location),
+    lat: coord(listing.lat),
+    lng: coord(listing.lng),
     id: String(listing.id),
     name: text(listing.name, 200),
     status: listing.status,

@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { C, F, R } from '../lib/tokens.js';
-import { searchListingsPage, matchListings, applyToListing, loadMyApplications, listingShifts, loadListingsByIds, myId } from '../lib/listings.js';
+import { searchListingsPage, matchListings, applyToListing, loadMyApplications, listingShifts, loadListingsByIds, myId, nearTerm } from '../lib/listings.js';
 import { shiftDates, inferYear, startOfDay } from '../lib/calendar.js';
 import { usePhotoPicker, resolveCover } from '../lib/photos.js';
 import { toggleSaved } from '../lib/db.js';
@@ -223,6 +223,17 @@ function applyErrorMessage(e) {
   return "Your application didn't send. Check your connection and try again.";
 }
 
+/* Save in the details dialog, pressed while the listing is saved. */
+function DetailSave({ listing, onToggle }) {
+  const { state } = useSnapshot();
+  const saved = Array.isArray(state.saved) && state.saved.includes(listing.id);
+  return (
+    <Button icon="bookmark" onClick={onToggle} aria-pressed={saved} aria-label={saved ? `Remove ${listing.name} from saved` : `Save ${listing.name}`}>
+      {saved ? 'Saved' : 'Save'}
+    </Button>
+  );
+}
+
 /* ---- saved-only ----------------------------------------------------------- */
 
 /* The free-text cleanup searchListingsPage applies before its ilike filters. */
@@ -241,7 +252,7 @@ export function matchesSearch(l, { q = '', causes = [], kind = 'all', place = 'a
   if (me && l.owner_id === me) return false;
   if ((kind === 'student' || kind === 'official') && l.org_class !== kind) return false;
   if (causes.length && !causes.includes(l.cause)) return false;
-  const loc = cleanTerm(near);
+  const loc = nearTerm(near).toLowerCase();
   if (loc && !holds(l.site, loc) && !holds(l.location, loc)) return false;
   if (place === 'online' && !(l.delivery === 'remote' || l.delivery === 'hybrid' || l.org_type === 'team' || /remote|online|virtual/i.test(l.site || ''))) return false;
   if (place === 'person' && !(l.delivery === 'in_person' || l.delivery === 'hybrid')) return false;
@@ -499,7 +510,11 @@ export default function DiscoverListings({
       sent = true;
       await refreshMine();
       if (api) api.close();
-      toast({ title: 'Applied', message: role ? `${listing.name} will see you applied as ${role}.` : `${listing.name} will see your application.`, tone: 'ok' });
+      const said = role ? `${listing.name} will see you applied as ${role}.` : `${listing.name} will see your application.`;
+      // Applying here doesn't pick a shift, so point to where shifts are picked.
+      toast(listingShifts(listing).length
+        ? { title: 'Applied', message: `${said} Pick your shift on its page.`, tone: 'ok', actionLabel: 'Pick a shift', onAction: () => router.push(`/join/${listing.id}`) }
+        : { title: 'Applied', message: said, tone: 'ok' });
     } catch (e) {
       toast({ title: "Couldn't apply", message: applyErrorMessage(e), tone: 'danger' });
     }
@@ -656,6 +671,7 @@ export default function DiscoverListings({
                 {signedOut ? 'Sign in to apply' : sending ? 'Applying' : 'Apply'}
               </Button>
             )}
+            <DetailSave listing={listing} onToggle={() => save(listing)} />
             <Button onClick={() => { api.close(); router.push(`/join/${listing.id}`); }}>
               Open full page
             </Button>
@@ -824,7 +840,7 @@ export default function DiscoverListings({
 /* A quiet empty or error block: heading, one line, one action. */
 function Plain({ title, body, alert, children }) {
   return (
-    <div role={alert ? 'alert' : undefined} style={S(`padding:24px 0 8px;border-top:1px solid ${C.line}`)}>
+    <div role={alert ? 'alert' : undefined} style={S(`margin-top:24px;padding:24px 0 8px;border-top:1px solid ${C.line}`)}>
       <div style={S(`font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{title}</div>
       <div style={S(`margin-top:6px;font:400 15px/1.5 ${F.body};color:${C.ink2};max-width:520px`)}>{body}</div>
       {children ? <div style={S('margin-top:16px')}>{children}</div> : null}

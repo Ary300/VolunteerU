@@ -3,7 +3,8 @@
 /* ==========================================================================
    NonprofitRow, a directory row the way ProPublica or Idealist show one:
    the name, then "Food and hunger · Carmel, IN", a trailing chevron (or an
-   external-link mark), and a 1px rule. No logo or initials square: we don't
+   external-link mark), and a 1px rule. App rows link to the nonprofit's own
+   page, /nonprofits/<ein>. No logo or initials square: we don't
    have their logos and won't invent one.
 
    Lay several out in two columns on wide screens with className
@@ -77,7 +78,7 @@ function subParts(sub, parts) {
  * @param {string[]} [props.parts]    or the sub line as parts: [causeLabel, 'Carmel, IN']
  * @param {number} [props.openCount]  a VolunteerU org's open listings, from data: "3 open"
  * @param {string} [props.href]       renders a link; otherwise pass onClick for a button
- * @param {()=>void} [props.onClick]
+ * @param {()=>void} [props.onClick]  with href, runs just before the link navigates
  * @param {boolean} [props.external]  opens in a new tab with the external mark
  * @param {React.ReactNode} [props.trailing] replaces the chevron (a button, a status)
  * @param {string} [props.cause]      accepted for older callers; unused
@@ -126,8 +127,9 @@ export default function NonprofitRow({ name, sub, parts, openCount, cause, href,
     );
   }
   if (href) {
+    // onClick runs before the navigation (a list remembers its scroll there).
     return (
-      <Link href={href} className={cls}>
+      <Link href={href} className={cls} onClick={onClick}>
         {body}
       </Link>
     );

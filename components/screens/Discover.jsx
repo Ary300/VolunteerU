@@ -4,16 +4,16 @@
    Discover.jsx, design screen: `isDiscover`
    Search opportunities posted on VolunteerU and nonprofits from IRS records
    in one place. Every filter lives in the URL, so a search can be shared and
-   the back button works. ?ein= opens a nonprofit's detail, ?view=nonprofits
+   the back button works. A nonprofit opens its own page (/nonprofits/<ein>; an old ?ein= link moves there), ?view=nonprofits
    switches to the nonprofit list.
 
    Layout (photo-first system): the What / Where / When pill, the category
    row, Opportunities N / Nonprofits N, filter chips with the sort at their
    end, then the results. From 1320px the results share the row with a
-   sticky sketch map (components/MapPanel.jsx): day/time pins for the
-   listings on screen and a popup for the picked one. Below that the map
-   opens in a sheet from a floating Map button, which sits above the tab bar
-   on phones. On phones the pill collapses to the query with a filter
+   sticky map (components/MapPanel.jsx, Leaflet): day/time pins at the
+   listings' real addresses and a popup for the picked one, with an Expand
+   button for a full-screen map. Below that the full-screen map opens from a
+   floating Map button, which sits above the tab bar on phones. On phones the pill collapses to the query with a filter
    button.
    ========================================================================== */
 
@@ -21,16 +21,16 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s } from '../../lib/style.js';
 import { C, F, R, SH, CATEGORIES, causeOf, causeKey } from '../../lib/tokens.js';
-import { Chip, Select, Checkbox, Button, Icon, Segmented } from '../ui.jsx';
+import { Chip, Select, Checkbox, Button, Icon, Segmented, useHeldValue } from '../ui.jsx';
 import CategoryRow from '../vu/CategoryRow.jsx';
 import { WHEN_OPTIONS } from '../vu/SearchBar.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
 import { DiscoverMap } from '../MapPanel.jsx';
-import WebNonprofits, { NonprofitDetail, stateName, formatCount } from '../WebNonprofits.jsx';
+import WebNonprofits, { stateName, formatCount, cityOf } from '../WebNonprofits.jsx';
 import { useSnapshot } from '../../lib/store.js';
-import { openModal, closeModal } from '../../lib/overlays.js';
+import { openModal } from '../../lib/overlays.js';
 import { rememberSearch, clearSearches } from '../../lib/db.js';
-import { searchListings, parseState } from '../../lib/listings.js';
+import { searchListings, searchListingsPage, parseState, townFromZip } from '../../lib/listings.js';
 import { CAUSES, WINDOWS } from '../../lib/seed.js';
 
 const SORTS = [
@@ -56,6 +56,16 @@ const FREE_PHRASE = {
   'School breaks': 'weekday daytimes',
 };
 
+/* Set for the rest of the visit once someone clears their causes, so the
+   sidebar Discover link and other plain /discover links stop adding them back. */
+const CLEARED_KEY = 'vu.discoverCleared';
+function causesCleared() {
+  try { return window.sessionStorage.getItem(CLEARED_KEY) === '1'; } catch { return false; }
+}
+function markCausesCleared() {
+  try { window.sessionStorage.setItem(CLEARED_KEY, '1'); } catch { /* private mode: clearing lasts for this page only */ }
+}
+
 function plural(n, one, many) {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
 }
@@ -79,8 +89,10 @@ function useMedia(query) {
 const WHERE_TEXT_MIN = 760;
 
 /* With "Near you" picked and no location of their own, a visitor sees
-   Carmel's nonprofits, as on Landing, where VolunteerU is built. */
-const DEFAULT_AREA = { city: 'Carmel', state: 'IN' };
+   Indianapolis nonprofits, as on Landing, the region VolunteerU serves. */
+const DEFAULT_AREA = { city: 'Indianapolis', state: 'IN' };
+/* Towns offered as one-tap Where values on the Nonprofits tab around Indianapolis. */
+const NEARBY_TOWNS = ['Indianapolis', 'Carmel', 'Fishers', 'Greenwood', 'Lawrence', 'Speedway', 'Zionsville'];
 
 /** The What hint, shortened as the bar narrows so it is never cut off. */
 function whatPlaceholder(barW) {
@@ -141,17 +153,26 @@ export default function Discover() {
   const { state } = useSnapshot();
   // The volunteer's own area, from their saved location or city. With no ?near
   // at all we fall back to it synchronously, so there is no blank-then-jump.
+  // Nonprofit search needs a state. Fold in the saved ZIP so a city name no
+  // lookup knows ("Rivertown") still resolves to one. A lead who came in
+  // through Start a project only gave a ZIP, so a known ZIP names the town
+  // the default lists use.
+  const savedZip = state.onboarding?.zip || (state.account && state.account.zip) || '';
+  const zipHome = townFromZip(savedZip);
   const homeRegion = ((state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '')).trim();
   const nearParam = params.get('near');
   // Online listings are open to anyone wherever they're based, so a bare
   // ?place=online (Home's Online link, the Online category) searches anywhere.
   // A Where typed alongside it still narrows them to that town.
   const near = nearParam !== null ? nearParam : place === 'online' ? '' : homeRegion;
-  // Nonprofit search needs a state. Fold in the saved ZIP so a city name no
-  // lookup knows ("Rivertown") still resolves to one. An explicitly empty
-  // Where field means anywhere, so the ZIP is left out then.
-  const savedZip = state.onboarding?.zip || (state.account && state.account.zip) || '';
-  const webNear = nearParam === '' ? '' : [near, near === homeRegion ? savedZip : ''].filter(Boolean).join(' ');
+  // With Near you on, no area of their own and nothing typed or picked,
+  // opportunities are Indianapolis's, the same town the nonprofit preview and the
+  // map show. A search word or a cause searches everywhere, as nonprofits do.
+  const listNear = near || (nearParam === null && place !== 'online' && !q && !causes.length ? zipHome || DEFAULT_AREA.city : '');
+  // A bare ZIP we know searches its town, so both lists cover the same place.
+  const zipTown = /^\s*\d{5}\s*$/.test(near) ? townFromZip(near) : '';
+  // An explicitly empty Where field means anywhere, so the ZIP is left out then.
+  const webNear = nearParam === '' ? '' : zipTown ? `${zipTown}, IN` : !near && zipHome ? `${zipHome}, IN` : [near, near === homeRegion ? savedZip : ''].filter(Boolean).join(' ');
 
   const [draftQuery, setDraftQuery] = useState(q);
   // Where is typed into local state and written to the URL after a short
@@ -161,6 +182,8 @@ export default function Discover() {
   const [draftNear, setDraftNear] = useState(near);
   const committedNear = useRef(near);
   const nearTimer = useRef(null);
+  // True while the visitor has typed in Where and it isn't in the URL yet.
+  const whereDirty = useRef(false);
   const [showSuggest, setShowSuggest] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const [listingCount, setListingCount] = useState(null);
@@ -203,6 +226,20 @@ export default function Discover() {
 
   useEffect(() => setDraftQuery(q), [q]);
 
+  // The Nonprofits view doesn't mount the opportunity list, so its tab count
+  // comes from one count-only query. Saved-only, When and free time can't be
+  // counted that way, so those keep the last count the list reported.
+  const causeParam = causes.join('|');
+  useEffect(() => {
+    if (view !== 'np' || savedOnly || when || windows.length) return undefined;
+    let alive = true;
+    searchListingsPage({ q, causes, kind, place, near: listNear, limit: 1 })
+      .then((res) => { if (alive && res && Number.isFinite(res.total)) setListingCount(res.total); })
+      .catch(() => { /* the tab shows no number when the count can't load */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, q, causeParam, kind, place, listNear, savedOnly, when, windows.length]);
+
   useEffect(() => {
     const el = formRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
@@ -244,7 +281,10 @@ export default function Discover() {
   const setParams = (patch, opts = {}) => {
     clearTimeout(nearTimer.current);
     nearTimer.current = null;
-    const carryNear = !('near' in patch) && draftNear !== near;
+    // Only a Where the visitor typed is carried. An empty draft never
+    // replaces the default or home area.
+    const carryNear = whereDirty.current && !('near' in patch) && draftNear !== near;
+    whereDirty.current = false;
     const full = carryNear ? { ...patch, near: draftNear } : patch;
     const keepEmpty = carryNear ? [...(opts.keepEmpty || []), 'near'] : opts.keepEmpty || [];
     // Merge into the address bar's query, which is ahead of `params` while a
@@ -255,6 +295,7 @@ export default function Discover() {
       if (v === null || v === undefined || v === false || (v === '' && !keepEmpty.includes(k))) next.delete(k);
       else next.set(k, String(v));
     });
+    if (!seeding.current && 'causes' in full && !next.get('causes')) markCausesCleared();
     if ('near' in full) {
       const resolved = next.has('near') ? next.get('near') : homeRegion;
       committedNear.current = resolved;
@@ -266,6 +307,7 @@ export default function Discover() {
   latestSetParams.current = setParams;
 
   function typeNear(v) {
+    whereDirty.current = true;
     setDraftNear(v);
     clearTimeout(nearTimer.current);
     nearTimer.current = setTimeout(() => {
@@ -274,19 +316,20 @@ export default function Discover() {
     }, 400);
   }
 
-  // Carry the volunteer's saved causes and free time (from onboarding) into
-  // the visible filters when they land here with no filters in the URL. The
+  // Carry the volunteer's saved causes (from onboarding) into the visible
+  // filters when they land here with no filters in the URL. Free time is
+  // never carried in: one window no listing matches would empty the list on
+  // every visit. Once causes are cleared they stay cleared for the visit. The
   // saved workspace can arrive after this screen mounts (a cold sign-in loads
   // it from the cloud, and the sign-in redirect can land after that), so this
   // runs whenever the saved values or the URL change, until the visitor picks
   // or clears a filter themselves. That keeps clearing sticky.
   const prefCauses = ((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c));
-  const prefWindows = ((state.prefs && state.prefs.windows) || []).filter((w) => WINDOWS.includes(w));
-  const prefsKey = `${prefCauses.join('|')}#${prefWindows.join('|')}`;
+  const prefsKey = prefCauses.join('|');
   const paramsKey = params.toString();
   useEffect(() => {
-    if (userTouched.current) return;
-    if (!prefCauses.length && !prefWindows.length) return; // nothing saved yet; wait for the workspace
+    if (userTouched.current || causesCleared()) return;
+    if (!prefCauses.length) return; // nothing saved yet; wait for the workspace
     const live = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : paramsKey);
     const untouched = !['q', 'causes', 'windows', 'near', 'kind', 'place', 'sort', 'saved', 'ein', 'when', 'view'].some((k) => live.get(k) !== null);
     if (!untouched) return;
@@ -294,7 +337,7 @@ export default function Discover() {
     try {
       // near: null keeps the default (the volunteer's own area) rather than
       // carrying a Where draft that hasn't caught up with the workspace yet.
-      setParams({ causes: prefCauses.join('|') || null, windows: prefWindows.join('|') || null, near: null }, { replace: true });
+      setParams({ causes: prefCauses.join('|'), near: null }, { replace: true });
     } finally {
       seeding.current = false;
     }
@@ -304,41 +347,18 @@ export default function Discover() {
   }, [prefsKey, paramsKey, seedCheck]);
   useEffect(() => () => clearTimeout(seedTimer.current), []);
 
-  /* ---- nonprofit detail, driven by ?ein= ---------------------------------- */
-  const einModal = useRef(null); // { ein, id }
+  /* ---- nonprofits open their own page --------------------------------------
+     An older ?ein= link (from before /nonprofits/<ein> existed) moves to the
+     nonprofit's page, keeping Discover's other filters in history. */
   useEffect(() => {
-    const cur = einModal.current;
-    if (cur && cur.ein !== ein) {
-      einModal.current = null;
-      closeModal(cur.id, 'route');
-    }
-    if (!ein || (einModal.current && einModal.current.ein === ein)) return;
-    const api = openModal({
-      title: 'Nonprofit',
-      size: 'wide',
-      Body: function NonprofitBody() {
-        return <NonprofitDetail ein={ein} />;
-      },
-      onClose: () => {
-        if (!einModal.current || einModal.current.ein !== ein) return; // closed by a route change
-        einModal.current = null;
-        const next = new URLSearchParams(window.location.search);
-        next.delete('ein');
-        pushQuery(next, { replace: true });
-      },
-    });
-    einModal.current = { ein, id: api.id };
+    if (!ein) return;
+    router.replace(`/nonprofits/${ein}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ein]);
 
-  // Leaving Discover closes the dialog it opened.
-  useEffect(() => () => {
-    const cur = einModal.current;
-    einModal.current = null;
-    if (cur) closeModal(cur.id, 'unmount');
-  }, []);
-
-  const openNonprofit = (o) => setParams({ ein: o.ein });
+  const openNonprofit = (o) => {
+    if (o && o.ein) router.push(`/nonprofits/${encodeURIComponent(String(o.ein))}`);
+  };
 
   /* ---- search -------------------------------------------------------------- */
   const term = draftQuery.trim().toLowerCase();
@@ -413,13 +433,19 @@ export default function Discover() {
     setParams({ q: null, causes: [...causes, c].join('|') });
   }
 
+  // Clears every filter and keeps the Where value.
   function clearFilters() {
     clearTimeout(nearTimer.current);
     nearTimer.current = null;
-    committedNear.current = '';
-    setDraftNear('');
+    whereDirty.current = false;
+    markCausesCleared();
+    const keep = draftNear.trim();
     const next = new URLSearchParams();
-    next.set('near', '');
+    if (keep && keep !== homeRegion) next.set('near', keep);
+    else if (nearParam === '' && !keep) next.set('near', '');
+    const resolved = next.has('near') ? next.get('near') : homeRegion;
+    committedNear.current = resolved;
+    setDraftNear(resolved);
     pushQuery(next);
   }
 
@@ -434,7 +460,19 @@ export default function Discover() {
     return near === homeRegion && !savedOnly ? 'near' : null;
   })();
 
+  // The row and the In person / Online chips read the URL, which follows the
+  // tap only once the route lands; these hold the tapped state until then.
+  const [heldCat, holdCat] = useHeldValue(paramsKey);
+  const [heldPlace, holdPlace] = useHeldValue(paramsKey);
+  const shownCat = heldCat === undefined ? catValue : heldCat;
+  const shownPlace = heldPlace === undefined ? place : heldPlace;
+  // What the row shows once causes are cleared (Near you, Online or nothing).
+  const catWithoutCause = place === 'online' && !near ? 'online' : near === homeRegion && !savedOnly ? 'near' : null;
+
   function pickCategory(key, item) {
+    if (key === 'near') holdCat('near');
+    else if (key === 'online') holdCat(catValue === 'online' ? (savedOnly ? null : 'near') : 'online');
+    else holdCat(causes.length === 1 && causes[0] === item.cause ? catWithoutCause : key);
     if (key === 'near') {
       setParams({ causes: null, windows: null, saved: null, place: place === 'person' ? 'person' : null, near: null });
       return;
@@ -457,11 +495,13 @@ export default function Discover() {
      into the URL: an Online chip next to "Rivertown" means online listings
      based in Rivertown. The Online category above searches anywhere. */
   function togglePlace(k) {
+    holdPlace(place === k ? 'all' : k);
     if (place === k) {
       setParams({ place: null });
       return;
     }
-    setParams({ place: k, near }, { keepEmpty: ['near'] });
+    // With no area of their own, the default town (Indianapolis) is the Where.
+    setParams({ place: k, near: near || listNear }, { keepEmpty: ['near'] });
   }
 
   function toggleWindow(w) {
@@ -583,32 +623,8 @@ export default function Discover() {
     town: near,
   };
 
-  function openMapSheet() {
-    const n = mapProps.listings.length;
-    openModal({
-      title: view === 'opp' ? `Map of ${plural(n, 'opportunity', 'opportunities')}` : 'Map of nonprofits',
-      size: 'wide',
-      Body: function MapBody({ api }) {
-        return (
-          <div
-            onClickCapture={(e) => {
-              // Following a listing link from the popup leaves the sheet behind.
-              if (e.target.closest && e.target.closest('a')) api.close();
-            }}
-          >
-            <DiscoverMap
-              {...mapProps}
-              onOpenNonprofit={(o) => {
-                api.close();
-                openNonprofit(o);
-              }}
-              style={{ height: 'min(68vh, 620px)' }}
-            />
-          </div>
-        );
-      },
-    });
-  }
+  // Phones and tablets: the floating Map pill opens the full-screen map.
+  const [mapFull, setMapFull] = useState(false);
 
   /* ---- render -------------------------------------------------------------- */
   const suggestBox = suggestOpen ? (
@@ -689,10 +705,17 @@ export default function Discover() {
   // Near you is on but the viewer has no location, and there are no words or cause to search by.
   const npArea = catValue === 'near' && !webNear.trim() && !q && !causes.length ? DEFAULT_AREA : null;
   // The preview is left out when there is nothing to list.
-  const npHasQuery = Boolean(q.trim() || causes.length || parseState(webNear) || npArea);
-  const npWhere = nonprofitCount && nonprofitCount.state ? `in ${stateName(nonprofitCount.state)}` : 'in IRS records';
-  const npHeading = npArea ? `Nonprofits in ${npArea.city}` : q ? `Nonprofits for “${q}”` : causes.length === 1 ? `${causeWording(causes[0]).np} ${npWhere}` : `Nonprofits ${npWhere}`;
-  const line = resultsLine({ count: listingCount, causes, kind, place, near, when, windows, q, savedOnly });
+  const npCity = npArea ? npArea.city : cityOf(webNear);
+  const npHasQuery = Boolean(q.trim() || causes.length || parseState(webNear) || npCity || npArea);
+  // Where the search actually ran (the list reports it, e.g. a town with no
+  // IRS records falls back to its state), else where it's about to run.
+  const npWhere = nonprofitCount
+    ? nonprofitCount.city ? `in ${nonprofitCount.city}` : nonprofitCount.state ? `in ${stateName(nonprofitCount.state)}` : 'in every state'
+    : npCity ? `in ${npCity}` : parseState(webNear) ? `in ${stateName(parseState(webNear))}` : 'in IRS records';
+  const npHeading = q ? `Nonprofits for “${q}” ${npWhere}` : causes.length === 1 ? `${causeWording(causes[0]).np} ${npWhere}` : `Nonprofits ${npWhere}`;
+  // Around Indianapolis, the towns next to it are one tap away.
+  const showTowns = view === 'np' && NEARBY_TOWNS.some((t) => t.toLowerCase() === String(npCity || '').toLowerCase());
+  const line = resultsLine({ count: listingCount, causes, kind, place, near: listNear, when, windows, q, savedOnly });
   // What they told us at sign-up, matched against listings by keyword. Shown
   // while nothing narrower (a search, a cause, a type or place) is picked.
   const interest = ((state.prefs && state.prefs.interest) || '').trim();
@@ -707,7 +730,7 @@ export default function Discover() {
           <button type="button" className="vu-link-ul" onClick={() => router.push('/volunteers')} style={S(`font:500 14px/1.3 ${F.body};color:${C.ink}`)}>
             Find volunteers
           </button>
-          <Button size="sm" icon="plus" onClick={() => router.push('/create')}>
+          <Button size="sm" icon="plus" onClick={() => router.push(state.session.authed ? '/create' : '/signup?intent=start')}>
             Start a student project
           </Button>
         </div>
@@ -863,7 +886,7 @@ export default function Discover() {
         </button>
       </div>
 
-      <CategoryRow className="dz-cats" value={catValue} onChange={pickCategory} short={phone} label="Causes" />
+      <CategoryRow className="dz-cats" value={shownCat} onChange={pickCategory} short={phone} label="Causes" />
 
       <div className={mapSide ? 'vu-layout-map dz-split' : 'dz-split'}>
         <div className="dz-list">
@@ -916,7 +939,7 @@ export default function Discover() {
                       { k: 'person', t: 'In person' },
                       { k: 'online', t: 'Online' },
                     ].map((o) => {
-                      const on = place === o.k;
+                      const on = shownPlace === o.k;
                       return (
                         <button key={o.k} type="button" aria-pressed={on} className="dz-chip" onClick={() => togglePlace(o.k)}>
                           {o.t}
@@ -949,7 +972,7 @@ export default function Discover() {
                       mode="match"
                       interest={interest}
                       causes={((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c))}
-                      near={near || homeRegion}
+                      near={listNear}
                       when={when}
                       windows={windows}
                       initial={phone || (wide && !mapSide) ? 3 : 2}
@@ -970,7 +993,7 @@ export default function Discover() {
                   causes={causes}
                   kind={kind}
                   place={place}
-                  near={near}
+                  near={listNear}
                   sort={sort}
                   when={when}
                   windows={windows}
@@ -988,6 +1011,19 @@ export default function Discover() {
             ) : null}
 
             <div className={view === 'opp' ? 'dz-np-preview' : 'dz-np-full'} hidden={view === 'opp' && (!showPreviewNp || !npHasQuery)}>
+              {showTowns ? (
+                <div role="group" aria-label="Nearby towns" className="dz-chips" style={S('margin-bottom:24px')}>
+                  <span aria-hidden="true" style={S(`flex:none;margin-right:4px;font:400 13px/1.2 ${F.body};color:${C.ink2}`)}>Nearby</span>
+                  {NEARBY_TOWNS.map((t) => {
+                    const on = t.toLowerCase() === String(npCity || '').toLowerCase();
+                    return (
+                      <button key={t} type="button" aria-pressed={on} className="dz-chip" onClick={() => setParams({ near: `${t}, IN` })}>
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
               <WebNonprofits
                 id="nonprofits"
                 q={q}
@@ -996,8 +1032,7 @@ export default function Discover() {
                 kind="all"
                 area={npArea}
                 limit={view === 'opp' ? 4 : 0}
-                heading={view === 'opp' ? npHeading : ''}
-                onOpen={openNonprofit}
+                heading={npHeading}
                 onClear={() => runSearch('')}
                 onCount={setNonprofitCount}
                 onResults={setOrgs}
@@ -1037,16 +1072,22 @@ export default function Discover() {
               highlight={hoverId}
               onPick={setPickedId}
               onOpenNonprofit={openNonprofit}
-              style={{ height: 'min(820px, calc(100vh - 48px))', minHeight: 520 }}
+              // 24px sticky top plus the page's 88px bottom padding, so the stuck map is never clipped at the end of the list.
+              style={{ height: 'min(820px, calc(100vh - 112px))', minHeight: 520 }}
             />
           </aside>
         ) : null}
       </div>
 
       {!mapSide ? (
+        <DiscoverMap {...mapProps} inline={false} expanded={mapFull} onExpandedChange={setMapFull} />
+      ) : null}
+
+      {!mapSide ? (
         <button
           type="button"
-          onClick={openMapSheet}
+          onClick={() => setMapFull(true)}
+          aria-haspopup="dialog"
           style={S(`position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--vu-tabbar-h, 0px) + 16px);z-index:40;height:46px;padding:0 20px;border-radius:${R.pill};background:${C.ink};color:#fff;display:inline-flex;align-items:center;gap:8px;font:600 15px/1 ${F.body};box-shadow:0 6px 20px rgba(30,36,33,.3);cursor:pointer`)}
           className="dz-mappill"
         >

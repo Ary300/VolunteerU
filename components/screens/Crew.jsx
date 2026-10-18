@@ -14,7 +14,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { S } from '../../lib/style.js';
 import { C, F } from '../../lib/tokens.js';
-import { Button, EmptyState, ErrorState, SkeletonRows } from '../ui.jsx';
+import { Button, ErrorState, SkeletonRows } from '../ui.jsx';
 import { loadMyApplications } from '../../lib/listings.js';
 import { openModal, toast } from '../../lib/overlays.js';
 import MemberProjects from '../MemberProjects.jsx';
@@ -107,7 +107,12 @@ export default function Crew() {
   }, [threadId, rows, router]);
 
   const goDiscover = () => router.push('/discover');
-  const line = Array.isArray(rows) ? summary(rows) : '';
+  const empty = Array.isArray(rows) && rows.length === 0;
+  // With no applications at all the header line says what lands here and
+  // the header button is the way in, so there's no separate empty block.
+  const line = empty
+    ? "Once an organizer accepts you, the project shows up here with its team chat and your hours."
+    : Array.isArray(rows) ? summary(rows) : '';
 
   return (
     <div className="vu-page vu-screen">
@@ -115,10 +120,11 @@ export default function Crew() {
         <header style={S('display:flex;align-items:flex-end;justify-content:space-between;gap:16px 24px;flex-wrap:wrap')}>
           <div style={S('min-width:0')}>
             <h1 className="vu-t-h1" style={S(`color:${C.ink}`)}>My crew</h1>
-            {line ? <p style={S(`margin:8px 0 0;font:400 15px/1.45 ${F.body};color:${C.ink2}`)}>{line}</p> : null}
+            {line ? <p className={empty ? 'vu-empty' : undefined} style={S(`margin:8px 0 0;max-width:560px;font:400 15px/1.45 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{line}</p> : null}
           </div>
-          {/* The empty state carries its own search button. */}
-          {Array.isArray(rows) && rows.length === 0 ? null : (
+          {empty ? (
+            <Button size="sm" variant="dark" icon="search" onClick={goDiscover}>Find a project</Button>
+          ) : (
             <Button size="sm" icon="search" onClick={goDiscover}>Find opportunities</Button>
           )}
         </header>
@@ -135,16 +141,7 @@ export default function Crew() {
               onRetry={() => setAttempt((n) => n + 1)}
             />
           </div>
-        ) : rows.length === 0 ? (
-          <div style={S('margin-top:32px')}>
-            <EmptyState
-              title="No projects yet"
-              body="Apply to an opportunity. Once the organizer accepts you, the project shows up here."
-              cta="Search opportunities"
-              onCta={goDiscover}
-            />
-          </div>
-        ) : (
+        ) : rows.length === 0 ? null : (
           <div key={attempt} style={S('margin-top:40px')}>
             <MemberProjects />
             {/* Plain section spacing: the project above already ends on its

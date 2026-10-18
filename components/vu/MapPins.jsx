@@ -7,6 +7,8 @@
    selected pin, the list popup for a place with several listings, and the
    legend. Position each one with `x`/`y` in percent of the map box (the map
    screen owns projection). All of them are absolutely positioned.
+   MapPanel's Leaflet map draws pins with pinHtml / dotHtml (the same classes
+   as MapPin and MapDot) and lays the popups over the map.
 
    Popups never draw a tile: a photo when the listing has its own, else a
    DateBlock beside the text, else just the text.
@@ -84,6 +86,18 @@ export function MapPin({ x, y, label, selected = false, onClick, ariaLabel }) {
   );
 }
 
+const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+/** HTML for a Leaflet divIcon that looks like MapPin: the pill, or the dot when undated. */
+export function pinHtml(label, selected = false) {
+  const text = pinText(label);
+  const on = selected ? ' is-on' : '';
+  return text ? `<span class="vu-pin${on}">${escHtml(text)}</span>` : `<span class="vu-pin-dot${on}"></span>`;
+}
+
+/** HTML for a Leaflet divIcon that looks like MapDot (a nonprofit). */
+export const dotHtml = () => '<span class="vu-np-dot"></span>';
+
 /** Hollow dot for a registered nonprofit that hasn't posted on VolunteerU. */
 export function MapDot({ x, y, title, onClick }) {
   const style = S(`${at(x, y)};width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid ${C.ink3};padding:0`);
@@ -117,7 +131,7 @@ function WhenLine({ parts, size = 13 }) {
  * @param {number} [props.width] default 248
  */
 // eslint-disable-next-line no-unused-vars
-export function MapPopup({ x, y, href, title, when, date, time, spots, photo, cause, width = 248 }) {
+export function MapPopup({ x, y, href, title, when, date, time, spots, photo, cause, place, directions, width = 248 }) {
   const hasPhoto = Boolean(photo && photo.src);
   const d = date !== undefined && date !== null && date !== '' ? date : splitWhen(when).date;
   const parts = whenParts({ when, date, time, spots, hasPhoto });
@@ -142,6 +156,7 @@ export function MapPopup({ x, y, href, title, when, date, time, spots, photo, ca
           <div style={S('position:relative;padding:12px 14px 14px')}>
             {link}
             <WhenLine parts={parts} />
+            <PlaceLine place={place} />
           </div>
         </>
       ) : (
@@ -150,9 +165,58 @@ export function MapPopup({ x, y, href, title, when, date, time, spots, photo, ca
           <div style={S('min-width:0;flex:1')}>
             {link}
             <WhenLine parts={parts} />
+            <PlaceLine place={place} />
           </div>
         </div>
       )}
+      <PopupLinks href={href} openLabel="Open listing" directions={directions} />
+    </div>
+  );
+}
+
+function PlaceLine({ place }) {
+  return place ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{place}</div> : null;
+}
+
+/** The popup's foot: open the page, and directions in a new tab. */
+function PopupLinks({ href, openLabel, directions }) {
+  if (!href && !directions) return null;
+  const link = S(`display:inline-flex;align-items:center;gap:6px;min-height:32px;font:600 14px/1 ${F.body};color:${C.ink}`);
+  return (
+    <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;column-gap:18px;row-gap:4px;padding:4px 14px 8px;border-top:1px solid ${C.line}`)}>
+      {href ? (
+        <Link href={href} className="vu-link-ul" style={link}>
+          {openLabel}
+        </Link>
+      ) : null}
+      {directions ? (
+        <a href={directions} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={link}>
+          Directions
+          <span className="vu-sr">(opens Google Maps in a new tab)</span>
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Popup for a nonprofit's dot: its name, cause and city, a link to its page
+ * on VolunteerU, and directions.
+ */
+export function MapOrgPopup({ x, y, name, cause, address, href, directions, width = 248 }) {
+  return (
+    <div
+      className="vu-mappop"
+      style={S(`position:absolute;left:${x}%;top:${y}%;transform:translate(-50%, calc(-100% - 16px));width:${width}px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:${SH.popup};z-index:2`)}
+    >
+      <div style={S('position:relative;padding:12px 14px 10px')}>
+        <Link href={href} className="vu-card-link" style={S(`display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font:600 15px/20px ${F.body};color:${C.ink}`)}>
+          {name}
+        </Link>
+        <div style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{[cause, 'nonprofit from IRS records'].filter(Boolean).join(', ')}</div>
+        <PlaceLine place={address} />
+      </div>
+      <PopupLinks href={href} openLabel="See nonprofit" directions={directions} />
     </div>
   );
 }
@@ -167,13 +231,13 @@ export function MapPopup({ x, y, href, title, when, date, time, spots, photo, ca
  * @param {number} [props.listMax] max list height in px (it scrolls)
  * @param {(item:object)=>string} [props.hrefFor] default /join/<id>
  */
-export function MapListPopup({ x, y, items = [], photos, place, width = 272, listMax = 260, hrefFor }) {
+export function MapListPopup({ x, y, items = [], photos, place, directions, width = 272, listMax = 260, hrefFor }) {
   return (
     <div
       className="vu-mappop"
       style={S(`position:absolute;left:${x}%;top:${y}%;transform:translate(-50%, calc(-100% - 22px));width:${width}px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:${SH.popup};z-index:4`)}
     >
-      <div style={S(`padding:12px 14px 10px;border-bottom:1px solid ${C.line}`)}>
+      <div style={S(`position:relative;padding:12px 14px 10px;border-bottom:1px solid ${C.line}`)}>
         <div style={S(`font:600 14px/18px ${F.body};color:${C.ink}`)}>{items.length} opportunities here</div>
         {place ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{place}</div> : null}
       </div>
@@ -203,6 +267,7 @@ export function MapListPopup({ x, y, items = [], photos, place, width = 272, lis
           );
         })}
       </ul>
+      <PopupLinks directions={directions} />
     </div>
   );
 }

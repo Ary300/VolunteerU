@@ -6,9 +6,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Avatar, Pressable, EmptyState, Toggle, Field, TextArea, Icon, Button, StatusText, IconButton } from '../ui.jsx';
+import { Avatar, Pressable, EmptyState, Toggle, Field, TextArea, Icon, Button, StatusText, IconButton, Select } from '../ui.jsx';
 import { C, F, R, TONES } from '../../lib/tokens.js';
 import DateBlock from '../vu/DateBlock.jsx';
+import DateTile from '../vu/DateTile.jsx';
+import CoverField from '../CoverField.jsx';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
 import { update } from '../../lib/store.js';
 import { shiftDates, isPastShift } from '../../lib/calendar.js';
@@ -17,16 +19,16 @@ import { ShareLink } from './CrossMembers.jsx';
 import MessageThread from '../MessageThread.jsx';
 import { formatShiftTime } from '../screens/JoinListing.jsx';
 import { supabase } from '../../lib/supabase.js';
-import { loadProjectMembers, confirmMemberHour, publishListing, myId, loadOwnerApplications, setMemberAssignment, postedShiftOnDate } from '../../lib/listings.js';
+import { loadProjectMembers, confirmMemberHour, publishListing, myId, loadOwnerApplications, setMemberAssignment, postedShiftOnDate, confirmedSelfLogOnDate } from '../../lib/listings.js';
 import {
   attendanceFor, attendanceStats, setAttendance, postAttendance,
   decideApplication, reopenApplication,
   pendingHours, cleanHours, approveHours, adjustHours, validateHours,
   recomputeCompliance, resolveDispute, fileIncident, closeIncident, resolveEscalation,
   sendMessage, readThread, toggleProjectSetting, archiveProject, logAudit,
-  updateProject, download, parseSessionDate, getProject, messageTemplateText, ATTEND_TONE, GRADE_TONE, tone,
+  updateProject, download, parseSessionDate, getProject, messageTemplateOptions, ATTEND_TONE, GRADE_TONE, tone,
 } from '../../lib/db.js';
-import { GRADE_SCALE, messageTemplates } from '../../lib/seed.js';
+import { GRADE_SCALE, CAUSES } from '../../lib/seed.js';
 
 const ATTEND_OPTIONS = ['Present', 'Late', 'Absent', 'Excused'];
 
@@ -164,15 +166,18 @@ function sessionTime(p, x) {
  * Write posted attendance hours onto a linked member's application, in the
  * owner-written half (`assignment.attendanceHours`). The lead posted them, so
  * they count as confirmed for the volunteer. Keyed by entry id, so a retry
- * replaces instead of adding twice. Returns { ok, gone }.
+ * replaces instead of adding twice. A member whose own log for that day
+ * the lead already confirmed is skipped, so one shift never counts twice.
+ * Returns { ok, gone, selfLogged }.
  */
 async function creditAttendanceHours(applicationId, entry) {
   if (!supabase) return { ok: false };
   const me = await myId();
   if (!me) return { ok: false };
-  const { data: cur, error: readErr } = await supabase.from('applications').select('assignment').eq('id', applicationId).maybeSingle();
+  const { data: cur, error: readErr } = await supabase.from('applications').select('assignment, member_state').eq('id', applicationId).maybeSingle();
   if (readErr) return { ok: false, error: readErr };
   if (!cur) return { ok: false, gone: true };
+  if (confirmedSelfLogOnDate(cur, entry.date)) return { ok: true, selfLogged: true };
   const a = cur.assignment || {};
   const list = Array.isArray(a.attendanceHours) ? a.attendanceHours.filter((h) => h && h.id !== entry.id) : [];
   const next = { ...a, attendanceHours: [entry, ...list] };
@@ -289,7 +294,7 @@ function reachCopy({ seen, unlinked = [], notMember = [], future }) {
  */
 async function creditPostedAttendance(projectId, onlySessionId) {
   const p = getProject(projectId);
-  const result = { delivered: [], failed: [], unlinked: [], notMember: [] };
+  const result = { delivered: [], failed: [], unlinked: [], notMember: [], selfLogged: [] };
   if (!p) return result;
   const cache = new Map();
   const posted = (p.attendanceSessions || []).filter((x) => x.posted && (!onlySessionId || x.id === onlySessionId));
@@ -328,7 +333,8 @@ async function creditPostedAttendance(projectId, onlySessionId) {
           const m = proj && (proj.attendanceSessions || []).find((x) => x.id === meta.id);
           if (m) m.credited = { ...(m.credited || {}), [appId]: res.ok ? true : 'gone' };
         });
-        if (res.ok) result.delivered.push(r.n);
+        if (res.selfLogged) result.selfLogged.push(r.n);
+        else if (res.ok) result.delivered.push(r.n);
         else result.notMember.push(r.n);
       } else {
         console.error('[lead] could not send posted hours to', r.n, res.error);
@@ -575,7 +581,9 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
       toast({ title: 'Attendance posted', message: 'Nobody had hours to add.', tone: 'ok' });
       return;
     }
-    const sent = reachCopy({ seen: res.delivered.length, unlinked: res.unlinked, notMember: res.notMember, future: false });
+    const sentBase = reachCopy({ seen: res.delivered.length, unlinked: res.unlinked, notMember: res.notMember, future: false });
+    const twice = res.selfLogged.length ? `${nameList(res.selfLogged)} already ${hasHave(res.selfLogged)} confirmed hours for ${meta.d}, so they weren't added again.` : '';
+    const sent = [sentBase, twice].filter(Boolean).join(' ');
     if (res.failed.length) {
       toast({
         title: 'Attendance posted',
@@ -1091,7 +1099,11 @@ export function ApplicationsTab({ p, params, setParam, onCopyLink }) {
           the filter, the row pattern and the actions. */}
       <CrossApplications
         listingId={p.listingId}
-        emptyState={<EmptyState icon="inbox" title="No applications waiting" body="Share your join link. New applications show up here." cta="Copy link" onCta={() => onCopyLink()} />}
+        emptyState={(
+          <EmptyState icon="inbox" title="No applications waiting" body="Share your join link. New applications show up here." cta="Copy link" onCta={() => onCopyLink()}>
+            <a href="/volunteers" className="vu-link-ul" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>Find volunteers</a>
+          </EmptyState>
+        )}
         local={{
           items: all,
           filter,
@@ -1205,13 +1217,13 @@ function hoursCSV(p, members) {
   const roster = (p.people || []).map((x) => {
     const app = x.appId ? byApp.get(x.appId) : null;
     const waiting = (waitingByName[x.n] || 0) + (app ? memberTotals(app).waiting : 0);
-    return [x.n, x.school, x.grade, x.role, x.st, round1(x.hrs), round1(waiting), x.last, (x.tags || []).join(' | '), x.appId ? 'Join link' : 'Added by you'];
+    return [x.n, x.school, x.grade, x.role, x.st, round1(x.hrs), round1(waiting), x.last, (x.tags || []).join(' | '), x.inviteId || x.viaInvite ? 'Invite link' : x.appId ? 'Applied on VolunteerU' : 'Added by you'];
   });
   const onRoster = new Set((p.people || []).map((x) => x.appId).filter(Boolean));
   const offRoster = (members || []).filter((app) => !onRoster.has(app.id)).map((app) => {
     const t = memberTotals(app);
     const role = (app.assignment && app.assignment.role) || app.position || '';
-    return [app.applicant_name || 'Volunteer', '', '', role, 'Member', t.confirmed, t.waiting, t.last, '', 'Join link'];
+    return [app.applicant_name || 'Volunteer', '', '', role, 'Member', t.confirmed, t.waiting, t.last, '', app.assignment && app.assignment.inviteId ? 'Invite link' : 'Applied on VolunteerU'];
   });
   return [head, ...roster, ...offRoster].map((r) => r.map(csvCell).join(',')).join('\n');
 }
@@ -1481,7 +1493,8 @@ export function HoursTab({ p }) {
               aria-label="Print this page"
               onClick={() => {
                 toast({ title: 'Opening print', message: 'Choose "Save as PDF" to keep a copy.', tone: 'brand' });
-                setTimeout(() => window.print(), 400);
+                // Print once the toast has painted; the dialog blocks the page after that.
+                requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
               }}
             >
               Print
@@ -1981,17 +1994,6 @@ export function MessagesTab({ p, params, setParam }) {
     toast({ title: 'Note saved', message: 'Only you see it.', tone: 'ok', timeout: 3200 });
   }
 
-  function templates(e) {
-    menuFromEvent(
-      e,
-      messageTemplates.map((t) => ({ key: t.id, label: t.t, icon: 'edit' })),
-      (key) => {
-        const t = messageTemplates.find((x) => x.id === key);
-        if (t) setDraft(messageTemplateText(p, key));
-      }
-    );
-  }
-
   const volName = (t) => t.app.applicant_name || 'Volunteer';
   // These threads are private notes. Older projects named the first one
   // "Announcements" or "Crew announcements", which read like a post to members.
@@ -2072,7 +2074,7 @@ export function MessagesTab({ p, params, setParam }) {
             </div>
             <div className={stacked ? 'vu-msgfit' : undefined} style={S('padding-top:16px')}>
               {stacked ? <style>{MSG_FIT_CSS}</style> : null}
-              <MessageThread key={volSel.app.id} applicationId={volSel.app.id} recipientId={volSel.app.applicant_id} recipientName={volName(volSel)} />
+              <MessageThread key={volSel.app.id} applicationId={volSel.app.id} recipientId={volSel.app.applicant_id} recipientName={volName(volSel)} templates={messageTemplateOptions(p)} />
             </div>
           </div>
         ) : th ? (
@@ -2081,12 +2083,6 @@ export function MessagesTab({ p, params, setParam }) {
               <div style={S('min-width:0')}>
                 <div className="vu-trunc" style={S(H3)}>{noteName(th)}</div>
                 <div style={S(`margin-top:4px;${SMALL}`)}>Only you see these.</div>
-              </div>
-              <div style={S('flex:none')}>
-                <Button variant="outline" size="sm" aria-label="Insert a message template" aria-haspopup="menu" aria-expanded="false" onClick={templates}>
-                  Templates
-                  <Icon name="chevron-down" size={14} />
-                </Button>
               </div>
             </div>
 
@@ -2148,12 +2144,13 @@ function isPublic(proj) {
   return row ? !!row.on : true;
 }
 
-/** Push the project to its public listing. Hidden or archived ones go paused. */
+/** Push the project to its public listing. A hidden project goes unlisted
+    (off Discover, join link still open); an archived one goes paused. */
 export async function syncListing(projectId) {
   const proj = getProject(projectId);
   if (!proj || !proj.listingId) return true;
   try {
-    await publishListing({ ...proj, archived: proj.archived || !isPublic(proj) });
+    await publishListing({ ...proj, archived: !!proj.archived });
     return true;
   } catch (err) {
     console.error('[lead] listing sync failed', err);
@@ -2176,11 +2173,26 @@ async function clearClosedStamps(listingId) {
   return failed.length;
 }
 
+/** The date of the project's next shift that hasn't ended, for the no-photo tile. */
+function nextShiftDate(p) {
+  const next = (p.sessions || []).find((x) => x && x.d && !isPastShift(x));
+  return next ? next.d : null;
+}
+
 export function SettingsTab({ p }) {
   const rows = (p.settings || []).filter((r) => LIVE_SETTINGS[r.id]);
   // On one column the join link sits under Project settings, so Archive stays last.
   const stacked = useNarrow(1179);
   const joinLink = <ShareLink p={p} tone="soft" />;
+
+  async function saveCover(cover, kind) {
+    updateProject(p.id, { cover });
+    const synced = await syncListing(p.id);
+    const title = kind === 'none' ? 'Photo removed' : 'Cover updated';
+    toast(synced
+      ? { title, message: kind === 'none' ? 'Your listing shows its next date instead.' : 'Discover and your join page show it now.', tone: 'ok' }
+      : { title: 'Saved here only', message: "Your join page didn't update. Try again in a minute.", tone: 'warn' });
+  }
 
   function editDetails() {
     openModal({
@@ -2254,7 +2266,7 @@ export function SettingsTab({ p }) {
     }
     // Hiding pauses the listing, and paused listings can't be opened by anyone
     // else, so the join link stops working too. Say so instead of promising it works.
-    toast({ title: row.on ? 'Showing on Discover' : 'Hidden from Discover', message: row.on ? 'Your join link works again.' : 'Your join link is paused until you turn this back on.', tone: 'ok', timeout: 3200 });
+    toast({ title: row.on ? 'Showing on Discover' : 'Hidden from Discover', message: row.on ? 'Volunteers can find it by searching again.' : 'Off Discover. Your join link still works for people you send it to.', tone: 'ok', timeout: 3200 });
   }
 
   const details = [
@@ -2280,7 +2292,7 @@ export function SettingsTab({ p }) {
                 <div key={r.id} style={S(`padding:16px 0;${RULE};display:flex;align-items:center;justify-content:space-between;gap:16px`)}>
                   <div style={S('min-width:0')}>
                     <div style={S(LABEL)}>{LIVE_SETTINGS[r.id]}</div>
-                    <div style={S(`margin-top:3px;${SMALL}`)}>{r.on ? 'Volunteers can find it by searching and open your join link.' : 'Hidden from Discover, and your join link is paused.'}</div>
+                    <div style={S(`margin-top:3px;${SMALL}`)}>{r.on ? 'Volunteers can find it by searching and open your join link.' : 'Hidden from Discover. Your join link still works for people you send it to.'}</div>
                   </div>
                   <Toggle on={r.on} label={LIVE_SETTINGS[r.id]} onChange={() => toggle(r)} />
                 </div>
@@ -2294,6 +2306,19 @@ export function SettingsTab({ p }) {
             {joinLink}
           </section>
         ) : null}
+
+        <section aria-labelledby="set-cover" style={S(SEC_GAP)}>
+          <h2 id="set-cover" style={S(H2)}>Cover photo</h2>
+          <p style={S(`margin:6px 0 16px;${META};max-width:560px`)}>Shown on your listing in Discover and on your join page.</p>
+          <CoverField
+            id="set-cover-field"
+            label="Current cover"
+            value={p.cover || ''}
+            cause={p.cause}
+            fallback={<DateTile cause={p.cause} date={nextShiftDate(p)} />}
+            onChange={(cover, { kind }) => saveCover(cover, kind)}
+          />
+        </section>
 
         <section aria-labelledby="set-det" style={S(SEC_GAP)}>
           <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
@@ -2345,14 +2370,19 @@ export function SettingsTab({ p }) {
 function DetailsForm({ api, project }) {
   // Same rule as /create: a remote project doesn't need a place.
   const remote = project.delivery === 'remote';
-  const [f, setF] = useState({ name: project.name || '', site: project.site || '', mission: project.mission || '', bio: project.bio || '' });
+  const [f, setF] = useState({ name: project.name || '', site: project.site || '', cause: project.cause || '', mission: project.mission || '', bio: project.bio || '' });
+  // The cause picked at create (or a template's) can be fixed here later.
+  const causeOptions = [...new Set([...(f.cause ? [f.cause] : []), ...CAUSES])].map((c) => ({ v: c, l: c }));
   const [err, setErr] = useState({});
   const [busy, setBusy] = useState(false);
   return (
     <div>
       <Field label="Project name" value={f.name} onChange={(v) => setF((x) => ({ ...x, name: v }))} maxLength={60} required error={err.name} />
       <div style={S('margin-top:16px')}>
-        <Field label="Where it happens" value={f.site} onChange={(v) => setF((x) => ({ ...x, site: v }))} maxLength={90} required={!remote} error={err.site} placeholder={remote ? 'Optional for a remote project' : 'e.g. Carmel Clay Public Library'} />
+        <Field label="Where it happens" value={f.site} onChange={(v) => setF((x) => ({ ...x, site: v }))} maxLength={90} required={!remote} error={err.site} placeholder={remote ? 'Optional for a remote project' : 'e.g. Central Library, Indianapolis'} />
+      </div>
+      <div style={S('margin-top:16px')}>
+        <Select label="Cause area" value={f.cause} onChange={(v) => setF((x) => ({ ...x, cause: v }))} options={causeOptions} />
       </div>
       <div style={S('margin-top:16px')}>
         <TextArea id="pd-mission" label="What volunteers do" value={f.mission} maxLength={240} minHeight={84} onChange={(v) => setF((x) => ({ ...x, mission: v }))} />
@@ -2375,7 +2405,7 @@ function DetailsForm({ api, project }) {
             setErr(e);
             if (Object.keys(e).length) return;
             setBusy(true);
-            updateProject(project.id, { name: f.name.trim(), site: f.site.trim(), siteShort: f.site.trim(), mission: f.mission.trim(), bio: f.bio.trim() });
+            updateProject(project.id, { name: f.name.trim(), site: f.site.trim(), siteShort: f.site.trim(), ...(f.cause ? { cause: f.cause } : {}), mission: f.mission.trim(), bio: f.bio.trim() });
             const synced = await syncListing(project.id);
             setBusy(false);
             api.close();

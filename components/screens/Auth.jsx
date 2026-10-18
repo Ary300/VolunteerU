@@ -8,7 +8,7 @@
    photo becomes a short band under the logo so the form still starts high.
    ========================================================================== */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s } from '../../lib/style.js';
@@ -16,7 +16,7 @@ import { C, F, R } from '../../lib/tokens.js';
 import { PHOTOS } from '../../lib/photos.js';
 import { Field, Button, LinkButton, Checkbox, Icon } from '../ui.jsx';
 import { Wordmark } from '../Logo.jsx';
-import { toast } from '../../lib/overlays.js';
+import { toast, dismissToast } from '../../lib/overlays.js';
 import { useSnapshot, getState } from '../../lib/store.js';
 import { supabase } from '../../lib/supabase.js';
 import { EMAIL_RX, passwordStrength, signIn, signUp, perform } from '../../lib/db.js';
@@ -173,12 +173,23 @@ function describeForgotFailure(err, email) {
   return { title: "Couldn't send the reset link", body: 'Something went wrong on our end. Try again in a few minutes.' };
 }
 
+/** `?email=…&next=…` with whichever of the two is set, or '' when neither is. */
+function authQuery(email, next) {
+  const q = new URLSearchParams();
+  if (email) q.set('email', email);
+  if (next) q.set('next', next);
+  const out = q.toString();
+  return out ? `?${out}` : '';
+}
+
 /** Map a failed auth call to a plain message. Raw server text only goes to the console. */
-function describeFailure(mode, err, email) {
+function describeFailure(mode, err, email, next) {
   const raw = String((err && err.message) || '');
   if (raw) console.warn(`[auth.${mode}]`, (err && err.authCode) || '', raw);
-  const forgotHref = `/forgot${email ? `?email=${encodeURIComponent(email)}` : ''}`;
-  const signinHref = `/signin${email ? `?email=${encodeURIComponent(email)}` : ''}`;
+  // Both links keep `next`, so a student who came from a listing still ends up back on it.
+  const query = authQuery(email, next);
+  const forgotHref = `/forgot${query}`;
+  const signinHref = `/signin${query}`;
 
   if (err && err.code === 'OFFLINE') return { title: "You're offline", body: 'Check your connection and try again.' };
   if (mode === 'forgot') return describeForgotFailure(err, email);
@@ -201,6 +212,7 @@ function describeFailure(mode, err, email) {
       title: `There's already an account for ${email}`,
       body: 'Sign in with it, or reset the password if you forgot it.',
       action: { href: signinHref, label: 'Sign in' },
+      action2: { href: forgotHref, label: 'Reset your password' },
     };
   }
   if (/email not confirmed|confirm your account/i.test(raw)) {
@@ -285,6 +297,14 @@ function Failure({ failure }) {
               </Link>
             </>
           ) : null}
+          {failure.action2 ? (
+            <>
+              {' or '}
+              <Link href={failure.action2.href} className="vu-link-ul">
+                {failure.action2.label.charAt(0).toLowerCase() + failure.action2.label.slice(1)}
+              </Link>
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -328,6 +348,7 @@ export default function Auth({ mode = 'signin' }) {
   const [errors, setErrors] = useState({});
   const [failure, setFailure] = useState(null);
   const [busy, setBusy] = useState(false);
+  const checkToast = useRef(null); // the "Check the highlighted fields" toast on screen
   const [sent, setSent] = useState(false);
   const [photoOk, setPhotoOk] = useState(true);
   const [focusField, setFocusField] = useState(null);
@@ -350,7 +371,7 @@ export default function Auth({ mode = 'signin' }) {
   const strength = passwordStrength(form.password);
   const newPassword = mode === 'signup' || mode === 'reset';
   const typedEmail = form.email.trim();
-  const emailQuery = typedEmail ? `?email=${encodeURIComponent(typedEmail)}` : '';
+  const emailQuery = authQuery(typedEmail, nextParam);
 
   function validate() {
     const e = {};
@@ -374,9 +395,12 @@ export default function Auth({ mode = 'signin' }) {
     }
     setErrors(e);
     const flagged = FIELD_ORDER.filter((k) => e[k]);
+    // One summary at a time, worded for what's flagged now.
+    if (checkToast.current) dismissToast(checkToast.current);
+    checkToast.current = null;
     if (flagged.length) {
       setFocusField({ key: flagged[0] });
-      toast({ title: flagged.length === 1 ? 'Check the highlighted field' : 'Check the highlighted fields', tone: 'warn' });
+      checkToast.current = toast({ title: flagged.length === 1 ? 'Check the highlighted field' : 'Check the highlighted fields', tone: 'warn' });
     }
     return !flagged.length;
   }
@@ -405,10 +429,12 @@ export default function Auth({ mode = 'signin' }) {
       } else {
         rememberEmail(typedEmail);
         toast({ title: 'Account created', tone: 'ok' });
-        router.replace(`/onboarding${nextQuery}`);
+        // A lead's invite link joins the project first; setup can wait until
+        // the student opens the app.
+        router.replace(/^\/invite\/[0-9a-f]{64}$/.test(nextParam) ? nextParam : `/onboarding${nextQuery}`);
       }
     } catch (err) {
-      if (!err || err.code !== 'DUPLICATE') setFailure(describeFailure(mode, err, typedEmail));
+      if (!err || err.code !== 'DUPLICATE') setFailure(describeFailure(mode, err, typedEmail, nextParam));
     } finally {
       setBusy(false);
     }

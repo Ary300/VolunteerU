@@ -21,13 +21,14 @@ import { Field, Select, Chip, TextArea, Button, RadioDot, countWords } from '../
 import { Wordmark } from '../Logo.jsx';
 import { causeLabel } from '../LogHoursForm.jsx';
 import { useSnapshot, update, getState } from '../../lib/store.js';
-import { toast, dismissToast } from '../../lib/overlays.js';
+import { toast, dismissToast, clearToasts } from '../../lib/overlays.js';
 import { CAUSES, WINDOWS } from '../../lib/seed.js';
 import { PHOTOS } from '../../lib/photos.js';
 import { createProject, perform, signOut, addDays, formatSessionDate } from '../../lib/db.js';
 import { track } from '../../lib/analytics.js';
 import { defaultDraft, generatedSessions } from '../../lib/createDraft.js';
 import { sameSitePath } from '../../lib/safePath.js';
+import { markOnboardingFinished } from '../../lib/onboardingFlag.js';
 
 const MISSION_MAX = 240;
 const INTEREST_MIN_CHARS = 8;
@@ -69,6 +70,13 @@ const HINT = `margin:8px 0 0;font:400 13px/1.45 ${F.body};color:${C.ink2}`;
 function safeNext(raw) {
   const p = sameSitePath(raw);
   return p && !NEXT_BLOCKLIST.test(p) ? p : '';
+}
+
+/** The join form's last button names where it goes: the listing the student
+    came from, another page they were on, or Discover. */
+function finishLabel(nextPath) {
+  if (!nextPath) return 'Show opportunities';
+  return nextPath.startsWith('/join/') ? 'Back to the opportunity' : 'Save and continue';
 }
 
 /** "Sat, Oct 24" for the first Saturday after today, so new projects never start in the past. */
@@ -375,18 +383,32 @@ export default function Onboarding() {
     clearWarn();
     setBusy(true);
     try {
+      // Back from the new project lands here again; an account that already
+      // finished never creates a second project from this form.
+      const alreadyDone = Boolean(getState().onboarding && getState().onboarding.completed);
+      markOnboardingFinished();
       await perform('onboarding.finish', () => update(saveAnswers));
+      if (isStart && alreadyDone) {
+        router.replace('/lead');
+        return;
+      }
       const project = isStart ? await createProject(projectDraft()) : null;
       track('onboarding_completed', { intent, causes: isStart ? [start.cause] : join.causes, has_location: isStart ? !!start.site.trim() : !!join.location.trim() });
+      // The result toast below replaces anything still up from sign-up.
+      clearToasts();
       if (isStart) {
         const listed = !!(project && getState().projects.find((p) => p.id === project.id && p.listingId));
         toast({ title: 'Project created', message: listed ? "It's listed on Discover now." : "It's saved, but not listed on Discover yet.", tone: listed ? 'ok' : 'warn' });
         router.replace(project ? `/lead/${project.id}/overview` : '/lead');
       } else {
-        toast(nextPath
-          ? { title: 'Preferences saved', tone: 'ok' }
-          : { title: 'Preferences saved', message: `Showing opportunities near ${join.location.trim()}.`, tone: 'ok' });
-        router.replace(nextPath || '/discover');
+        // Coming back to a listing, the listing itself is the next step, so no toast.
+        if (!nextPath) toast({ title: 'Preferences saved', message: `Showing opportunities near ${join.location.trim()}.`, tone: 'ok' });
+        // Show my matches carries the answers just given. Later visits to
+        // Discover seed causes only, never free time (see Discover.jsx).
+        const qs = new URLSearchParams();
+        if (join.causes && join.causes.length) qs.set('causes', join.causes.join('|'));
+        if (join.windows && join.windows.length) qs.set('windows', join.windows.join('|'));
+        router.replace(nextPath || (qs.toString() ? `/discover?${qs.toString()}` : '/discover'));
       }
       // Leave busy on: the page is navigating away.
     } catch (err) {
@@ -404,6 +426,7 @@ export default function Onboarding() {
   // so the start path says plainly that nothing was made.
   function skip() {
     clearWarn();
+    markOnboardingFinished();
     let keptPrefs = false;
     update((st) => {
       const name = identity.firstName.trim();
@@ -416,7 +439,13 @@ export default function Onboarding() {
       st.onboarding.intent = intent;
       if (!isStart) keptPrefs = saveJoinPrefs(st, { partial: true });
     });
-    if (isStart) {
+    // Back to a listing (a signed-out Apply sent them here), the page they
+    // came for is the answer; a note about Settings would only sit on top of
+    // the apply toast that comes next.
+    clearToasts();
+    if (nextPath) {
+      /* no toast */
+    } else if (isStart) {
       toast({ title: 'Skipped for now', message: "Your project wasn't created. Start it any time from Lead a project.", actionLabel: 'Start project', onAction: () => router.push('/create') });
     } else {
       toast({
@@ -464,7 +493,7 @@ export default function Onboarding() {
             ) : isStart ? (
               <StartForm start={start} setStart={setStart} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} />
             ) : (
-              <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} />
+              <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} finishLabel={finishLabel(nextPath)} />
             )}
           </div>
         </div>
@@ -629,7 +658,7 @@ function StartForm({ start, setStart, errors, busy, onFinish, onBack, onSkip }) 
         <div className="vu-ob-sec vu-ob-pair">
           <Field label="Project name" value={start.name} onChange={set('name')} placeholder="e.g. Northside Reading Circle" maxLength={60} required error={errors.name} />
           <Select label="Cause" value={start.cause} onChange={set('cause')} options={CAUSE_OPTION_ITEMS} />
-          <Field label="Where it happens" value={start.site} onChange={set('site')} placeholder="e.g. Carmel Clay Public Library" maxLength={80} required error={errors.site} />
+          <Field label="Where it happens" value={start.site} onChange={set('site')} placeholder="e.g. Central Library, Indianapolis" maxLength={80} required error={errors.site} />
           <Select label="People you need" value={start.crew} onChange={set('crew')} options={CREW_OPTIONS} />
         </div>
         <div className="vu-ob-sec">
@@ -666,14 +695,14 @@ function StartForm({ start, setStart, errors, busy, onFinish, onBack, onSkip }) 
   );
 }
 
-function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip }) {
+function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip, finishLabel: label }) {
   const set = (k) => (v) => setJoin((f) => ({ ...f, [k]: v }));
   return (
     <div className="vu-screen">
       <Heading sub="We use this to sort Discover. Change it any time in Settings.">What are you looking for?</Heading>
       <div style={S('margin-top:28px')}>
         <div className="vu-ob-sec">
-          <Field label="Where are you?" value={join.location} onChange={set('location')} placeholder="City or town, e.g. Carmel" autoComplete="address-level2" maxLength={60} required error={errors.location} />
+          <Field label="Where are you?" value={join.location} onChange={set('location')} placeholder="City or town, e.g. Indianapolis" autoComplete="address-level2" maxLength={60} required error={errors.location} />
         </div>
         <div className="vu-ob-sec">
           <TextArea
@@ -724,7 +753,7 @@ function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip }) {
           <PillChoice id="ob-vol" label="Have you volunteered before?" options={VOLUNTEERED} value={join.volunteered} onChange={set('volunteered')} />
         </div>
       </div>
-      <FinishRow label="Show opportunities" busyLabel="Saving" busy={busy} onFinish={onFinish} onBack={onBack} onSkip={onSkip} />
+      <FinishRow label={label} busyLabel="Saving" busy={busy} onFinish={onFinish} onBack={onBack} onSkip={onSkip} />
     </div>
   );
 }

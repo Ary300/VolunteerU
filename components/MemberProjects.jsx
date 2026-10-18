@@ -219,9 +219,15 @@ export default function MemberProjects({ hoursInRail = false } = {}) {
     setBusy(true);
     const cur = (app.member_state && app.member_state.pipeline) || {};
     const nextPipeline = { ...cur, [stepId]: !cur[stepId] };
+    // Optimistic: the step flips on the click; a failed save puts it back.
+    const before = app.member_state || {};
+    patchLocal(app.id, { ...before, pipeline: nextPipeline });
     const { ok, member_state } = await updateMemberState(app.id, { pipeline: nextPipeline });
     if (ok) patchLocal(app.id, member_state);
-    else toast({ title: "Couldn't save that step", message: 'Check your connection and try again.', tone: 'danger' });
+    else {
+      patchLocal(app.id, before);
+      toast({ title: "Couldn't save that step", message: 'It\'s back the way it was. Check your connection and try again.', tone: 'danger' });
+    }
     setBusy(false);
   }
 
@@ -240,9 +246,15 @@ export default function MemberProjects({ hoursInRail = false } = {}) {
     setBusy(true);
     const cur = (app.member_state && app.member_state.tasks) || {};
     const next = cur[taskId] === 'done' ? 'todo' : 'done';
+    // Optimistic: the check flips on the click; a failed save puts it back.
+    const before = app.member_state || {};
+    patchLocal(app.id, { ...before, tasks: { ...cur, [taskId]: next } });
     const { ok, member_state } = await setMyTaskStatus(app.id, taskId, next);
     if (ok) { patchLocal(app.id, member_state); toast({ title: next === 'done' ? 'Marked done' : 'Marked not done', tone: 'ok', timeout: 1600 }); }
-    else toast({ title: "Couldn't save that", message: 'Check your connection and try again.', tone: 'danger' });
+    else {
+      patchLocal(app.id, before);
+      toast({ title: "Couldn't save that", message: 'The task is back the way it was. Check your connection and try again.', tone: 'danger' });
+    }
     setBusy(false);
   }
 

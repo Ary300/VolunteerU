@@ -1,0 +1,44 @@
+# Photo credits
+
+The cover photos in covers/ (and the thumbnails in covers/sm/) come from Pexels under the Pexels license. They are free to use and attribution is not required.
+
+- covers/food-1.jpg, Thư Tiêu, https://www.pexels.com/photo/group-of-women-cooking-together-in-a-kitchen-33368317/
+- covers/food-2.jpg, Su Casa Panamá, https://www.pexels.com/photo/distribution-of-precooked-meals-10579215/
+- covers/food-3.jpg, tainah ferreira, https://www.pexels.com/photo/preparing-onions-in-a-rustic-kitchen-setting-33576787/
+- covers/food-4.jpg, Md. Mahbubur Rahman, https://www.pexels.com/photo/community-meal-preparation-in-keraniganj-bangladesh-35307939/
+- covers/education-1.jpg, Andrea Piacquadio, https://www.pexels.com/photo/elder-sister-and-brother-studying-at-home-3769981/
+- covers/education-2.jpg, Mikhail Nilov, https://www.pexels.com/photo/boy-in-a-sweater-reading-8342284/
+- covers/education-3.jpg, Zen Chung, https://www.pexels.com/photo/multiethnic-female-students-preparing-for-exam-in-park-5538355/
+- covers/education-4.jpg, Ron Lach, https://www.pexels.com/photo/group-of-students-reading-a-book-10638213/
+- covers/environment-1.jpg, Ron Lach, https://www.pexels.com/photo/photo-of-boys-collecting-plastic-trash-on-a-seashore-9034660/
+- covers/environment-2.jpg, Thirdman, https://www.pexels.com/photo/man-and-woman-planting-on-grassfield-7656717/
+- covers/environment-3.jpg, Vitaly Gariev, https://www.pexels.com/photo/volunteer-group-cleaning-up-forest-litter-outdoors-36713475/
+- covers/environment-4.jpg, Justyn Abacajan, https://www.pexels.com/photo/joyful-gardening-in-cebu-city-philippines-33352121/
+- covers/animals-1.jpg, Dominik Gryzbon, https://www.pexels.com/photo/adorable-rescue-kittens-at-veterinary-clinic-30577796/
+- covers/animals-2.jpg, Bùi Hoàng Long, https://www.pexels.com/photo/man-crouching-and-patting-cat-20102427/
+- covers/animals-3.jpg, Mia X, https://www.pexels.com/photo/volunteer-feeding-stray-dogs-at-shelter-sanctuary-35231855/
+- covers/animals-4.jpg, Blue Bird, https://www.pexels.com/photo/woman-walking-dogs-7210536/
+- covers/homelessness-1.jpg, Timur Weber, https://www.pexels.com/photo/woman-giving-food-on-homeless-man-9532260/
+- covers/homelessness-2.jpg, Mel Navala, https://www.pexels.com/photo/two-women-organizing-clothes-in-storage-room-40091038/
+- covers/homelessness-3.jpg, levan simonshvili, https://www.pexels.com/photo/colorful-winter-coats-hanging-on-metal-fence-36198667/
+- covers/homelessness-4.jpg, Sergei Starostin, https://www.pexels.com/photo/person-serving-hot-soup-outdoors-with-ladle-29321559/
+- covers/seniors-1.jpg, cottonbro studio, https://www.pexels.com/photo/grandmother-and-a-teenager-having-tea-together-5585289/
+- covers/seniors-2.jpg, Kampus Production, https://www.pexels.com/photo/a-man-in-white-shirt-talking-to-the-man-in-blue-sweater-while-reading-a-book-7551606/
+- covers/seniors-3.jpg, Andrea Piacquadio, https://www.pexels.com/photo/young-positive-lady-showing-photos-on-smartphone-to-senior-man-while-sitting-at-laptop-3823542/
+- covers/seniors-4.jpg, Cristian Rojas, https://www.pexels.com/photo/grandma-and-grandson-preparing-pancakes-8064907/
+- covers/health-1.jpg, Tahir Xəlfəquliyev, https://www.pexels.com/photo/healthcare-professional-checking-blood-pressure-outdoors-33034061/
+- covers/health-2.jpg, Arnu, https://www.pexels.com/photo/healthcare-worker-performing-blood-test-40040504/
+- covers/health-3.jpg, Gustavo Fring, https://www.pexels.com/photo/a-man-monitoring-the-blood-pressure-of-an-elderly-woman-using-sphygmomanometer-7446759/
+- covers/health-4.jpg, Tahir Xəlfəquliyev, https://www.pexels.com/photo/two-women-practicing-cpr-on-mannequins-indoors-33317471/
+- covers/arts-1.jpg, Kathleen Trigg, https://www.pexels.com/photo/artist-painting-colorful-vegetable-mural-outdoors-36774842/
+- covers/arts-2.jpg, Pavel Danilyuk, https://www.pexels.com/photo/students-painting-together-8382313/
+- covers/arts-3.jpg, Yan Krukau, https://www.pexels.com/photo/teacher-teaching-a-boy-to-play-a-stringed-instrument-8190785/
+- covers/arts-4.jpg, Nowrin Sanjana, https://www.pexels.com/photo/young-woman-painting-colorful-street-art-mural-37046927/
+- covers/civic-1.jpg, Caleb Oquendo, https://www.pexels.com/photo/group-discussion-in-cozy-living-room-gathering-34519967/
+- covers/civic-2.jpg, Speak Media Uganda, https://www.pexels.com/photo/a-group-of-people-sitting-around-a-tree-27471164/
+- covers/civic-3.jpg, Mehmet Turgut Kirkgoz, https://www.pexels.com/photo/woman-working-in-library-11599620/
+- covers/civic-4.jpg, Gonzalo Angueira, https://www.pexels.com/photo/volunteers-cleaning-up-a-rural-playground-35926011/
+- covers/general-1.jpg, Jonathan Borba, https://www.pexels.com/photo/people-working-in-poly-tunnel-15682913/
+- covers/general-2.jpg, Helena Jankovičová Kováčová, https://www.pexels.com/photo/emergency-workers-preparing-sandbags-for-flood-control-28447797/
+- covers/general-3.jpg, Franklin Peña Gutierrez, https://www.pexels.com/photo/a-man-carrying-a-roof-14000747/
+- covers/general-4.jpg, Raúl Torres, https://www.pexels.com/photo/community-effort-in-outdoor-furniture-disposal-33222182/

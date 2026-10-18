@@ -18,18 +18,21 @@ import Link from 'next/link';
 import { S, cx, H } from '../../lib/style.js';
 import { C, F, R, causeOf, causeKey } from '../../lib/tokens.js';
 import { Button, Icon, StatusPill, StatusText, ErrorState } from '../ui.jsx';
-import { Wordmark } from '../Logo.jsx';
 import { MarketingHeader, MarketingFooter } from '../Marketing.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import DateBlock, { dateParts } from '../vu/DateBlock.jsx';
 import { fmtRange } from '../../lib/format.js';
 import { photoFor } from '../../lib/photos.js';
-import { toast, confirmDialog } from '../../lib/overlays.js';
-import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp, memberHourEntries } from '../../lib/listings.js';
+import { toast, confirmDialog, openModal } from '../../lib/overlays.js';
+import { toggleSaved, copyText } from '../../lib/db.js';
+import MessageThread from '../MessageThread.jsx';
+import AppShell from '../AppShell.jsx';
+import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp, memberHourEntries, loadShiftSpots } from '../../lib/listings.js';
 import { safeUrl } from '../MemberProjects.jsx';
-import { isPastShift, parseTimeRange } from '../../lib/calendar.js';
+import { isPastShift, parseTimeRange, googleCalUrl, icsEvent } from '../../lib/calendar.js';
 import { isArchivedApplication } from '../VolunteerApplications.jsx';
 import { whenLabel } from '../AnnouncementBoard.jsx';
+import { AddressMap } from '../MapPanel.jsx';
 
 /* The verified check sits after the organization's name; the explanation is its hover
    title and screen-reader text. Shared with Detail and Apply. */
@@ -179,6 +182,55 @@ function useSubmitInView(panelRef, barHeight = 80) {
 /* Listing ids are UUIDs. Anything else on /join is a typo or an old link. */
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/* The shift a visitor tapped before signing in. It arrives as ?shift= and is
+   kept in this tab's sessionStorage until it's used, so a refresh before
+   applying doesn't drop it. */
+const shiftKey = (listingId) => `vu.join.shift.${listingId}`;
+
+function readSavedShift(listingId) {
+  try {
+    return window.sessionStorage.getItem(shiftKey(listingId)) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Saves the picked shift for this listing, or forgets it when `shiftId` is ''. */
+function saveShift(listingId, shiftId) {
+  try {
+    if (shiftId) window.sessionStorage.setItem(shiftKey(listingId), shiftId);
+    else window.sessionStorage.removeItem(shiftKey(listingId));
+  } catch {
+    // Storage blocked (private mode): the pick just won't survive a refresh.
+  }
+}
+
+/* That shift, while it's still one of this listing's upcoming shifts. */
+function returnedShift(listing) {
+  if (typeof window === 'undefined' || !listing) return '';
+  const want = new URLSearchParams(window.location.search).get('shift') || readSavedShift(listing.id);
+  return want && listingShifts(listing).some((x) => x.id === want) ? want : '';
+}
+
+/* A Google Calendar link for one shift the volunteer signed up for. */
+function calendarEvent(listing) {
+  const remote = listing.delivery === 'remote';
+  return {
+    title: listing.name,
+    org: splitOrgSite(listing).org,
+    address: remote ? '' : String(listing.site || listing.location || ''),
+    description: listing.mission || '',
+  };
+}
+function calendarLink(listing, sh) {
+  return googleCalUrl(calendarEvent(listing), sh);
+}
+/* The shift as a downloadable .ics, for Apple Calendar and Outlook. */
+function icsLink(listing, sh) {
+  const text = icsEvent(calendarEvent(listing), sh);
+  return text ? `data:text/calendar;charset=utf-8,${encodeURIComponent(text)}` : null;
+}
+
 /**
  * @param {{ id: string, outdated?: boolean, preview?: object | null }} props
  *   preview: the public fields app/join/[id]/page.js read on the server. It
@@ -188,7 +240,16 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export default function JoinListing({ id, outdated = false, preview = null }) {
   const router = useRouter();
   const stale = outdated && !UUID_RX.test(String(id || ''));
-  const [listing, setListing] = useState(undefined); // undefined=loading, null=missing
+  const [loaded, setListing] = useState(undefined); // undefined=loading, null=missing
+  // Signed out (as far as this browser's stored session says), nothing on
+  // the page waits on the visitor's applications, so it draws the whole
+  // listing from the server's copy at once and the browser's own read just
+  // refreshes it. Signed in, PreviewShell holds the panel until that read
+  // says whether they already applied.
+  const { state: snap } = useSnapshot();
+  const storedAuthed = !!(snap && snap.session && snap.session.authed);
+  const draft = loaded === undefined && !stale && preview && preview.full && !storedAuthed ? preview : undefined;
+  const listing = draft || loaded;
   const [me, setMe] = useState(undefined);
   const [app, setApp] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -196,10 +257,19 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
   const [note, setNote] = useState('');
   const [posError, setPosError] = useState('');
   const [shiftPick, setShiftPick] = useState('');
+  // The shift they came back to sign up for while their application is
+  // withdrawn, waitlisted or declined. The status panel names it.
+  const [blockedShift, setBlockedShift] = useState(null);
+  const [cameBack, setCameBack] = useState(false); // back from sign-in with a shift picked
+  // Back from sign-in with a shift picked, but they had already applied: the
+  // row's sign-up runs once the panel has loaded.
+  const [returned, setReturned] = useState('');
   const [shiftBusy, setShiftBusy] = useState(''); // id of the shift being saved
   // The member's application when the organizer archived this project: RLS
   // hides the listing from them, so the read above comes back empty.
   const [archivedApp, setArchivedApp] = useState(null);
+  // A pending or waitlisted application to a listing the organizer has since paused or closed.
+  const [closedApp, setClosedApp] = useState(null);
   // The applications read failed, so this page can't tell whether the
   // student already applied. The panel says so instead of offering the form.
   const [appsError, setAppsError] = useState(false);
@@ -208,6 +278,10 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
   // so the page offers a retry instead of "This link isn't active".
   const [loadError, setLoadError] = useState(false);
   const [loadNonce, setLoadNonce] = useState(0);
+  // Spots per shift ({ [id]: { cap, taken, left, full } }), or null when unknown.
+  const [spots, setSpots] = useState(null);
+  // Bumped after Apply, Withdraw and Apply again, so focus lands on the new status.
+  const [focusTick, setFocusTick] = useState(0);
   const panelRef = useRef(null);
   const stickyTop = useStickyTop(panelRef);
   const submitInView = useSubmitInView(panelRef);
@@ -220,7 +294,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
       // status) instead of showing the form and then swapping it out.
       // loadMyApplications returns [] when signed out.
       let failed = false;
-      const [l, uid, mine] = await Promise.all([
+      const [l, uid, mine, sp] = await Promise.all([
         getListing(id).catch((err) => {
           console.error('[join] could not load the listing', err);
           return 'error';
@@ -231,8 +305,10 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
           failed = true;
           return [];
         }),
+        UUID_RX.test(String(id || '')) ? loadShiftSpots(id) : null,
       ]);
       if (!alive) return;
+      setSpots(sp);
       if (l === 'error') {
         setLoadError(true);
         setMe(uid || null);
@@ -244,15 +320,90 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
       // archived. Check before showing "This link isn't active".
       if (uid && !l && UUID_RX.test(String(id || ''))) {
         setArchivedApp(mine.find((a) => a.listing_id === id && isArchivedApplication(a)) || null);
+        setClosedApp(mine.find((a) => a.listing_id === id && ['pending', 'waitlisted'].includes(a.status)) || null);
       }
       const found = uid && l ? mine.find((a) => a.listing_id === l.id) : null;
       if (found) setApp(found);
+      // Back from sign-in with the shift they chose signed out. Without an
+      // application it's picked in the apply form, so one tap applies and
+      // signs them up. With one, the row's sign-up runs for them.
+      const want = uid && l && !failed && l.owner_id !== uid ? returnedShift(l) : '';
+      if (want && !found) {
+        saveShift(l.id, want);
+        setShiftPick(want);
+        setCameBack(true);
+      } else if (want) {
+        setReturned(want);
+      }
+      if (typeof window !== 'undefined' && /[?&]shift=/.test(window.location.search)) {
+        window.history.replaceState(window.history.state, '', window.location.pathname);
+      }
       setAppsError(!!uid && failed);
       setListing(l);
       setMe(uid || null);
     })();
     return () => { alive = false; };
   }, [id, loadNonce]);
+
+  // Coming back with a shift picked: bring the Apply button into view.
+  useEffect(() => {
+    if (!cameBack || !listing) return;
+    setCameBack(false);
+    const el = panelRef.current ? panelRef.current.querySelector('[data-apply-submit]') : null;
+    if (el) el.scrollIntoView({ block: 'center' });
+  }, [cameBack, listing]);
+
+  // Already applied when they came back with a shift: sign them up for it, or
+  // say why that can't happen yet. Runs once per return.
+  useEffect(() => {
+    if (!returned || !listing || !app || !me) return;
+    setReturned('');
+    saveShift(listing.id, '');
+    const sh = listingShifts(listing).find((x) => x.id === returned);
+    if (!sh) return;
+    if (!app.id || !SIGNUP_STATUSES.includes(app.status)) {
+      setBlockedShift(sh);
+      return;
+    }
+    if (myShiftSignUps(app).some((x) => x.id === sh.id && !x.past)) {
+      toast({ title: 'Already signed up', message: `${listing.name} · ${shiftLabel(sh)}`, tone: 'ok' });
+      scrollToShift(sh.id);
+      return;
+    }
+    signUpShift(sh).then((ok) => { if (ok) scrollToShift(sh.id); });
+    // signUpShift reads this render's app and listing, which the deps cover.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returned, listing, app, me]);
+
+  // A link to #vu-join-apply (See shifts on Home and My crew) lands before
+  // the panel exists, so the jump runs again once the listing is drawn.
+  useEffect(() => {
+    if (!listing || typeof window === 'undefined' || !window.location.hash) return;
+    const el = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    if (el) el.scrollIntoView({ block: 'start' });
+  }, [listing]);
+
+  // Apply, Withdraw and Apply again swap the panel, which drops the focused
+  // button. Focus moves to the new status so keyboard and screen-reader users
+  // keep their place.
+  useEffect(() => {
+    if (!focusTick || !panelRef.current) return;
+    const el = panelRef.current.querySelector('[data-status-focus]');
+    if (el) el.focus({ preventScroll: false });
+  }, [focusTick]);
+
+  /** Reads the spots left on each shift again. */
+  async function refreshSpots() {
+    if (!listing) return;
+    const sp = await loadShiftSpots(listing.id);
+    if (sp) setSpots(sp);
+  }
+
+  /** Scrolls the panel's row for one shift into view. */
+  function scrollToShift(shiftId) {
+    const el = typeof document === 'undefined' ? null : document.querySelector(`[data-shift-id="${CSS.escape(shiftId)}"]`);
+    if (el) el.scrollIntoView({ block: 'center' });
+  }
 
   /** Reads the student's applications again after a failed load. */
   async function retryApps() {
@@ -298,6 +449,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     setBusy(true);
     try {
       await applyToListing(listing, { position: chosen || undefined, note: note.trim() });
+      saveShift(listing.id, '');
       const found = await refreshApp({ id: null, status: 'pending', position: chosen });
       if (pick) {
         const res = found && found.id ? await signUpForShift(found.id, pick.id) : null;
@@ -305,6 +457,9 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
           setApp({ ...found, member_state: res.member_state });
           setShiftPick('');
           toast({ title: 'Applied and signed up', message: `${listing.name} has your application. You're signed up for ${shiftPhrase(pick)}.`, tone: 'ok' });
+        } else if (res && res.error && res.error.code === 'FULL') {
+          setShiftPick('');
+          toast({ title: 'Applied, that shift is full', message: `${listing.name} has your application. Choose another shift from the list.`, tone: 'warn' });
         } else {
           if (res) console.error('[join] shift sign-up after applying failed', res.error);
           toast({ title: 'Applied, shift not saved', message: 'Sign up for the shift from the list of shifts.', tone: 'warn' });
@@ -312,6 +467,8 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
       } else {
         toast({ title: 'Applied', message: `${listing.name} will see your application.`, tone: 'ok' });
       }
+      refreshSpots();
+      setFocusTick((n) => n + 1);
     } catch (e) {
       if (e && e.code === 'DUPLICATE') {
         // Applied from another tab or device. Show where that application
@@ -346,8 +503,10 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     setBusy(true);
     const { ok: saved, error } = await setApplicationStatus(app.id, 'withdrawn');
     if (saved) {
-      await refreshApp({ ...app, status: 'withdrawn' });
+      await refreshApp({ ...app, status: 'withdrawn', member_state: { ...(app.member_state || {}), shifts: myShiftSignUps(app).filter((x) => x.past) } });
       toast({ title: 'Application withdrawn', tone: 'ok' });
+      refreshSpots();
+      setFocusTick((n) => n + 1);
     } else {
       console.error('[join] withdraw failed', error);
       toast({ title: "Couldn't withdraw", message: 'Check your connection and try again.', tone: 'danger' });
@@ -366,20 +525,28 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     }
   }
 
-  async function signUpShift(sh) {
-    if (shiftBusy || !app || !app.id) return;
+  /** Signs the applicant up for one shift. Resolves true when it saved. */
+  async function signUpShift(sh, forApp = app) {
+    // Signed out: the button says "Sign up", so it opens account creation.
+    // That page links to sign-in for a returning student, and both come back
+    // here with this shift picked.
+    if (!me) { router.push(`/signup?next=${encodeURIComponent(`/join/${id}?shift=${encodeURIComponent(sh.id)}`)}`); return false; }
+    if (shiftBusy || !forApp || !forApp.id) return false;
     setShiftBusy(sh.id);
-    const res = await signUpForShift(app.id, sh.id);
+    const res = await signUpForShift(forApp.id, sh.id);
     if (res.ok) {
       setApp((prev) => ({ ...prev, member_state: res.member_state }));
       toast({ title: 'Signed up', message: `${listing.name} · ${shiftLabel(sh)}`, tone: 'ok' });
+      refreshSpots();
     } else {
-      console.error('[join] shift sign-up failed', res.error);
+      if (res.error.code !== 'FULL') console.error('[join] shift sign-up failed', res.error);
       toast({ title: "Couldn't sign up", message: res.error.message, tone: 'danger' });
       if (['GONE', 'PAST'].includes(res.error.code)) await reloadListing();
-      if (res.error.code === 'CLOSED') await refreshApp(app);
+      if (res.error.code === 'FULL') await refreshSpots();
+      if (res.error.code === 'CLOSED') await refreshApp(forApp);
     }
     setShiftBusy('');
+    return !!res.ok;
   }
 
   async function cancelShift(sh) {
@@ -397,6 +564,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     if (res.ok) {
       setApp((prev) => ({ ...prev, member_state: res.member_state }));
       toast({ title: 'Sign-up canceled', message: `${listing.name} · ${shiftLabel(sh)}`, tone: 'ok' });
+      refreshSpots();
     } else {
       console.error('[join] cancel shift sign-up failed', res.error);
       toast({ title: "Couldn't cancel", message: res.error.message, tone: 'danger' });
@@ -409,8 +577,18 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     setBusy(true);
     const { ok: saved, error } = await setApplicationStatus(app.id, 'pending');
     if (saved) {
-      await refreshApp({ ...app, status: 'pending' });
+      const found = await refreshApp({ ...app, status: 'pending' });
+      const want = blockedShift && listingShifts(listing).find((x) => x.id === blockedShift.id);
+      setBlockedShift(null);
+      if (want) {
+        // They came back to sign up for this shift; applying again opens it.
+        setBusy(false);
+        const signed = await signUpShift(want, found || { ...app, status: 'pending' });
+        if (signed) scrollToShift(want.id);
+        return;
+      }
       toast({ title: 'Applied', message: `${listing.name} will see your application.`, tone: 'ok' });
+      setFocusTick((n) => n + 1);
     } else {
       console.error('[join] re-apply failed', error);
       toast({ title: "Couldn't apply", message: 'Check your connection and try again.', tone: 'danger' });
@@ -448,6 +626,14 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
   }
   if (listing === null && archivedApp) {
     return <Shell signedIn={!!me}><ArchivedProject app={archivedApp} /></Shell>;
+  }
+  if (listing === null && closedApp) {
+    const name = (closedApp.listings && closedApp.listings.name) || 'This project';
+    return (
+      <Shell signedIn={!!me}>
+        <Notice icon="link" title={`${name} stopped taking applications`} body="Your application was still waiting when the organizer paused or closed this project. Other opportunities are open on Discover." cta="Find opportunities" href="/discover" />
+      </Shell>
+    );
   }
   if (listing === null && appsError) {
     // Hidden listing and no applications to check it against: it may be an
@@ -493,17 +679,21 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
   const facts = counts.length ? `The organizer reports ${counts.join(' and ')}.` : '';
 
   const shiftList = isTeam ? null : pickInForm ? (
-    <ShiftPicker shifts={shifts} site={listing.site} value={shiftPick} onChange={setShiftPick} />
+    <ShiftPicker shifts={shifts} site={listing.site} spots={spots} value={shiftPick} onChange={(v) => { setShiftPick(v); saveShift(listing.id, v); }} />
   ) : (shifts.length || orphanSignUps.length) ? (
     <ShiftList
       shifts={shifts}
       orphans={orphanSignUps}
       site={listing.site}
-      canPick={canPickShifts}
+      canPick={canPickShifts || (!me && !isOwner)}
+      signedOut={!me}
+      spots={spots}
       signedUpIds={signedUpIds}
       shiftBusy={shiftBusy}
       onSignUp={signUpShift}
       onCancel={cancelShift}
+      calendarHref={(sh) => calendarLink(listing, sh)}
+      icsHref={(sh) => icsLink(listing, sh)}
     />
   ) : (
     <div style={S(`font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
@@ -539,7 +729,8 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     <Shell signedIn={!!me}>
       <ListingHeader listing={listing} isTeam={isTeam} />
 
-      <div className={cx('vu-jl-grid', showBar && 'has-bar')}>
+      {/* data-draft: drawn from the server's copy, the browser's read still on its way. */}
+      <div className={cx('vu-jl-grid', showBar && 'has-bar')} data-draft={draft ? 'true' : undefined}>
         <div className="vu-jl-main">
           {listing.mission || listing.bio || facts ? (
             <section className="vu-jl-sec">
@@ -596,7 +787,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
               <Button href="/lead" variant="outline" full>Open Lead</Button>
             </StatusBlock>
           ) : app ? (
-            <AppStatus app={app} listing={listing} busy={busy} hasShifts={shifts.length > 0} onWithdraw={withdraw} onApplyAgain={applyAgain} shifts={panelShifts} />
+            <AppStatus app={app} listing={listing} busy={busy} hasShifts={shifts.length > 0} onWithdraw={withdraw} onApplyAgain={applyAgain} shifts={panelShifts} wantShift={blockedShift} />
           ) : appsError ? (
             <StatusBlock title="Couldn't load your application" body="We can't tell whether you already applied here. Check your connection and try again." shifts={panelShifts}>
               <Button variant="outline" icon="refresh" full onClick={retryApps} disabled={appsRetrying} busy={appsRetrying}>
@@ -618,6 +809,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
               shiftPicker={pickInForm ? shiftList : panelShifts}
             />
           )}
+          {!isOwner ? <ListingActions listing={listing} app={app} /> : null}
         </aside>
       </div>
       {showBar ? (
@@ -801,7 +993,7 @@ function ApplyForm({ me, needsConsent, positions, position, posError, onPosition
       ) : null}
 
       <div style={S('margin-top:20px')}>
-        <Button variant="primary" size="lg" full onClick={onApply} disabled={busy} data-busy={busy ? 'true' : undefined} data-apply-submit="">
+        <Button variant="primary" size="lg" full onClick={onApply} busy={busy} data-apply-submit="">
           {busy ? 'Applying' : me ? 'Apply to join' : 'Sign in to apply'}
         </Button>
       </div>
@@ -811,7 +1003,15 @@ function ApplyForm({ me, needsConsent, positions, position, posError, onPosition
 
 /* Signed in, no application yet: pick one shift to sign up for with the
    application. Optional, and changeable later. */
-function ShiftPicker({ shifts, site, value, onChange }) {
+/* "Full", "1 spot left", "4 spots left", or '' when the shift has no limit
+   or the count couldn't be read. */
+function spotsText(spot) {
+  if (!spot || spot.cap === null) return '';
+  if (spot.full) return 'Full';
+  return `${spot.left} ${spot.left === 1 ? 'spot' : 'spots'} left`;
+}
+
+function ShiftPicker({ shifts, site, spots, value, onChange }) {
   const [all, setAll] = useState(false);
   const shown = all ? shifts : shifts.filter((sh, i) => i < SHIFT_PREVIEW || sh.id === value);
   return (
@@ -822,15 +1022,19 @@ function ShiftPicker({ shifts, site, value, onChange }) {
       <div role="radiogroup" aria-labelledby="vu-join-shift-label" style={S(OPTION_LIST)}>
         {shown.map((sh) => {
           const text = shiftText(sh, site);
+          const spot = spots ? spots[sh.id] : null;
+          const full = !!(spot && spot.full);
+          const left = spotsText(spot);
           return (
             <Option
               key={sh.id}
-              on={value === sh.id}
+              on={value === sh.id && !full}
+              disabled={full}
               onClick={() => onChange(value === sh.id ? '' : sh.id)}
-              label={shiftPhrase(sh)}
+              label={`${shiftPhrase(sh)}${left ? `, ${left}` : ''}`}
               lead={text.dated ? <DateBlock date={sh.d} size="sm" month /> : null}
               title={text.title}
-              sub={text.sub}
+              sub={[text.sub, left].filter(Boolean).join(', ')}
             />
           );
         })}
@@ -860,17 +1064,18 @@ const OPTION_LIST = `margin-top:8px;display:flex;flex-direction:column;border-bo
 
 /* A selectable row (role or shift): radio semantics, the radio on the right.
    Chosen reads as ink text and a filled radio. */
-function Option({ on, onClick, title, sub, lead, label }) {
+function Option({ on, onClick, title, sub, lead, label, disabled = false }) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       onClick={onClick}
       className={cx('vu-jl-option', H.press)}
       data-on={on ? 'true' : 'false'}
-      style={S(`display:flex;align-items:center;gap:12px;width:100%;min-height:56px;text-align:left;padding:${lead ? 10 : 14}px 0;margin:0;border:0;border-top:1px solid ${C.line};border-radius:0;background:transparent;cursor:pointer;color:${C.ink}`)}
+      style={S(`display:flex;align-items:center;gap:12px;width:100%;min-height:56px;text-align:left;padding:${lead ? 10 : 14}px 0;margin:0;border:0;border-top:1px solid ${C.line};border-radius:0;background:transparent;cursor:${disabled ? 'not-allowed' : 'pointer'};color:${C.ink}`)}
     >
       {lead}
       <span style={S('min-width:0;flex:1')}>
@@ -894,7 +1099,7 @@ function MoreToggle({ total, shown, all, onToggle }) {
 
 /* The listing's upcoming shifts. An applicant signs up or cancels from the
    row; anyone else just sees the dates. Past shifts are never listed. */
-function ShiftList({ shifts, orphans, site, canPick, signedUpIds, shiftBusy, onSignUp, onCancel }) {
+function ShiftList({ shifts, orphans, site, canPick, signedOut = false, spots = null, signedUpIds, shiftBusy, onSignUp, onCancel, calendarHref, icsHref = null }) {
   const [all, setAll] = useState(false);
   const shown = all ? shifts : shifts.filter((sh, i) => i < SHIFT_PREVIEW || signedUpIds.has(sh.id));
   return (
@@ -907,9 +1112,13 @@ function ShiftList({ shifts, orphans, site, canPick, signedUpIds, shiftBusy, onS
             shift={sh}
             site={site}
             canPick={canPick}
+            signedOut={signedOut}
+            spot={spots ? spots[sh.id] : null}
             signedUp={signedUpIds.has(sh.id)}
             busy={shiftBusy === sh.id}
             disabled={!!shiftBusy}
+            calHref={signedUpIds.has(sh.id) && calendarHref ? calendarHref(sh) : null}
+            icsHref={signedUpIds.has(sh.id) && icsHref ? icsHref(sh) : null}
             onSignUp={() => onSignUp(sh)}
             onCancel={() => onCancel(sh)}
           />
@@ -933,25 +1142,46 @@ function ShiftList({ shifts, orphans, site, canPick, signedUpIds, shiftBusy, onS
   );
 }
 
-function ShiftRow({ shift, site, canPick, signedUp, removed, busy, disabled, onSignUp, onCancel, first = false }) {
+function ShiftRow({ shift, site, canPick, signedOut = false, spot = null, signedUp, removed, busy, disabled, onSignUp, onCancel, calHref = null, icsHref = null, first = false }) {
   const label = shiftPhrase(shift);
   const text = shiftText(shift, site);
+  const full = !signedUp && !!(spot && spot.full);
+  const left = signedUp ? '' : spotsText(spot);
   return (
-    <li style={S(`display:flex;align-items:center;gap:12px;padding:10px 0;${first ? '' : `border-top:1px solid ${C.line}`}`)}>
+    <li data-shift-id={shift.id} style={S(`display:flex;align-items:center;gap:12px;padding:10px 0;${first ? '' : `border-top:1px solid ${C.line}`}`)}>
       {text.dated ? <DateBlock date={shift.d} size="sm" month tone={signedUp ? 'white' : 'line'} className={signedUp ? 'vu-jl-date-on' : undefined} /> : null}
       <div style={S('min-width:0;flex:1')}>
         <div className="vu-break" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{text.title}</div>
         {text.sub ? <div className="vu-break" style={S(`margin-top:2px;font:400 13.5px/1.35 ${F.body};color:${C.ink2}`)}>{text.sub}</div> : null}
+        {left && !full ? <div style={S(`margin-top:2px;font:400 13.5px/1.35 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>{left}</div> : null}
         {removed ? <div style={S(`margin-top:3px;font:500 13px/1.35 ${F.body};color:${C.emberDeep}`)}>The organizer took this shift off the list.</div> : null}
       </div>
       {canPick ? (
         signedUp ? (
           <div style={S('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px')}>
             <StatusText tone="ok">Signed up</StatusText>
+            {calHref ? (
+              <a href={calHref} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={S(`font:600 13px/1.2 ${F.body}`)}>
+                Add to calendar
+                <span style={S(SR_ONLY)}> for {label} (opens Google Calendar in a new tab)</span>
+              </a>
+            ) : null}
+            {icsHref ? (
+              <a href={icsHref} download="volunteeru-shift.ics" className="vu-link-ul" style={S(`font:600 13px/1.2 ${F.body}`)}>
+                Apple or Outlook
+                <span style={S(SR_ONLY)}> calendar file for {label}</span>
+              </a>
+            ) : null}
             <button type="button" onClick={onCancel} disabled={disabled} aria-label={`Cancel sign-up for ${label}`} data-busy={busy ? 'true' : undefined} className="vu-link-ul" style={S(`padding:0;border:0;background:none;cursor:pointer;font:600 13px/1.2 ${F.body};color:${C.emberDeep}`)}>
               {busy ? 'Canceling' : 'Cancel sign-up'}
             </button>
           </div>
+        ) : full ? (
+          <StatusText tone="mute">Full</StatusText>
+        ) : signedOut ? (
+          <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} aria-label={`Sign in to sign up for ${label}`}>
+            Sign in to sign up
+          </Button>
         ) : (
           <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} busy={busy} aria-label={`Sign up for ${label}`}>
             {busy ? 'Signing up' : 'Sign up'}
@@ -962,11 +1192,70 @@ function ShiftRow({ shift, site, canPick, signedUp, removed, busy, disabled, onS
   );
 }
 
+/* Save, Share and, once there's an application, a thread with the organizer. */
+const THREAD_STATUSES = ['pending', 'accepted', 'waitlisted'];
+function ListingActions({ listing, app }) {
+  const { state } = useSnapshot();
+  const saved = Array.isArray(state.saved) && state.saved.includes(listing.id);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const t = setTimeout(() => setCopied(false), 2400);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  function save() {
+    const now = toggleSaved(listing.id);
+    toast({ title: now ? 'Saved' : 'Removed from saved', message: listing.name, tone: now ? 'ok' : 'brand', actionLabel: 'Undo', onAction: () => toggleSaved(listing.id) });
+  }
+
+  async function share() {
+    const url = `${window.location.origin}/join/${listing.id}`;
+    if (navigator.share && window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+      try {
+        await navigator.share({ title: listing.name, url });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    if (await copyText(url)) {
+      setCopied(true);
+      toast({ title: 'Link copied', message: listing.name, tone: 'ok' });
+    } else {
+      toast({ title: "Couldn't copy", message: `Copy this link yourself: ${url}`, tone: 'warn' });
+    }
+  }
+
+  function message() {
+    openModal({
+      title: listing.name,
+      subtitle: 'Message the organizer',
+      Body: () => <MessageThread applicationId={app.id} recipientId={listing.owner_id} recipientName={listing.name} />,
+    });
+  }
+
+  const canMessage = !!(app && app.id && THREAD_STATUSES.includes(app.status));
+  return (
+    <div style={S(`margin-top:22px;padding-top:18px;border-top:1px solid ${C.line};display:flex;flex-wrap:wrap;gap:10px`)}>
+      {canMessage ? <Button variant="outline" size="sm" icon="message" onClick={message}>Message the organizer</Button> : null}
+      <Button variant="outline" size="sm" icon="bookmark" onClick={save} aria-pressed={saved} aria-label={saved ? `Remove ${listing.name} from saved` : `Save ${listing.name}`}>
+        {saved ? 'Saved' : 'Save'}
+      </Button>
+      <Button variant="outline" size="sm" icon={copied ? 'check' : 'share'} onClick={share}>
+        {copied ? 'Link copied' : 'Share'}
+      </Button>
+    </div>
+  );
+}
+
 const APP_TONE = { accepted: 'ok', waitlisted: 'mute', declined: 'bad', withdrawn: 'mute', pending: 'wait' };
 
-function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, shifts }) {
+function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, shifts, wantShift = null }) {
   const role = app.position ? ` as ${app.position}` : '';
   const tone = APP_TONE[app.status] || 'wait';
+  // The shift they came back to sign up for, when this status blocks it.
+  const want = wantShift ? shiftPhrase(wantShift) : '';
   if (app.status === 'accepted') {
     return (
       <StatusBlock tone={tone} shifts={shifts} title="Accepted" body={`You're on ${listing.name}${role}. ${hasShifts ? 'Sign up for the shifts you can make.' : 'Your role and next steps are on Home.'}`}>
@@ -977,7 +1266,7 @@ function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, sh
   }
   if (app.status === 'waitlisted') {
     return (
-      <StatusBlock tone={tone} shifts={shifts} title="Waitlisted" body={`${listing.name} put you on the waitlist${role}. If a spot opens and they accept you, it shows up on Home.`}>
+      <StatusBlock tone={tone} shifts={shifts} title="Waitlisted" body={`${listing.name} put you on the waitlist${role}. If a spot opens and they accept you, it shows up on Home.${want ? ` Shift sign-up for ${want} opens once they accept you.` : ''}`}>
         <Button href="/app" variant="outline" full>Go to Home</Button>
         <WithdrawLink onClick={onWithdraw} disabled={busy} />
       </StatusBlock>
@@ -985,7 +1274,7 @@ function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, sh
   }
   if (app.status === 'declined') {
     return (
-      <StatusBlock tone={tone} shifts={shifts} title="Not accepted" body={`${listing.name} passed on your application. Other opportunities are open on Discover.`}>
+      <StatusBlock tone={tone} shifts={shifts} title="Not accepted" body={`${listing.name} passed on your application${want ? `, so you can't sign up for ${want}` : ''}. Other opportunities are open on Discover.`}>
         <Button href="/discover" variant="outline" full>Find opportunities</Button>
         <HomeLink />
       </StatusBlock>
@@ -993,8 +1282,8 @@ function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, sh
   }
   if (app.status === 'withdrawn') {
     return (
-      <StatusBlock tone={tone} shifts={shifts} title="Withdrawn" body="You withdrew this application. You can apply again.">
-        <Button variant="primary" size="lg" full onClick={onApplyAgain} disabled={busy} data-busy={busy ? 'true' : undefined}>
+      <StatusBlock tone={tone} shifts={shifts} title="Withdrawn" body={want ? `You withdrew this application. Apply again to sign up for ${want}.` : 'You withdrew this application. You can apply again.'}>
+        <Button variant="primary" size="lg" full onClick={onApplyAgain} busy={busy}>
           {busy ? 'Applying' : 'Apply again'}
         </Button>
         <HomeLink />
@@ -1002,7 +1291,7 @@ function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, sh
     );
   }
   return (
-    <StatusBlock tone={tone} shifts={shifts} title="Applied" body={`You applied${role}. Waiting to hear back, and their reply shows up on Home.${hasShifts && app.id ? ' You can sign up for shifts now.' : ''}`}>
+    <StatusBlock tone={tone} shifts={shifts} title="Applied" body={`You applied${role}. Waiting to hear back. Their reply shows up in Notifications and on your Profile.${hasShifts && app.id ? ' You can sign up for shifts now.' : ''}`}>
       <Button href="/app" variant="outline" full>Go to Home</Button>
       {app.id ? <WithdrawLink onClick={onWithdraw} disabled={busy} /> : null}
     </StatusBlock>
@@ -1013,7 +1302,7 @@ function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, sh
 function StatusBlock({ tone, title, body, shifts, children }) {
   return (
     <div>
-      <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>
+      <h2 tabIndex={-1} data-status-focus="" style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink};outline-offset:4px`)}>
         {tone ? <StatusPill tone={tone} icon={tone !== 'mute'}>{title}</StatusPill> : title}
       </h2>
       <p className="vu-break" style={S(`margin:12px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink}`)}>{body}</p>
@@ -1072,9 +1361,9 @@ function OrganizerNotes({ items }) {
   );
 }
 
-/* Where the shift happens: the address and a link that opens it in Google
-   Maps in a new tab. No drawn map, so the page never claims to show the
-   exact block. */
+/* Where the shift happens: the address on a small real map (stored or
+   geocoded coordinates), with Directions and Open in Maps links. An address
+   the geocoder can't find shows as text with the links. */
 function WhereSection({ listing }) {
   const remote = listing.delivery === 'remote';
   const address = String(listing.site || listing.location || '').trim();
@@ -1088,15 +1377,9 @@ function WhereSection({ listing }) {
       </Section>
     );
   }
-  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   return (
     <Section title="Where you'll be">
-      <p className="vu-break" style={S(`margin:8px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink}`)}>{address}</p>
-      <a href={mapHref} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:6px;margin-top:10px;font:600 14px/20px ${F.body}`)}>
-        Open in Maps
-        <Icon name="external" size={14} />
-        <span style={S(SR_ONLY)}>(opens Google Maps in a new tab)</span>
-      </a>
+      <AddressMap address={address} lat={listing.lat} lng={listing.lng} />
     </Section>
   );
 }
@@ -1201,19 +1484,17 @@ function Shell({ children, signedIn }) {
       </div>
     );
   }
+  // Signed in, the page sits in the app's own frame (sidebar on desktop,
+  // tab bar on phones), so Home, My crew and Profile stay one tap away.
+  // `loading` holds the first-visit tours back, so they never cover the
+  // listing someone just followed a link to.
   return (
-    <div className="vu-jl-page" style={S('min-height:100vh;background:#fff')}>
-      <style dangerouslySetInnerHTML={{ __html: JOIN_CSS }} />
-      <div style={S(`border-bottom:1px solid ${C.line}`)}>
-        <div className="vu-jl-wrap" style={S('height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-          <Link href="/" aria-label="VolunteerU home" style={S('display:inline-flex;text-decoration:none')}>
-            <Wordmark size={30} />
-          </Link>
-          <Link href="/discover" className="vu-link-ul" style={S(`font:600 14px/1 ${F.body}`)}>Discover</Link>
-        </div>
+    <AppShell loading>
+      <div className="vu-jl-page" style={S('background:#fff')}>
+        <style dangerouslySetInnerHTML={{ __html: JOIN_CSS }} />
+        <div className="vu-jl-wrap" style={S('padding-top:32px;padding-bottom:96px')}>{children}</div>
       </div>
-      <main id="vu-main" className="vu-jl-wrap" style={S('padding-top:32px;padding-bottom:96px')}>{children}</main>
-    </div>
+    </AppShell>
   );
 }
 

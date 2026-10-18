@@ -5,15 +5,15 @@
    Shell, tab bar, and the Overview / People / Positions / Shifts tabs.
    ========================================================================== */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, EmptyState, Field, Select, TextArea, Chip, Avatar, Icon, Button, StatusPill, StatusText } from '../ui.jsx';
+import { Pressable, EmptyState, Field, Select, TextArea, Chip, Avatar, Icon, Button, StatusPill, StatusText, useHeldValue } from '../ui.jsx';
 import { C, F, R, CAUSE } from '../../lib/tokens.js';
 import { resolveCover, PHOTOS } from '../../lib/photos.js';
 import DateBlock from '../vu/DateBlock.jsx';
-import { useSnapshot, update as updateStore } from '../../lib/store.js';
+import { useSnapshot, update as updateStore, getState } from '../../lib/store.js';
 import { isPastShift, shiftDates, parseTimeRange } from '../../lib/calendar.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
 import CrossApplications from '../CrossApplications.jsx';
@@ -29,9 +29,10 @@ import {
   upsertSession, deleteSession, repeatWeekly, regenerateCode, addPerson, updatePerson,
   removePerson, addNote, rosterCSV, download, setActiveProject, projects as allProjects,
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
-  requestProjectVerification, parseSessionDate, formatSessionDate, uid, shortName,
+  requestProjectVerification, parseSessionDate, formatSessionDate, uid, shortName, messageTemplateOptions,
 } from '../../lib/db.js';
 import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment, postAnnouncement } from '../../lib/listings.js';
+import { createInvites, revokeInvite, inviteEmailError, inviteLink, inviteMailto, inviteSms, invitesAsText, EMAIL_MAX } from '../../lib/invites.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
 } from '../lead/Tabs.jsx';
@@ -134,7 +135,8 @@ function schoolLine(x) {
   if (x.school && x.grade) return `${x.school}, grade ${x.grade}`;
   if (x.school) return x.school;
   const s = String(x.s || '').replace(/\s*·\s*/g, ', ');
-  return s || (x.appId ? 'Joined through your join link' : '');
+  if (s || !x.appId) return s;
+  return x.inviteId || x.viaInvite ? 'Joined with your invite link' : 'Applied on VolunteerU';
 }
 
 /** "10:00 AM-11:00 AM" -> "10 to 11 AM", "3:30 PM-6:00 PM" -> "3:30 to 6 PM". Unreadable text passes through. */
@@ -278,6 +280,15 @@ function openLinkSuggestions(p) {
  * removes anyone. `linkedApps` remembers who was added once, so a person the
  * lead removes from the roster stays removed.
  */
+/* The roster invite an accepted application came from (claim_roster_invite
+   writes assignment.inviteId and assignment.invite), or null. */
+function inviteOf(app) {
+  const a = app && app.assignment;
+  if (!a || typeof a.inviteId !== 'string' || !a.inviteId) return null;
+  const facts = a.invite && typeof a.invite === 'object' ? a.invite : {};
+  return { id: a.inviteId, school: typeof facts.school === 'string' ? facts.school : '', grade: facts.grade == null ? '' : String(facts.grade), consent: facts.consent === true };
+}
+
 /* An application's shift sign-ups, past ones included, as Attendance reads them. */
 const shiftPicks = (app) => myShiftSignUps(app).map((x) => ({ id: String(x.id), d: x.d || '', t: x.t || '' }));
 
@@ -344,15 +355,31 @@ function applyMemberLinks(p, apps) {
         mine.linkConfirmed = true;
         continue;
       }
+      // The student opened the invite link the lead sent: their Invited row
+      // becomes this account's row. The invite id is written by the server
+      // (claim_roster_invite), so a name typed at sign-up can't take a row.
+      const invite = inviteOf(app);
+      const invited = invite ? p.people.find((x) => x.inviteId === invite.id && !x.appId) : null;
+      if (invited) {
+        invited.appId = app.id;
+        invited.accountId = app.applicant_id;
+        invited.linkConfirmed = true;
+        invited.linkHrs = confirmedMemberHours(app);
+        invited.hrs = Math.round(((Number(invited.hrs) || 0) + invited.linkHrs) * 10) / 10;
+        if (invited.st === 'Invited') invited.st = 'Active';
+        if (shiftPicks(app).length) invited.signUps = shiftPicks(app);
+        p.activity = [{ id: uid('ac'), t: `${invited.n} joined with your invite link`, w: stampLabel(), at: Date.now() }, ...(p.activity || [])].slice(0, 30);
+        continue;
+      }
       const pos = p.positions.find((x) => norm(x.t) === norm(app.position)) || p.positions.find((x) => x.open !== false) || p.positions[0];
       const hrs = confirmedMemberHours(app);
       p.people.unshift({
         id: uid('per'),
         n: name,
         short: shortName(name),
-        s: '',
-        school: '',
-        grade: null,
+        s: invite && invite.school ? `${invite.school}${invite.grade ? `, grade ${invite.grade}` : ''}` : '',
+        school: invite && invite.school ? invite.school : '',
+        grade: invite && Number(invite.grade) ? Number(invite.grade) : null,
         role: pos ? pos.t : app.position || 'Volunteer',
         positionId: pos ? pos.id : null,
         st: 'Active',
@@ -361,20 +388,23 @@ function applyMemberLinks(p, apps) {
         last: '',
         tags: [],
         slug: linkSlug(name, app.id),
-        // Nobody's consent form or training is assumed on file.
-        consent: false,
+        // Nobody's consent form or training is assumed on file, unless the
+        // lead ticked it when they invited this student.
+        consent: !!(invite && invite.consent === true),
         trained: false,
         notes: [],
         appId: app.id,
         accountId: app.applicant_id,
         linkAdded: true,
+        ...(invite ? { viaInvite: true } : {}),
         linkHrs: hrs,
         ...(shiftPicks(app).length ? { signUps: shiftPicks(app) } : {}),
       });
       // Stamped with when the lead accepted, so the row ages ("12 min ago", then "Oct 18").
       const at = app.decided_at ? new Date(app.decided_at).getTime() : NaN;
       const ms = Number.isFinite(at) ? at : Date.now();
-      p.activity = [{ id: uid('ac'), t: `${name} joined through your join link`, w: stampLabel(ms), at: ms }, ...(p.activity || [])].slice(0, 30);
+      const how = invite ? ' with your invite link' : app.position ? ` as ${app.position}` : '';
+      p.activity = [{ id: uid('ac'), t: `${name} joined${how}`, w: stampLabel(ms), at: ms }, ...(p.activity || [])].slice(0, 30);
       // Same name as a row the lead added: ask, never assume.
       const same = p.people.find((x) => unclaimedRow(x) && norm(x.n) === norm(name));
       if (same) suggestions = [...suggestions.filter((sg) => sg.appId !== app.id), { appId: app.id, personId: same.id }];
@@ -705,6 +735,11 @@ export default function Lead({ projectId, tab: tabParam }) {
   useDocumentTitle(p ? `${p.name} \u00b7 ${tabLabel}, VolunteerU` : missing ? MISSING_TITLE : LEAD_TITLE);
   const linkApps = useListingApps(p);
   const unreadMessages = useUnreadMessages(p ? p.listingId : null, tab);
+  // The tab lives in the URL, so a click marks its tab right away and holds
+  // it until the route lands; the panel dims while it's on the way.
+  const [heldTab, holdTab] = useHeldValue(`${p ? p.id : ''}/${tab}`);
+  const [tabLoading, startTabNav] = useTransition();
+  const shownTab = heldTab === undefined ? tab : heldTab;
 
   if (missing) return <ProjectMissing projects={owned} tab={tab} />;
 
@@ -720,7 +755,16 @@ export default function Lead({ projectId, tab: tabParam }) {
               Post a project and other students can apply to help. You plan the shifts here and confirm everyone's hours after each one.
             </p>
             <div style={S('margin-top:24px')}>
-              <Button variant="primary" icon="plus" onClick={() => goCreateProject(router)}>Start a student project</Button>
+              {(() => {
+                // Save and exit on /create keeps the draft; say so instead of offering a fresh start.
+                const d = state.drafts && state.drafts.create;
+                const draftName = d && String(d.name || '').trim();
+                return draftName ? (
+                  <Button variant="primary" icon="edit" onClick={() => goCreateProject(router)}>{`Continue your draft: ${draftName}`}</Button>
+                ) : (
+                  <Button variant="primary" icon="plus" onClick={() => goCreateProject(router)}>Start a student project</Button>
+                );
+              })()}
             </div>
           </div>
           <img
@@ -743,7 +787,11 @@ export default function Lead({ projectId, tab: tabParam }) {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  const goTab = (k) => router.push(`/lead/${p.id}/${k}`);
+  const goTab = (k) => {
+    const key = String(k).split('?')[0];
+    if (key !== tab) holdTab(key);
+    startTabNav(() => router.push(`/lead/${p.id}/${k}`));
+  };
 
   const chip = headerStatus(p);
   // One count of each thing for the whole screen: tab badges, Needs you
@@ -802,7 +850,7 @@ export default function Lead({ projectId, tab: tabParam }) {
   const meta = [p.orgClass === 'official' ? 'Volunteer program' : 'Student project', p.siteShort || p.site, p.archived ? '' : p.cadence, !p.archived && p.termWeeks ? `${p.termWeeks}-week term` : ''].filter(Boolean);
 
   function onTabKey(e) {
-    const i = TABS.findIndex(([k]) => k === tab);
+    const i = TABS.findIndex(([k]) => k === shownTab);
     const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }[e.key];
     if (to === undefined) return;
     e.preventDefault();
@@ -872,7 +920,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         style={S(`margin-top:28px;border-bottom:1px solid ${C.line};display:flex;gap:24px`)}
       >
         {TABS.map(([k, label]) => {
-          const on = tab === k;
+          const on = shownTab === k;
           const n = badgeFor(k);
           const unread = k === 'messages' && n;
           return (
@@ -907,7 +955,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         })}
       </div>
 
-      <div role="tabpanel" aria-label={tab} id={`lead-panel-${tab}`}>
+      <div role="tabpanel" aria-label={tab} id={`lead-panel-${tab}`} aria-busy={tabLoading ? 'true' : undefined} className="vu-tabpanel" data-loading={tabLoading && shownTab !== tab ? 'true' : undefined}>
         {tab === 'overview' ? (isTeam(p) ? <TeamOverview p={p} goTab={goTab} linkApps={linkApps} /> : <Overview p={p} goTab={goTab} waiting={waiting} apps={linkApps} />) : null}
         {tab === 'people' ? <People p={p} params={params} setParam={setParam} linkApps={linkApps} /> : null}
         {tab === 'tasks' ? <TasksTab p={p} /> : null}
@@ -920,7 +968,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         {tab === 'quality' ? <QualityTab p={p} params={params} setParam={setParam} goTab={goTab} /> : null}
         {tab === 'messages' ? (
           <div style={S('margin-top:32px;display:flex;flex-direction:column;gap:32px')}>
-            <AnnouncementBoard listingId={p.listingId} canPost title="Updates for your team" />
+            <AnnouncementBoard listingId={p.listingId} canPost title="Updates for your team" templates={messageTemplateOptions(p)} />
             <MessagesTab p={p} params={params} setParam={setParam} embedded />
           </div>
         ) : null}
@@ -1259,6 +1307,7 @@ function VerifyForm({ p, api }) {
     const e = {};
     if (!name.trim()) e.name = 'Enter the organization name.';
     if (!contact.trim()) e.contact = 'Enter a staff name and email.';
+    else if (!/[^\s@]+@[^\s@]+\.[^\s@]+/.test(contact) && !/\d{3}\D?\d{3}\D?\d{4}/.test(contact)) e.contact = "Add the staff member's email so the reviewer can reach them.";
     setErr(e);
     if (Object.keys(e).length) return;
     setBusy(true);
@@ -1268,7 +1317,7 @@ function VerifyForm({ p, api }) {
   };
   return (
     <div style={S('display:flex;flex-direction:column;gap:14px')}>
-      <Field label="Organization name" value={name} onChange={setName} placeholder="e.g. Carmel Clay Public Library" error={err.name} required maxLength={90} />
+      <Field label="Organization name" value={name} onChange={setName} placeholder="e.g. Indianapolis Public Library" error={err.name} required maxLength={90} />
       <Field label="Staff contact" value={contact} onChange={setContact} placeholder="e.g. Ms. Alvarez, alvarez@school.edu" error={err.contact} required maxLength={120} />
       <ModalActions>
         <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
@@ -1531,9 +1580,39 @@ function TeamOverview({ p, goTab, linkApps = [] }) {
 /* ---- people ------------------------------------------------------------- */
 
 const PAGE = 8;
-const STATUSES = ['all', 'Active', 'Onboarding', 'Invited', 'Waitlist', 'Inactive'];
-/** 'Invited' stays the stored key; nothing is sent, so the label says 'Added'. */
-const statusLabel = (st) => (st === 'Invited' ? 'Added' : st);
+const STATUSES = ['all', 'Active', 'Onboarding', 'Invited', 'Waitlist', 'Inactive', 'Withdrawn'];
+/** 'Invited' is the stored key. A row with an invite link reads Invited; a
+    row the lead added without one (an unpublished project, or older rows)
+    reads Added, since nothing can reach that student yet. */
+const statusLabel = (st, person) => (person && person.withdrew ? 'Withdrew' : st === 'Invited' && person && !person.inviteToken ? 'Added' : st);
+/** A member who withdrew their application. People hides them unless the
+    Withdrawn filter is on. */
+const withdrewFrom = (x, appsById) => x.st === 'Inactive' && x.leftVia === 'app' && !!x.appId && (appsById.get(x.appId) || {}).status === 'withdrawn';
+/** A roster row whose invite link is out and hasn't been used yet. */
+const pendingInvite = (x) => !!(x && x.inviteToken && x.inviteId && !x.appId);
+/** The lead's first name, to sign the invite they send. */
+function leadFirstName() {
+  const a = getState().account || {};
+  return String(a.firstName || a.name || '').trim().split(/\s+/)[0] || '';
+}
+/** Open a mailto: or sms: link in the lead's own email or texting app. */
+function openExternal(href) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+/** True on a touch phone, where an sms: link opens the texting app. */
+function useCanText() {
+  const [can, setCan] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    setCan(window.matchMedia('(pointer: coarse) and (max-width: 900px)').matches);
+  }, []);
+  return can;
+}
 const GRADES = ['7', '8', '9', '10', '11', '12'];
 
 /** True below the phone breakpoint, so the roster can switch from a table to rows. */
@@ -1561,7 +1640,9 @@ const TH = `font:600 13px/1.2 ${F.body};color:${C.ink2}`;
 const PERSON_PILL = { Active: 'ok', Onboarding: 'wait', Invited: 'mute', Waitlist: 'mute', Inactive: 'mute', Removed: 'bad' };
 
 function People({ p: stored, params, setParam, linkApps = [] }) {
-  const p = { ...stored, people: rosterWithTeamRoles(stored, linkApps) };
+  const appsById = new Map(linkApps.map((a) => [a.id, a]));
+  const roster = rosterWithTeamRoles(stored, linkApps).map((x) => (withdrewFrom(x, appsById) ? { ...x, withdrew: true } : x));
+  const p = { ...stored, people: roster };
   const q = params.get('pq') || '';
   const status = params.get('pstatus') || 'all';
   const role = params.get('prole') || 'all';
@@ -1570,7 +1651,10 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   const [draftQuery, setDraftQuery] = useState(q);
   const narrow = useNarrow();
 
-  const filtered = filterPeople(p, { q, status, role });
+  const listed = p.people.filter((x) => (status === 'Withdrawn' ? x.withdrew : !x.withdrew));
+  // The Withdrawn filter only shows up once someone has withdrawn.
+  const hasWithdrawn = p.people.some((x) => x.withdrew);
+  const filtered = filterPeople({ ...p, people: listed }, { q, status: status === 'Withdrawn' ? 'all' : status, role });
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const safePage = Math.min(page, pages);
   const rows = filtered.slice((safePage - 1) * PAGE, safePage * PAGE);
@@ -1583,7 +1667,6 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   const summary = `${count('Active')} active, ${count('Onboarding')} onboarding, ${count('Waitlist')} on the waitlist`;
   const matches = openLinkSuggestions(stored);
   const team = isTeam(stored);
-  const appsById = new Map(linkApps.map((a) => [a.id, a]));
   // The accepted application behind a roster row, so the lead can message
   // that member in the same thread the Applications tab opens.
   const memberApp = (person) => {
@@ -1626,11 +1709,38 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   function addStudent() {
     openModal({
       title: 'Add a student',
-      subtitle: 'They show on the roster as Added until you mark them active. Nothing is sent to them.',
+      subtitle: stored.listingId
+        ? 'You get a link to send them from your own email or phone. It puts them on this project when they make an account.'
+        : 'They show on the roster as Added. Publish the project to get a link that puts them on it.',
       Body: function AddBody({ api }) {
-        return <AddPersonForm api={api} project={p} />;
+        return <AddPersonForm api={api} project={p} onInvited={shareInvite} />;
       },
     });
+  }
+
+  /* Send one student's invite link: copy it, or open the lead's own email
+     or texting app with it filled in. */
+  function shareInvite(person) {
+    openModal({
+      title: `Send ${person.n} their invite`,
+      subtitle: 'VolunteerU doesn’t send email for you yet. Send the link from your own email or phone.',
+      Body: function ShareBody({ api }) {
+        return <InviteShare api={api} project={stored} person={person} />;
+      },
+    });
+  }
+
+  /* An Added row on a published project gets its link here. */
+  async function makeInvite(person) {
+    const pos = p.positions.find((x) => x.id === person.positionId);
+    const res = await createInvites(stored.listingId, [{ name: person.n, email: person.email, school: person.school, grade: person.grade, position: pos ? pos.t : person.role, consent: person.consent === true }]);
+    if (!res.ok) {
+      toast({ title: "Couldn't make the invite link", message: 'Check your connection and try again.', tone: 'warn' });
+      return;
+    }
+    const inv = res.invites[0];
+    updatePerson(stored.id, person.id, { inviteId: inv.id, inviteToken: inv.token });
+    shareInvite({ ...person, inviteId: inv.id, inviteToken: inv.token });
   }
 
   // Overview's empty Team section links here with ?add=student; open the
@@ -1647,9 +1757,20 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   function importList() {
     openModal({
       title: 'Import from a list',
-      subtitle: 'One student per line: name, school, grade.',
+      subtitle: stored.listingId ? 'One student per line: name, school, grade and email if you have it.' : 'One student per line: name, school, grade.',
       Body: function ImportBody({ api }) {
-        return <ImportForm api={api} project={p} />;
+        return <ImportForm api={api} project={p} onInvited={shareInviteList} />;
+      },
+    });
+  }
+
+  /* Every new link from one import, with Copy and Email per student. */
+  function shareInviteList(people) {
+    openModal({
+      title: `Send ${plural(people.length, 'invite link')}`,
+      subtitle: 'VolunteerU doesn’t send email for you yet. Send each link from your own email or phone.',
+      Body: function ShareListBody({ api }) {
+        return <InviteShareList api={api} project={stored} people={people} />;
       },
     });
   }
@@ -1686,6 +1807,16 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
       e,
       [
         ...(memberApp(person) ? [{ key: 'message', label: 'Message', icon: 'message' }, { sep: true }] : []),
+        ...(pendingInvite(person)
+          ? [
+              { key: 'invite-copy', label: 'Copy invite link', icon: 'link' },
+              { key: 'invite-email', label: 'Email invite', icon: 'mail' },
+              { key: 'invite-resend', label: 'Resend', icon: 'send' },
+              { sep: true },
+            ]
+          : stored.listingId && person.st === 'Invited' && unclaimedRow(person)
+            ? [{ key: 'invite-make', label: 'Create invite link', icon: 'link' }, { sep: true }]
+            : []),
         ...(team ? [{ key: 'role', label: person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role', icon: 'flag' }, { sep: true }] : []),
         { key: 'active', label: 'Mark active', icon: 'check', disabled: person.st === 'Active' },
         { key: 'waitlist', label: 'Move to waitlist', icon: 'clock', disabled: person.st === 'Waitlist' },
@@ -1708,6 +1839,23 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
           teamRolePicker(person);
           return;
         }
+        if (key === 'invite-copy') {
+          const ok = await copyText(inviteLink(person.inviteToken));
+          toast(ok ? { title: 'Link copied', message: `Send it to ${person.n} from your own email or phone.`, tone: 'ok', timeout: 2600 } : { title: "Couldn't copy the link", message: 'Use Resend to see it and copy it by hand.', tone: 'warn' });
+          return;
+        }
+        if (key === 'invite-email') {
+          openExternal(inviteMailto({ email: person.email, name: person.n, projectName: stored.name, leadName: leadFirstName(), link: inviteLink(person.inviteToken) }));
+          return;
+        }
+        if (key === 'invite-resend') {
+          shareInvite(person);
+          return;
+        }
+        if (key === 'invite-make') {
+          await makeInvite(person);
+          return;
+        }
         if (key === 'message') {
           const app = memberApp(person);
           if (app) messageMember(app);
@@ -1720,6 +1868,8 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
             confirmLabel: 'Remove from roster',
           });
           if (ok) {
+            // Their link stops working too.
+            if (pendingInvite(person)) revokeInvite(person.inviteId);
             removePerson(p.id, person.id);
             setSelected((sel) => sel.filter((i) => i !== person.id));
             toast({ title: 'Removed from roster', message: person.n, tone: 'ok' });
@@ -1775,7 +1925,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
     </div>
   );
 
-  const statusChip = (x) => <StatusText tone={PERSON_PILL[x.st] || 'mute'}>{statusLabel(x.st)}</StatusText>;
+  const statusChip = (x) => <StatusText tone={PERSON_PILL[x.st] || 'mute'}>{statusLabel(x.st, x)}</StatusText>;
 
   return (
     <div style={S('margin-top:32px')}>
@@ -1842,7 +1992,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         <Pressable
           label={`Filter by status, now ${status === 'all' ? 'all statuses' : statusLabel(status)}`}
           expanded={false}
-          onClick={(e) => menuFromEvent(e, STATUSES.map((v) => ({ key: v, label: v === 'all' ? 'All statuses' : statusLabel(v), checked: v === status })), (v) => setParam({ pstatus: v === 'all' ? null : v, ppage: null }))}
+          onClick={(e) => menuFromEvent(e, STATUSES.filter((v) => v !== 'Withdrawn' || hasWithdrawn || status === v).map((v) => ({ key: v, label: v === 'all' ? 'All statuses' : statusLabel(v), checked: v === status })), (v) => setParam({ pstatus: v === 'all' ? null : v, ppage: null }))}
           className={cx(H.secondary, H.press)}
           style={S(`${FILTER_BTN}${status !== 'all' ? `;background:${C.ink};border:1px solid ${C.ink};color:#fff` : ''}`)}
         >
@@ -1972,7 +2122,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         <div style={S(`padding:16px 0 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${SMALL};${NUM}`)}>
           <div>
             {rows.length ? `${(safePage - 1) * PAGE + 1}-${(safePage - 1) * PAGE + rows.length}` : '0'} of {plural(filtered.length, 'person', 'people')}
-            {filtered.length !== p.people.length ? ` (filtered from ${p.people.length})` : ''}
+            {filtered.length !== listed.length ? ` (filtered from ${listed.length})` : ''}
           </div>
           {pages > 1 ? (
             <div style={S('display:flex;gap:8px')}>
@@ -2076,7 +2226,7 @@ function PersonProfile({ project, person, onNote, onRole, onMessage }) {
           <Avatar name={person.n} fs={16} />
         </div>
         <div style={S(`min-width:0;flex:1;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>{schoolLine(person)}</div>
-        <StatusPill tone={PERSON_PILL[person.st] || 'mute'} size="sm">{statusLabel(person.st)}</StatusPill>
+        <StatusPill tone={PERSON_PILL[person.st] || 'mute'} size="sm">{statusLabel(person.st, person)}</StatusPill>
       </div>
 
       <dl style={S(`margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;padding:14px 0;border-top:1px solid ${C.line};border-bottom:1px solid ${C.line}`)}>
@@ -2142,27 +2292,65 @@ function ConsentCheck({ checked, onChange }) {
   );
 }
 
-function AddPersonForm({ api, project }) {
+function AddPersonForm({ api, project, onInvited }) {
   const { state } = useSnapshot();
   const mySchool = (state.account && state.account.school) || '';
-  const [f, setF] = useState({ n: '', school: mySchool, grade: '10', positionId: project.positions[0] ? project.positions[0].id : '', consent: false });
+  const [f, setF] = useState({ n: '', email: '', school: mySchool, grade: '10', positionId: project.positions[0] ? project.positions[0].id : '', consent: false });
   const [err, setErr] = useState({});
-  const submit = () => {
+  const [busy, setBusy] = useState(false);
+  const published = !!project.listingId;
+  const submit = async () => {
+    if (busy) return;
     const e = {};
     if (!f.n.trim() || !f.n.trim().includes(' ')) e.n = 'Enter their first and last name.';
+    const emailErr = inviteEmailError(f.email);
+    if (emailErr) e.email = emailErr;
     if (!f.school.trim()) e.school = 'Enter their school.';
     setErr(e);
     if (Object.keys(e).length) return;
     const pos = project.positions.find((x) => x.id === f.positionId);
-    addPerson(project.id, { n: f.n.trim(), school: f.school.trim(), grade: f.grade, role: pos ? pos.t : 'Volunteer', positionId: f.positionId, consentOnFile: f.consent });
+    const name = f.n.trim();
+    const email = f.email.trim();
+    const person = addPerson(project.id, { n: name, school: f.school.trim(), grade: f.grade, role: pos ? pos.t : 'Volunteer', positionId: f.positionId, consentOnFile: f.consent });
+    if (!person) return;
+    if (email) updatePerson(project.id, person.id, { email });
+    if (!published) {
+      api.close();
+      toast({ title: 'Added to roster', message: `${name} is on the roster as Added. Publish the project to get their invite link.`, tone: 'ok' });
+      return;
+    }
+    setBusy(true);
+    const res = await createInvites(project.listingId, [{ name, email, school: f.school.trim(), grade: f.grade, position: pos ? pos.t : 'Volunteer', consent: f.consent }]);
+    setBusy(false);
     api.close();
-    toast({ title: 'Added to roster', message: `${f.n.trim()} is on the roster. They weren’t notified.`, tone: 'ok' });
+    if (!res.ok) {
+      toast({ title: 'Added to roster, no invite link yet', message: `${name} is on the roster as Added. Choose Create invite link from their row's menu to try again.`, tone: 'warn' });
+      return;
+    }
+    const inv = res.invites[0];
+    updatePerson(project.id, person.id, { inviteId: inv.id, inviteToken: inv.token });
+    if (onInvited) onInvited({ ...person, email, inviteId: inv.id, inviteToken: inv.token });
   };
   return (
     <div>
       <Field label="Full name" value={f.n} onChange={(v) => setF((x) => ({ ...x, n: v }))} placeholder="e.g. Ana Castillo" required error={err.n} maxLength={60} onEnter={submit} />
+      <div style={S('margin-top:14px')}>
+          <Field
+            label="Email"
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            value={f.email}
+            onChange={(v) => { setF((x) => ({ ...x, email: v })); if (err.email) setErr((x) => ({ ...x, email: undefined })); }}
+            placeholder="e.g. ana@gmail.com"
+            error={err.email}
+            hint={err.email ? undefined : published ? 'Optional. It fills in the To line when you email them their link.' : 'Optional. You can email them a link once the project is published.'}
+            maxLength={EMAIL_MAX}
+            onEnter={submit}
+          />
+      </div>
       <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-        <Field label="School" value={f.school} onChange={(v) => setF((x) => ({ ...x, school: v }))} placeholder="e.g. Carmel High School" required error={err.school} maxLength={60} />
+        <Field label="School" value={f.school} onChange={(v) => setF((x) => ({ ...x, school: v }))} placeholder="e.g. North Central High School" required error={err.school} maxLength={60} />
         <Select label="Grade" value={f.grade} options={GRADES} onChange={(v) => setF((x) => ({ ...x, grade: v }))} />
       </div>
       {project.positions.length ? (
@@ -2184,7 +2372,87 @@ function AddPersonForm({ api, project }) {
       <ConsentCheck checked={f.consent} onChange={(v) => setF((x) => ({ ...x, consent: v }))} />
       <ModalActions>
         <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
-        <Button variant="primary" onClick={submit}>Add student</Button>
+        <Button variant="primary" busy={busy} onClick={submit}>{busy ? 'Adding student' : 'Add student'}</Button>
+      </ModalActions>
+    </div>
+  );
+}
+
+/* The invite link, with Copy, Email and (on phones) Text. */
+function InviteShare({ api, project, person }) {
+  const [copied, setCopied] = useState(false);
+  const canText = useCanText();
+  const link = inviteLink(person.inviteToken);
+  const msg = { email: person.email, name: person.n, projectName: project.name, leadName: leadFirstName(), link };
+  const copy = async () => {
+    const ok = await copyText(link);
+    if (ok) setCopied(true);
+    else toast({ title: "Couldn't copy the link", message: 'Select it in the box and copy it by hand.', tone: 'warn' });
+  };
+  return (
+    <div>
+      <p style={S(`margin:0;${META}`)}>
+        <span style={S(`color:${C.ink};font-weight:600`)}>{person.n}</span> is on the roster as Invited. When they open the link and make an account, they show up as Active.
+      </p>
+      <label htmlFor={`inv-${person.id}`} style={S(`display:block;margin-top:18px;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Invite link</label>
+      <input
+        id={`inv-${person.id}`}
+        readOnly
+        value={link}
+        onFocus={(e) => e.target.select()}
+        className={H.input}
+        style={S(`margin-top:8px;width:100%;height:44px;padding:0 12px;border-radius:${R.control};border:1px solid ${C.line2};background:${C.mist};font:400 14px/1.2 ${F.body};color:${C.ink};text-overflow:ellipsis`)}
+      />
+      <div style={S('margin-top:12px;display:flex;gap:10px;flex-wrap:wrap')}>
+        <Button variant="primary" icon={copied ? 'check' : 'copy'} onClick={copy} aria-live="polite">{copied ? 'Link copied' : 'Copy link'}</Button>
+        <Button variant="outline" icon="mail" href={inviteMailto(msg)}>Email invite</Button>
+        {canText ? <Button variant="outline" icon="message" href={inviteSms(msg)}>Text invite</Button> : null}
+      </div>
+      <p style={S(`margin:14px 0 0;${SMALL}`)}>
+        {person.email ? `Email invite opens your email app with a message to ${person.email}.` : 'Email invite opens your email app with the message filled in. Add their address there.'}
+      </p>
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Done</Button>
+      </ModalActions>
+    </div>
+  );
+}
+
+/* Links from one import, one row per student. */
+function InviteShareList({ api, project, people }) {
+  const [copied, setCopied] = useState('');
+  const lead = leadFirstName();
+  const copy = async (key, text) => {
+    const ok = await copyText(text);
+    if (ok) setCopied(key);
+    else toast({ title: "Couldn't copy the links", message: 'Open a student’s menu on People and choose Copy invite link.', tone: 'warn' });
+  };
+  const all = invitesAsText(people.map((x) => ({ name: x.n, token: x.inviteToken })));
+  return (
+    <div>
+      <ul style={S(`margin:0;padding:0;list-style:none;border-top:1px solid ${C.line};max-height:min(52vh, 420px);overflow:auto`)}>
+        {people.map((x) => {
+          const link = inviteLink(x.inviteToken);
+          return (
+            <li key={x.id} style={S(`display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;${RULE};flex-wrap:wrap`)}>
+              <div style={S('min-width:0;flex:1 1 180px')}>
+                <div className="vu-trunc" style={S(LABEL)}>{x.n}</div>
+                <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{x.email || 'No email on file'}</div>
+              </div>
+              <div style={S('display:flex;gap:8px;flex:none')}>
+                <Button variant="outline" size="sm" icon={copied === x.id ? 'check' : 'copy'} onClick={() => copy(x.id, link)} aria-label={`Copy invite link for ${x.n}`}>
+                  {copied === x.id ? 'Link copied' : 'Copy link'}
+                </Button>
+                <Button variant="outline" size="sm" icon="mail" href={inviteMailto({ email: x.email, name: x.n, projectName: project.name, leadName: lead, link })} aria-label={`Email invite to ${x.n}`}>
+                  Email
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <ModalActions left={<Button variant="ghost" size="sm" onClick={() => copy('all', all)}>{copied === 'all' ? 'All links copied' : 'Copy all links'}</Button>}>
+        <Button variant="outline" onClick={() => api.close()}>Done</Button>
       </ModalActions>
     </div>
   );
@@ -2192,22 +2460,45 @@ function AddPersonForm({ api, project }) {
 
 const TEXTAREA = `display:block;width:100%;padding:12px 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.55 ${F.body};color:${C.ink}`;
 
-function ImportForm({ api, project }) {
+function ImportForm({ api, project, onInvited }) {
   const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
   const parsed = text
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
     .map((l) => l.split(',').map((x) => x.trim()))
     .filter((parts) => parts[0]);
-  const valid = parsed.filter((r) => r.length >= 3 && r[0].includes(' ') && r[1] && /^\d{1,2}$/.test(r[2]) && Number(r[2]) >= 6 && Number(r[2]) <= 12);
+  // name, school, grade, then an optional email.
+  const valid = parsed.filter((r) => r.length >= 3 && r.length <= 4 && r[0].includes(' ') && r[1] && /^\d{1,2}$/.test(r[2]) && Number(r[2]) >= 6 && Number(r[2]) <= 12 && !inviteEmailError(r[3]));
   const bad = parsed.length - valid.length;
-  const submit = () => {
-    if (!valid.length) return;
+  const published = !!project.listingId;
+  const submit = async () => {
+    if (!valid.length || busy) return;
     const pos = project.positions[0];
-    valid.forEach(([n, school, grade]) => addPerson(project.id, { n, school, grade, role: pos ? pos.t : 'Volunteer', positionId: pos ? pos.id : null }));
+    const added = valid.map(([n, school, grade, email]) => {
+      const person = addPerson(project.id, { n, school, grade, role: pos ? pos.t : 'Volunteer', positionId: pos ? pos.id : null });
+      if (person && email) updatePerson(project.id, person.id, { email });
+      return person ? { ...person, email: email || '' } : null;
+    }).filter(Boolean);
+    const title = `Imported ${plural(added.length, 'student')}`;
+    if (!published) {
+      api.close();
+      toast({ title, message: 'They’re on the roster as Added. Publish the project to get their invite links.', tone: 'ok' });
+      return;
+    }
+    setBusy(true);
+    const res = await createInvites(project.listingId, added.map((x) => ({ name: x.n, email: x.email, school: x.school, grade: x.grade, position: x.role, consent: false })));
+    setBusy(false);
     api.close();
-    toast({ title: `Imported ${plural(valid.length, 'student')}`, message: 'They’re on the roster as Added. Nobody was notified.', tone: 'ok' });
+    if (!res.ok) {
+      toast({ title, message: 'Their invite links didn’t save. Choose Create invite link from each row’s menu to try again.', tone: 'warn' });
+      return;
+    }
+    const invited = added.map((x, i) => ({ ...x, inviteId: res.invites[i].id, inviteToken: res.invites[i].token }));
+    invited.forEach((x) => updatePerson(project.id, x.id, { inviteId: x.inviteId, inviteToken: x.inviteToken }));
+    toast({ title, message: 'They’re on the roster as Invited. Send each one their link.', tone: 'ok' });
+    if (onInvited) onInvited(invited);
   };
   return (
     <div>
@@ -2216,21 +2507,21 @@ function ImportForm({ api, project }) {
         id="imp"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'Ana Castillo, Carmel High School, 11\nMarcus Bell, Carmel High School, 12'}
+        placeholder={'Ana Castillo, North Central High School, 11, ana@example.org\nMarcus Bell, Shortridge High School, 12'}
         className={H.input}
         style={S(`margin-top:8px;min-height:140px;${TEXTAREA}`)}
       />
       {parsed.length ? (
         <div className="vu-hint" aria-live="polite" style={S(`margin-top:8px;font:500 13px/1.4 ${F.body};color:${bad ? C.waiting : C.confirmed}`)}>
           {bad
-            ? `${valid.length} of ${plural(parsed.length, 'row')} ready. Each row needs a full name, a school and a grade from 6 to 12.`
+            ? `${valid.length} of ${plural(parsed.length, 'row')} ready. Each row needs a full name, a school and a grade from 6 to 12, then an email if you have one.`
             : `${plural(valid.length, 'row')} ready to import.`}
         </div>
       ) : null}
       <ModalActions>
         <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
-        <Button variant="primary" disabled={!valid.length} aria-disabled={valid.length ? undefined : 'true'} onClick={submit}>
-          {valid.length ? `Import ${plural(valid.length, 'student')}` : 'Import students'}
+        <Button variant="primary" busy={busy} disabled={!valid.length} aria-disabled={valid.length ? undefined : 'true'} onClick={submit}>
+          {busy ? 'Importing students' : valid.length ? `Import ${plural(valid.length, 'student')}` : 'Import students'}
         </Button>
       </ModalActions>
     </div>
@@ -2702,7 +2993,7 @@ function Shifts({ p, goTab, apps = [] }) {
   async function regenerate() {
     const ok = await confirmDialog({
       title: 'Change the check-in code?',
-      body: 'The current code stops working right away. Anyone who has it will need the new one.',
+      body: 'Share the new code before the next shift. Check-ins with the old code get flagged for you on Setup steps.',
       confirmLabel: 'Change code',
     });
     if (!ok) return;

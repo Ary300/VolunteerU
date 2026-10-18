@@ -101,6 +101,8 @@ const ICONS = {
   folder: [p('M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z')],
   dot: [ci(12, 12, 1)],
   navigation: [p('M3 11 22 2l-9 19-2-8-8-2z')],
+  maximize: [p('M15 3h6v6'), p('M9 21H3v-6'), p('m21 3-7 7'), p('m3 21 7-7')],
+  crosshair: [ci(12, 12, 10), p('M22 12h-4'), p('M6 12H2'), p('M12 6V2'), p('M12 22v-4')],
   'qr-code': [re(3, 3, 5, 5, 1), re(16, 3, 5, 5, 1), re(3, 16, 5, 5, 1), p('M21 16h-3a2 2 0 0 0-2 2v3'), p('M21 21v.01'), p('M12 7v3a2 2 0 0 1-2 2H7'), p('M3 12h.01'), p('M12 3h.01'), p('M12 16v.01'), p('M16 12h1'), p('M21 12v.01'), p('M12 21v-1')],
   // causes
   apple: [p('M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z'), p('M10 2c1 .5 2 2 2 5')],
@@ -279,6 +281,57 @@ const VARIANT = {
 };
 const SIZE = { sm: { h: 36, px: 14, fs: 14 }, md: { h: 44, px: 18, fs: 15 }, lg: { h: 52, px: 22, fs: 16 } };
 
+/* ---- waiting buttons --------------------------------------------------------
+   A button that starts an async action is disabled the moment it is pressed
+   (a second click can't fire it again), but its face changes only when the
+   wait runs past BUSY_SHOW_MS: fast actions never flash a spinner or a
+   "Saving" label. Past that, the label it had before the press keeps its
+   space (hidden), a small spinner sits centered on top and the busy label
+   the call site passed goes to screen readers, so the button never changes
+   width. When the action ends, the call site's result label shows in place.
+   ------------------------------------------------------------------------- */
+const BUSY_SHOW_MS = 150;
+
+function useBusyFace(busy, icon, children) {
+  const [late, setLate] = useState(false);
+  const idle = useRef({ icon, children });
+  if (!busy) idle.current = { icon, children };
+  useEffect(() => {
+    if (!busy) {
+      setLate(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setLate(true), BUSY_SHOW_MS);
+    return () => clearTimeout(t);
+  }, [busy]);
+  return { late: Boolean(busy && late), idle: busy ? idle.current : { icon, children } };
+}
+
+/** Button contents for every state. `gap` matches the button's own flex gap. */
+function ButtonFace({ busy, icon, iconSize, children, gap = 8 }) {
+  const { late, idle } = useBusyFace(busy, icon, children);
+  if (!late) {
+    return (
+      <>
+        {renderIcon(idle.icon, iconSize)}
+        {idle.children}
+      </>
+    );
+  }
+  return (
+    <>
+      <span aria-hidden="true" style={S(`display:inline-flex;align-items:center;gap:${gap}px;visibility:hidden`)}>
+        {renderIcon(idle.icon, iconSize)}
+        {idle.children}
+      </span>
+      <span aria-hidden="true" style={S('position:absolute;inset:0;display:grid;place-items:center;pointer-events:none')}>
+        <span className="vu-spin" />
+      </span>
+      <span className="vu-sr">{children}</span>
+    </>
+  );
+}
+
 /**
  * One button for every variant. Renders an <a> when `href` is given.
  * <Button variant="primary|dark|outline|danger|ghost" size="sm|md|lg" icon="plus" full busy>Log hours</Button>
@@ -293,15 +346,14 @@ export function Button({ variant = 'outline', size = 'md', icon, iconSize, href,
     variant === 'ghost' ? 'padding:0' : `padding:0 ${z.px}px`,
     `height:${z.h}px;border-radius:${R.control}`,
     v.css,
-    `font:600 ${z.fs}px/1 ${F.body};cursor:pointer`,
-    'transition:background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease',
+    `font:600 ${z.fs}px/1 ${F.body};cursor:pointer;position:relative`,
+    'transition:background .16s ease, border-color .16s ease, color .16s ease, transform .08s ease',
     extra
   );
   const inner = (
-    <>
-      {busy ? <span className="vu-spin" /> : renderIcon(icon, iconSize || (z.fs >= 16 ? 18 : 16))}
+    <ButtonFace busy={busy} icon={icon} iconSize={iconSize || (z.fs >= 16 ? 18 : 16)}>
       {children}
-    </>
+    </ButtonFace>
   );
   if (href) {
     // Same-site paths use next/link so they navigate client-side.
@@ -320,6 +372,7 @@ export function Button({ variant = 'outline', size = 'md', icon, iconSize, href,
       disabled={disabled || busy}
       data-disabled={disabled ? 'true' : undefined}
       data-busy={busy ? 'true' : undefined}
+      aria-busy={busy ? 'true' : undefined}
       style={style}
       {...rest}
     >
@@ -370,14 +423,14 @@ export function PrimaryButton({
         'color:#fff',
         `font:600 ${fs}px/1 ${F.body}`,
         ls ? `letter-spacing:${ls}` : '',
-        'cursor:pointer',
-        'transition:background .16s ease, transform .12s ease',
+        'cursor:pointer;position:relative',
+        'transition:background .16s ease, transform .08s ease',
         extra
       )}
+      aria-busy={busy ? 'true' : undefined}
       {...rest}
     >
-      {busy ? <span className="vu-spin" /> : renderIcon(icon, iconSize)}
-      {children}
+      <ButtonFace busy={busy} icon={icon} iconSize={iconSize}>{children}</ButtonFace>
     </button>
   );
 }
@@ -421,14 +474,14 @@ export function SecondaryButton({
         `background:${bg}`,
         `color:${OLD_BRAND.test(color) ? C.ink : color}`,
         `font:600 ${fs}px/1 ${F.body}`,
-        'cursor:pointer',
-        'transition:background .16s ease, border-color .16s ease, transform .12s ease',
+        'cursor:pointer;position:relative',
+        'transition:background .16s ease, border-color .16s ease, transform .08s ease',
         extra
       )}
+      aria-busy={busy ? 'true' : undefined}
       {...rest}
     >
-      {busy ? <span className="vu-spin" /> : renderIcon(icon, iconSize)}
-      {children}
+      <ButtonFace busy={busy} icon={icon} iconSize={iconSize}>{children}</ButtonFace>
     </button>
   );
 }
@@ -981,10 +1034,51 @@ function useRovingKeys(options, value, onChange) {
 }
 
 /**
+ * The picked option shows as selected on the press itself, even when the
+ * parent's `value` only follows after a route change (Discover writes its
+ * tab to the URL). The pick yields to `value` as soon as that changes, or
+ * after PICK_HOLD_MS if the parent never takes it.
+ */
+const PICK_HOLD_MS = 4000;
+function useOptimisticPick(value, onChange) {
+  const [picked, setPicked] = useState(null);
+  useEffect(() => { setPicked(null); }, [value]);
+  useEffect(() => {
+    if (picked === null) return undefined;
+    const t = setTimeout(() => setPicked(null), PICK_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [picked]);
+  const shown = picked !== null ? picked.v : value;
+  const pick = (v) => {
+    if (v !== shown) setPicked({ v });
+    if (onChange) onChange(v);
+  };
+  return [shown, pick];
+}
+
+/**
+ * A value to show ahead of the one a route change will bring, for controls
+ * whose state lives in the URL. `hold(v)` shows `v` at once; it yields as
+ * soon as `resetKey` changes (the route landed) or after PICK_HOLD_MS.
+ * Returns [held, hold]; `held` is undefined while nothing is held.
+ */
+export function useHeldValue(resetKey) {
+  const [held, setHeld] = useState(null);
+  useEffect(() => { setHeld(null); }, [resetKey]);
+  useEffect(() => {
+    if (held === null) return undefined;
+    const t = setTimeout(() => setHeld(null), PICK_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [held]);
+  return [held === null ? undefined : held.v, (v) => setHeld({ v })];
+}
+
+/**
  * Pill segmented control with counts: "Opportunities 27 | Nonprofits 748".
  * options: [{ v, l, count?, panelId? }]
  */
-export function Segmented({ options = [], value, onChange, label, size = 'md' }) {
+export function Segmented({ options = [], value: committed, onChange: commit, label, size = 'md' }) {
+  const [value, onChange] = useOptimisticPick(committed, commit);
   const onKeyDown = useRovingKeys(options, value, onChange);
   const sm = size === 'sm';
   return (
@@ -1023,7 +1117,8 @@ export function Segmented({ options = [], value, onChange, label, size = 'md' })
  * Underline tabs (profile: Hours / Applications / Notes from organizers / About).
  * options: [{ v, l, count?, panelId? }]
  */
-export function Tabs({ options = [], value, onChange, label }) {
+export function Tabs({ options = [], value: committed, onChange: commit, label }) {
+  const [value, onChange] = useOptimisticPick(committed, commit);
   const onKeyDown = useRovingKeys(options, value, onChange);
   return (
     <div role="tablist" aria-label={label} onKeyDown={onKeyDown} className="vu-tabs vu-scroll-x" style={S(`display:flex;gap:28px;border-bottom:1px solid ${C.line}`)}>

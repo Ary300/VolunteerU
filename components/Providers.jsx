@@ -10,7 +10,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { C } from '../lib/tokens.js';
-import { hydrate, useSnapshot, useHydrated, getState, update } from '../lib/store.js';
+import { hydrate, useSnapshot, useHydrated, update } from '../lib/store.js';
 import { initAuth } from '../lib/auth.js';
 import { syncVolunteerDirectory, refreshNotificationBadge, syncMyListingsVerification, syncMyServiceHours, justSignedOut as signedOutRecently } from '../lib/db.js';
 import { sameSitePath } from '../lib/safePath.js';
@@ -19,6 +19,7 @@ import OverlayHost from './OverlayHost.jsx';
 import OfflineBanner from './OfflineBanner.jsx';
 import AnalyticsProvider from './AnalyticsProvider.jsx';
 import { identifyUser, resetAnalytics } from '../lib/analytics.js';
+import { onboardingJustFinished, clearOnboardingFinished } from '../lib/onboardingFlag.js';
 
 /* Routes that require a signed-in account. */
 const PROTECTED = ['/app', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
@@ -26,12 +27,6 @@ const PROTECTED = ['/app', '/crew', '/volunteers', '/opportunity', '/apply', '/l
 const PUBLIC_IN_APP = ['/discover'];
 /* Routes a signed-in user should not sit on. */
 const AUTH_ONLY = ['/signin', '/signup', '/forgot'];
-/* How fresh the edit that flipped `onboarding.completed` must be to count as
-   the person finishing on the page. store.update stamps every local edit with
-   Date.now(), and the guard runs within a frame of it. A cloud copy merged in
-   by lib/sync.js carries an older stamp, because sync waits 700 ms after the
-   last edit before it pushes and merges. */
-const OWN_EDIT_MS = 600;
 
 /** The ?next= of the current URL when it is a same-site page outside the auth forms, else ''. */
 function nextTarget(search) {
@@ -168,14 +163,15 @@ export default function Providers({ children }) {
     const completed = !!state.onboarding.completed;
     // Only a flip the person made on the page counts. The cloud load turning
     // `completed` on is the account's real state arriving, not a finish.
-    if (pathname !== '/onboarding') finishedOnPage.current = false;
-    else if (wasCompleted.current === false && completed && wasReady.current) {
-      // Finish and Skip on the onboarding screen are the person's own edits
-      // and navigate on their own. A flip that arrived with a merged cloud
-      // copy (the account was already set up on another device or tab) is
-      // treated like arriving finished, so the guard sends them on.
-      const age = Date.now() - Number(getState().__updatedAt || 0);
-      finishedOnPage.current = age >= 0 && age < OWN_EDIT_MS;
+    if (pathname !== '/onboarding') {
+      finishedOnPage.current = false;
+      clearOnboardingFinished();
+    } else if (wasCompleted.current === false && completed && wasReady.current) {
+      // Finish and Skip on the onboarding screen mark themselves and navigate
+      // on their own. A flip that arrived with a merged cloud copy (the
+      // account was already set up on another device or tab) is treated like
+      // arriving finished, so the guard sends them on.
+      finishedOnPage.current = onboardingJustFinished();
     }
     wasCompleted.current = completed;
     wasReady.current = workspaceReady;

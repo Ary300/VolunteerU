@@ -113,6 +113,9 @@ function factsFor(app, scoped) {
   ].filter(Boolean);
 }
 
+/** "Ava" from "Ava Lin", for the toast's Message button. */
+const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'them';
+
 function openThread(app) {
   openModal({
     title: app.applicant_name,
@@ -201,6 +204,9 @@ export default function CrossApplications(props) {
         tone: 'ok',
         actionLabel: 'Undo',
         onAction: () => revert(app),
+        // The accepted row leaves the Waiting on you list, so the reply
+        // starts here instead of on another filter.
+        ...(status === 'accepted' && app.applicant_id ? { secondLabel: `Message ${firstName(app.applicant_name)}`, onSecond: () => openThread(app), timeout: 7000 } : {}),
       });
       announceChange();
       load();

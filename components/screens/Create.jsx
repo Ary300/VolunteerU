@@ -9,7 +9,7 @@
    ========================================================================== */
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx } from '../../lib/style.js';
 import { C, F, R, causeOf } from '../../lib/tokens.js';
 import { Pressable, Field, Select, TextArea, Checkbox, Chip, Icon, Button, RadioDot, IconButton } from '../ui.jsx';
@@ -19,7 +19,10 @@ import { useSnapshot, update } from '../../lib/store.js';
 import { openModal, confirmDialog, toast, dismissToast, menuFromEvent } from '../../lib/overlays.js';
 import { createProject, perform, verifiedHours, canCreateProject, projectBlockingCreation, getProject, parseSessionDate } from '../../lib/db.js';
 import { projectTemplates } from '../../lib/seed.js';
-import { PHOTOS, resolveCover, coverFits } from '../../lib/photos.js';
+import { resolveCover, suggestedCover } from '../../lib/photos.js';
+import CoverField from '../CoverField.jsx';
+import { geocode } from '../../lib/geo.js';
+import { readPartner, clearPartnerParams } from '../../lib/partnerPrefill.js';
 import {
   defaultDraft, generatedSessions, totalSlots, safetyComplete, validateFirstSession,
   CAUSE_OPTIONS, TERM_OPTIONS, REPEAT_OPTIONS, AUDIENCE_OPTIONS, MISSION_MAX,
@@ -62,17 +65,12 @@ const CLASS_OPTS = [
   { k: 'official', t: 'Registered nonprofit', d: 'An established organization' },
 ];
 
-/* Seed photos the cover picker offers, stored as their local /photos path.
-   Each is offered only for causes its subject fits (lib/photos.js `suits`),
-   so a tutoring project never gets the clothing-drive photos: Discover would
-   drop that cover and show the cause color anyway. */
-/* trail.jpg is left out: its subject faces the camera with crossed arms,
-   which reads as stock (Landing.jsx drops it for the same reason). */
-const COVER_KEYS = ['food', 'food2', 'civic', 'outdoor', 'seniors', 'shelter', 'lead', 'reading2', 'reading4'];
-
-/** The cover photos that fit a cause, in picker order. */
-function coversFor(cause) {
-  return COVER_KEYS.map((key) => ({ key, url: PHOTOS[key].src, pos: PHOTOS[key].pos })).filter((c) => coverFits(c.url, cause));
+/* The cover a draft publishes with: the lead's own pick (an upload or a
+   library photo), else a library photo for the cause, unless the lead chose
+   "No photo" (coverNone), in which case the listing shows its date tile. */
+function draftCover(d) {
+  if (d.cover) return d.cover;
+  return d.coverNone ? '' : suggestedCover(d.cause, d.coverSeed);
 }
 
 /* Repeats that name a weekday: the first shift has to fall on that day, or
@@ -153,17 +151,6 @@ const LOCAL_CSS = `
 .cr-seg-item:focus-visible { outline-offset:2px; }
 .cr-seg-note { margin:10px 0 0; font:400 14px/1.4 var(--f-body); color:var(--ink-2); }
 
-.cr-cover { position:relative; display:block; width:100%; max-width:300px; aspect-ratio:4 / 3; border-radius:var(--r-photo); overflow:hidden; cursor:pointer; background:var(--mist); }
-.cr-cover img { width:100%; height:100%; object-fit:cover; display:block; }
-.cr-cover-tag { position:absolute; right:12px; bottom:12px; display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; border-radius:var(--r-pill); background:rgba(255,255,255,.94); box-shadow:0 0 0 1px rgba(30,36,33,.06); font:600 13px/1 var(--f-body); color:var(--ink); }
-.cr-cover-help { margin:10px 0 0; max-width:300px; font:400 13px/1.45 var(--f-body); color:var(--ink-2); }
-.cr-cover:focus-visible { outline-offset:3px; border-radius:var(--r-photo); }
-.cr-picks { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
-.cr-pick { position:relative; display:block; aspect-ratio:4 / 3; border-radius:var(--r-control); overflow:hidden; cursor:pointer; background:var(--mist); }
-.cr-pick img { width:100%; height:100%; object-fit:cover; display:block; }
-.cr-pick[aria-pressed="true"] { box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--ink); }
-.cr-pick-on { position:absolute; right:8px; top:8px; width:26px; height:26px; border-radius:50%; display:grid; place-items:center; background:var(--ink); color:#fff; }
-.cr-pick:focus-visible { outline-offset:4px; }
 
 .cr-rows { border-top:1px solid var(--line); }
 .cr-row { display:flex; align-items:center; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); min-width:0; }
@@ -211,14 +198,12 @@ const LOCAL_CSS = `
   .cr-grid2 { grid-template-columns:minmax(0,1fr); gap:20px; }
   .cr-sched { gap:20px 12px; }
   .cr-sched-wide { grid-column:1 / -1; }
-  .cr-picks { grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
   .cr-pipe-meta, .cr-pipe-links { grid-template-columns:minmax(0,1fr); }
   .cr-task { grid-template-columns:minmax(0,1fr) 36px; }
   .cr-task > .cr-task-role { grid-column:1 / -1; grid-row:2; }
   .cr-review > div { grid-template-columns:minmax(0,1fr); gap:4px; }
   .cr-actions { flex-direction:column; align-items:stretch; }
   .cr-actions > .vu-btn { width:100%; }
-  .cr-cover { max-width:none; }
 }
 `;
 
@@ -328,6 +313,24 @@ export default function Create() {
   const router = useRouter();
   const { state } = useSnapshot();
   const [draft, setDraft] = useState(() => state.drafts.create || defaultDraft());
+  // "Start a student project with them" on a nonprofit page arrives with
+  // ?partner=...: that nonprofit becomes the project's site, in person. The
+  // query is read from the router, which is current even when a client
+  // navigation renders this screen before the address bar changes. Signed
+  // out, the query is left in place so the sign-in redirect carries it.
+  const searchParams = useSearchParams();
+  const partnerQuery = searchParams ? searchParams.toString() : '';
+  const authed = !!(state.session && state.session.authed);
+  const partnerDone = useRef('');
+  useEffect(() => {
+    if (!authed) return;
+    const partner = readPartner(partnerQuery);
+    if (!partner || partnerDone.current === partner.site) return;
+    partnerDone.current = partner.site;
+    setDraft((d) => ({ ...d, site: partner.site, delivery: d.delivery === 'remote' ? 'in_person' : d.delivery }));
+    clearPartnerParams();
+    toast({ title: 'Site filled in', message: `${partner.name} is the project's site. Change it in About the project.`, tone: 'ok' });
+  }, [partnerQuery, authed]);
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const hasProject = (state.projects || []).length > 0;
@@ -345,6 +348,22 @@ export default function Create() {
       { silent: true }
     );
   }, [draft]);
+
+  // Picks which library photo a new draft suggests, once, so two leads with
+  // the same cause don't start on the same cover. Kept in the draft so the
+  // preview doesn't change between visits.
+  useEffect(() => {
+    if (draft.coverSeed === undefined) setDraft((cur) => (cur.coverSeed === undefined ? { ...cur, coverSeed: Math.floor(Math.random() * 1000) } : cur));
+  }, [draft.coverSeed]);
+
+  // Look the site up on the map once typing pauses, so publishing finds its
+  // coordinates already cached (lib/listings.js publishListing).
+  const siteToPlace = draft.orgType === 'team' || draft.delivery === 'remote' ? '' : String(draft.site || '').trim();
+  useEffect(() => {
+    if (siteToPlace.length < 6) return undefined;
+    const t = setTimeout(() => { geocode(siteToPlace); }, 1200);
+    return () => clearTimeout(t);
+  }, [siteToPlace]);
 
   const step = Math.min(4, Math.max(1, draft.step || 1));
   const isTeam = draft.orgType === 'team';
@@ -514,8 +533,9 @@ export default function Create() {
     try {
       const cap = totalSlots(draft) || DEFAULT_CAP;
       const pipeline = labeledSteps(draft.pipeline);
-      // A cover that doesn't fit the cause (an older draft) would never show.
-      const cover = resolveCover(draft.cover, draft.cause) ? draft.cover : '';
+      // An older draft's seed photo that doesn't fit the cause would never show.
+      const picked = draftCover(draft);
+      const cover = resolveCover(picked, draft.cause) ? picked : '';
       const payload = isTeam
         ? { ...draft, cover, pipeline, positions: [], sessions: [] }
         : { ...draft, cover, pipeline, crewTarget: cap, sessions: generatedSessions(draft) };
@@ -667,7 +687,7 @@ function PreviewCard({ d, account, isTeam }) {
           time={first ? rangeText(first.t) : ''}
           moreDates={Math.max(0, shifts.length - 1)}
           online={d.delivery === 'remote'}
-          photo={resolveCover(d.cover, d.cause)}
+          photo={resolveCover(draftCover(d), d.cause)}
           cause={d.cause}
           headingLevel={3}
           prefetch={false}
@@ -822,72 +842,9 @@ function DeliveryControl({ value, onChange }) {
 }
 
 function Step1({ d, set, errors, onNext, router, hasHours }) {
-  const cover = resolveCover(d.cover, d.cause);
   // Without a photo the field previews the same date tile the card shows.
   const firstShift = draftShifts(d, d.orgType === 'team')[0];
   const firstDate = firstShift ? firstShift.d : null;
-
-  function pickCover() {
-    const fits = coversFor(d.cause);
-    const current = resolveCover(d.cover);
-    openModal({
-      title: 'Cover photo',
-      subtitle: 'Shown on your listing and project page.',
-      size: 'wide',
-      Body: function CoverBody({ api }) {
-        return (
-          <div>
-          {fits.length ? (
-          <div className="cr-picks">
-            {fits.map(({ key, url, pos }, i) => {
-              const on = Boolean(current && current.key === key);
-              return (
-                <Pressable
-                  key={key}
-                  label={`Use cover photo ${i + 1}`}
-                  pressed={on}
-                  onClick={() => {
-                    set({ cover: url });
-                    api.close();
-                    toast({ title: 'Cover updated', tone: 'ok', timeout: 2000 });
-                  }}
-                  className="cr-pick"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt="" loading="lazy" decoding="async" style={{ objectPosition: pos }} />
-                  {on ? (
-                    <span className="cr-pick-on" aria-hidden="true">
-                      <Icon name="check" size={15} stroke={2.25} />
-                    </span>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </div>
-          ) : (
-            <p style={S(`margin:0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
-              We don&apos;t have a photo that fits {d.cause || 'this cause'} yet, so your listing shows its next date.
-            </p>
-          )}
-          {d.cover ? (
-            <div style={S('margin-top:16px')}>
-              <Button
-                size="sm"
-                onClick={() => {
-                  set({ cover: '' });
-                  api.close();
-                  toast({ title: 'Photo removed', message: 'Your listing shows its next date instead.', tone: 'ok', timeout: 2500 });
-                }}
-              >
-                Remove photo
-              </Button>
-            </div>
-          ) : null}
-          </div>
-        );
-      },
-    });
-  }
 
   return (
     <div>
@@ -943,7 +900,7 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
             onChange={(v) => set({ site: v })}
             maxLength={90}
             required={d.delivery !== 'remote'}
-            placeholder={d.delivery === 'remote' ? 'e.g. Carmel' : 'e.g. Carmel Clay Public Library'}
+            placeholder={d.delivery === 'remote' ? 'e.g. Indianapolis' : 'e.g. Central Library, Indianapolis'}
             error={errors.site}
           />
           <Field label="Website or social link" value={d.website} onChange={(v) => set({ website: v })} placeholder="Optional" type="url" error={errors.website} />
@@ -964,27 +921,19 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
       <Section id="cr-photo" title="Photo and term">
         <div className="cr-grid2" style={S('align-items:start')}>
           <div>
-            <div style={S(`font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Cover photo</div>
-            <Pressable label={cover ? 'Change the cover photo' : 'Add a cover photo'} onClick={pickCover} className="cr-cover" style={S('margin-top:8px')}>
-              {cover ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={cover.src} alt="" decoding="async" style={{ objectPosition: cover.pos }} />
-              ) : (
-                <DateTile cause={d.cause} date={firstDate} />
-              )}
-              <span className="cr-cover-tag" aria-hidden="true">
-                <Icon name="image" size={15} />
-                {cover ? 'Change' : 'Add a photo'}
-              </span>
-            </Pressable>
-            {d.cover && !cover ? (
-              <p className="cr-cover-help">
-                Your photo doesn&apos;t fit {d.cause}, so Discover shows the date instead.{' '}
-                {coversFor(d.cause).length ? 'Pick another photo or change the cause.' : 'Change the cause to use it.'}
-              </p>
-            ) : !cover ? (
-              <p className="cr-cover-help">Add a cover photo so your listing shows a picture.</p>
-            ) : null}
+            <CoverField
+              id="cr-cover"
+              value={d.cover || ''}
+              suggested={d.coverNone ? '' : suggestedCover(d.cause, d.coverSeed)}
+              cause={d.cause}
+              fallback={<DateTile cause={d.cause} date={firstDate} />}
+              onChange={(cover, { kind }) => {
+                set(kind === 'none' ? { cover: '', coverNone: true } : { cover, coverNone: false });
+                toast(kind === 'none'
+                  ? { title: 'Photo removed', message: 'Your listing shows its next date instead.', tone: 'ok', timeout: 2500 }
+                  : { title: kind === 'upload' ? 'Photo uploaded' : 'Cover updated', tone: 'ok', timeout: 2000 });
+              }}
+            />
           </div>
           <div className="cr-stack">
             <Select label="Term length" value={d.term} onChange={(v) => set({ term: v })} options={TERM_OPTIONS} hint={d.orgType === 'team' ? undefined : 'Sets how many weekly shifts we schedule.'} />
@@ -1037,17 +986,25 @@ function Step2({ d, set, errors, onNext, onBack }) {
   }
 
   function applyTemplate(t) {
+    const before = d.cause;
+    const changed = Boolean(t.cause && before && t.cause !== before);
     set({
       positions: t.positions.map((name, i) => ({ t: name, slots: i === 0 ? 8 : 1, age: '13+', train: 'None', commit: '1 hr weekly', note: '', requirements: [] })),
-      cause: t.cause,
+      cause: t.cause || before,
     });
-    toast({ title: 'Template applied', message: `Added ${plural(t.positions.length, 'position')}. Change spots and ages to fit.`, tone: 'ok' });
+    // A cause change is named, with a one-tap way back to the one picked on step 1.
+    toast({
+      title: 'Template applied',
+      message: `Added ${plural(t.positions.length, 'position')}.${changed ? ` Cause changed to ${causeOf(t.cause).label}.` : ''} Change spots and ages to fit.`,
+      tone: 'ok',
+      ...(changed ? { actionLabel: `Keep ${causeOf(before).label}`, onAction: () => set({ cause: before }) } : {}),
+    });
   }
 
   function useTemplate(e) {
     menuFromEvent(
       e,
-      projectTemplates.map((t) => ({ key: t.id, label: `${t.t}, ${t.m}`, icon: 'clipboard' })),
+      projectTemplates.map((t) => ({ key: t.id, label: t.t, icon: 'clipboard' })),
       async (key) => {
         const t = projectTemplates.find((x) => x.id === key);
         if (!t) return;

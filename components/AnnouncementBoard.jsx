@@ -12,8 +12,8 @@
 import { useEffect, useState } from 'react';
 import { S } from '../lib/style.js';
 import { C, F } from '../lib/tokens.js';
-import { Button, IconButton, TextArea } from './ui.jsx';
-import { toast, confirmDialog } from '../lib/overlays.js';
+import { Button, IconButton, TextArea, Icon } from './ui.jsx';
+import { toast, confirmDialog, menuFromEvent } from '../lib/overlays.js';
 import { loadAnnouncements, postAnnouncement, deleteAnnouncement } from '../lib/listings.js';
 
 const MAX_LEN = 1000;
@@ -32,7 +32,28 @@ export function whenLabel(at) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function AnnouncementBoard({ listingId, canPost = false, compact = false, title = 'Announcements' }) {
+export function TemplatesButton({ templates, onPick }) {
+  if (!templates || !templates.length) return null;
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      aria-label="Insert a message template"
+      aria-haspopup="menu"
+      aria-expanded="false"
+      onClick={(e) => menuFromEvent(e, templates.map((t) => ({ key: t.key, label: t.label, icon: 'edit' })), (key) => {
+        const t = templates.find((x) => x.key === key);
+        if (t) onPick(t.text);
+      })}
+    >
+      Templates
+      <Icon name="chevron-down" size={14} />
+    </Button>
+  );
+}
+
+/* `templates` ([{ key, label, text }]) adds a Templates menu that fills the composer. */
+export default function AnnouncementBoard({ listingId, canPost = false, compact = false, title = 'Announcements', templates = null }) {
   const [items, setItems] = useState(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -82,7 +103,8 @@ export default function AnnouncementBoard({ listingId, canPost = false, compact 
               maxLength={MAX_LEN}
               minHeight={72}
             />
-            <div style={S('margin-top:10px;display:flex;justify-content:flex-end')}>
+            <div style={S('margin-top:10px;display:flex;justify-content:flex-end;gap:8px')}>
+              <TemplatesButton templates={templates} onPick={setDraft} />
               <Button variant="dark" size="sm" busy={busy} disabled={!draft.trim()} aria-disabled={!draft.trim() || busy ? 'true' : undefined} onClick={post}>
                 {busy ? 'Posting' : 'Post update'}
               </Button>

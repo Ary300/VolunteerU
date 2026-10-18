@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { S, s } from '../lib/style.js';
 import { C, F, R } from '../lib/tokens.js';
 import { toast } from '../lib/overlays.js';
+import { TemplatesButton } from './AnnouncementBoard.jsx';
 import { loadMessages, sendMessage, myId as getMyId } from '../lib/listings.js';
 import { Button, Icon } from './ui.jsx';
 
@@ -36,7 +37,8 @@ function sameGroup(m, next) {
 
 const NOTE = `margin:auto;max-width:300px;text-align:center;font:400 14px/1.5 ${F.body};color:${C.ink2}`;
 
-export default function MessageThread({ applicationId, recipientId, recipientName = 'them' }) {
+/* `templates` ([{ key, label, text }]) adds a Templates menu that fills the composer. */
+export default function MessageThread({ applicationId, recipientId, recipientName = 'them', templates = null }) {
   const [msgs, setMsgs] = useState([]);
   const [me, setMe] = useState(null);
   const [text, setText] = useState('');
@@ -164,6 +166,11 @@ export default function MessageThread({ applicationId, recipientId, recipientNam
           );
         })}
       </div>
+      {templates && templates.length ? (
+        <div style={S('padding-top:10px;display:flex;justify-content:flex-end')}>
+          <TemplatesButton templates={templates} onPick={setText} />
+        </div>
+      ) : null}
       <div style={S(`padding-top:12px;border-top:1px solid ${C.line};display:flex;gap:8px;align-items:flex-end`)}>
         <textarea
           value={text}

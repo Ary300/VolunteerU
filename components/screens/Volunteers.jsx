@@ -129,7 +129,7 @@ function InviteActions({ first, api }) {
       <div style={S(panel)}>
         <div>Publish {draft.name} to turn on its join link. Anyone with the link, {first} included, can then apply.</div>
         <div style={S('margin-top:12px')}>
-          <Button size="sm" href={`/lead/${draft.id}`} onClick={() => api.close()}>Open your project</Button>
+          <Button size="sm" href={`/lead/${draft.id}/overview`} onClick={() => api.close()}>Open your project</Button>
         </div>
       </div>
     );
@@ -227,6 +227,9 @@ export default function Volunteers() {
   // The query string this screen last wrote, so a URL change it made itself
   // isn't read back as an outside navigation.
   const written = useRef(params.toString());
+  // A cause chip is a choice the visitor makes, so it gets its own history
+  // entry (Back undoes it, as on Discover). Typing replaces.
+  const pushNext = useRef(false);
   const [rows, setRows] = useState(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -266,7 +269,10 @@ export default function Volunteers() {
       const qs = filtersQuery({ q: q.trim(), near: near.trim(), causes });
       if (qs === written.current) return;
       written.current = qs;
-      window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+      const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+      if (pushNext.current) window.history.pushState(null, '', url);
+      else window.history.replaceState(null, '', url);
+      pushNext.current = false;
     }, (q || near) ? 280 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -306,7 +312,10 @@ export default function Volunteers() {
     }
   }
 
-  const toggleCause = (c) => setCauses((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
+  const toggleCause = (c) => {
+    pushNext.current = true;
+    setCauses((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
+  };
   const active = Boolean(q.trim() || causes.length || near.trim());
   const clearAll = () => { setQ(''); setNear(''); setCauses([]); };
 
@@ -345,7 +354,7 @@ export default function Volunteers() {
             <span className="vu-sb-ic"><Icon name="pin" size={20} /></span>
             <span className="vu-sb-body">
               <span className="vu-sb-label">Where</span>
-              <input type="text" aria-label="Filter by city" autoComplete="off" value={near} placeholder="City, e.g. Carmel" onChange={(e) => setNear(e.target.value)} className="vu-sb-input" />
+              <input type="text" aria-label="Filter by city" autoComplete="off" value={near} placeholder="City, e.g. Indianapolis" onChange={(e) => setNear(e.target.value)} className="vu-sb-input" />
             </span>
             {near ? <button type="button" aria-label="Clear city" onClick={() => setNear('')} className="vu-iconbtn" style={S(CLEAR_BTN)}><Icon name="x" size={16} /></button> : null}
           </label>

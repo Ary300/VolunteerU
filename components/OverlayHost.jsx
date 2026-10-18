@@ -11,6 +11,7 @@ import {
   useOverlays, dismissToast, holdToast, releaseToast, closeModal, closeMenu, closeTopOverlay,
 } from '../lib/overlays.js';
 import { SecondaryButton, Field, Icon, renderIcon } from './ui.jsx';
+import RouteProgress from './RouteProgress.jsx';
 
 export default function OverlayHost() {
   const { toasts, modals, menu } = useOverlays();
@@ -44,19 +45,146 @@ export default function OverlayHost() {
     };
   }, [modals.length]);
 
+  const shown = useLeavingModals(modals);
+  // On phones a toast born while a dialog was open has its own stack at the
+  // top (lib/overlays.js toast()); every other toast stays at the bottom.
+  const phone = usePhone();
+  const topToasts = phone ? toasts.filter((t) => t.top) : [];
+  const bottomToasts = phone ? toasts.filter((t) => !t.top) : toasts;
+
   return (
     <>
-      {modals.map((m) => (
-        <Modal key={m.id} entry={m} />
-      ))}
+      <RouteProgress />
+      {shown.map((m) => (m.html ? (
+        <div key={`${m.id}-out`} className="vu-ghost" aria-hidden="true" inert dangerouslySetInnerHTML={{ __html: m.html }} />
+      ) : (
+        <Modal key={m.id} entry={m.entry} />
+      )))}
       {menu ? <Menu menu={menu} /> : null}
-      <div className="vu-toasts" role="region" aria-label="Notifications">
-        {toasts.map((t) => (
-          <Toast key={t.id} toast={t} />
-        ))}
+      <div role="region" aria-label="Notifications" style={S('display:contents')}>
+        <div className="vu-toasts">
+          {bottomToasts.map((t) => (
+            <Toast key={t.id} toast={t} />
+          ))}
+        </div>
+        {topToasts.length ? (
+          <div className="vu-toasts vu-toasts-top">
+            {topToasts.map((t) => (
+              <Toast key={t.id} toast={t} />
+            ))}
+          </div>
+        ) : null}
       </div>
     </>
   );
+}
+
+const PHONE_MQ = '(max-width: 719px)';
+function usePhone() {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(PHONE_MQ);
+    const sync = () => setPhone(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return phone;
+}
+
+/* ---- closing dialogs -------------------------------------------------------
+   When a dialog leaves the overlay store, the real dialog unmounts at once
+   (focus goes back, its effects clean up) and a static copy of its markup
+   stays for EXIT_MS, inert and hidden from assistive tech, so it can fade
+   out instead of vanishing. The copy runs no React code, so nothing in it
+   can read data the close just removed. Reduced motion: no copy.
+   ------------------------------------------------------------------------- */
+
+const EXIT_MS = 130;
+
+function prefersReducedMotion() {
+  if (typeof window === 'undefined') return true;
+  if (document.documentElement.getAttribute('data-motion') === 'off') return true;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+/* The copy is decoration: no ids (they belong to the live page), no dialog
+   role and nothing focusable, so scripts and assistive tech never find it. */
+function ghostMarkup(el) {
+  const copy = el.cloneNode(true);
+  for (const n of [copy, ...copy.querySelectorAll('*')]) {
+    n.removeAttribute('id');
+    n.removeAttribute('role');
+    n.removeAttribute('aria-modal');
+    n.removeAttribute('aria-labelledby');
+    if (n.hasAttribute('tabindex')) n.setAttribute('tabindex', '-1');
+  }
+  return copy.outerHTML;
+}
+
+const MENU_EXIT_MS = 110;
+
+/**
+ * Leaves a static, inert copy of `el` on the page for a moment so a menu or
+ * the welcome tour fades out instead of vanishing. Call it while `el` is
+ * still in the DOM (a layout-effect cleanup runs before React removes it).
+ * The copy sits outside React's tree and removes itself. Reduced motion: no
+ * copy.
+ * @param {HTMLElement|null} el
+ * @param {string} className classes for the copy's wrapper
+ */
+export function leaveGhost(el, className = 'vu-ghost-pop') {
+  if (!el || !el.isConnected || prefersReducedMotion()) return;
+  const html = ghostMarkup(el);
+  // Only a real removal leaves a copy: if the element is still on the page
+  // a moment later (Strict Mode's rehearsal unmount), nothing happens. No
+  // frame paints between the removal and this check.
+  queueMicrotask(() => {
+    if (el.isConnected) return;
+    const wrap = document.createElement('div');
+    wrap.className = className;
+    wrap.setAttribute('aria-hidden', 'true');
+    wrap.inert = true;
+    wrap.innerHTML = html;
+    document.body.appendChild(wrap);
+    setTimeout(() => wrap.remove(), MENU_EXIT_MS + 40);
+  });
+}
+
+function useLeavingModals(modals) {
+  const prev = useRef([]);
+  const ghosts = useRef(new Map()); // id -> { id, html, index }
+  const [, rerender] = useState(0);
+
+  // Read during render, while the closing dialog is still in the DOM, so the
+  // copy replaces it in the same commit with no empty frame between.
+  if (prev.current !== modals) {
+    const live = new Set(modals.map((m) => m.id));
+    if (typeof document !== 'undefined' && !prefersReducedMotion()) {
+      prev.current.forEach((m, index) => {
+        if (live.has(m.id) || ghosts.current.has(m.id)) return;
+        const el = document.getElementById(`${m.id}-scrim`);
+        if (el) ghosts.current.set(m.id, { id: m.id, html: ghostMarkup(el), index });
+      });
+    }
+    prev.current = modals;
+  }
+
+  useEffect(() => {
+    if (!ghosts.current.size) return undefined;
+    const t = setTimeout(() => {
+      ghosts.current.clear();
+      rerender((n) => n + 1);
+    }, EXIT_MS);
+    return () => clearTimeout(t);
+  }, [modals]);
+
+  const out = modals.map((entry) => ({ id: entry.id, entry }));
+  Array.from(ghosts.current.values())
+    .sort((a, b) => a.index - b.index)
+    .forEach((g) => out.splice(Math.min(g.index, out.length), 0, g));
+  return out;
 }
 
 /* ---- click shield ---------------------------------------------------------
@@ -95,39 +223,63 @@ function useClickShield(openCount) {
 
 /* ---- toast --------------------------------------------------------------- */
 
+/* Each toast sits in a slot that folds shut while the toast fades, so the
+   ones above it slide down instead of jumping (globals.css .vu-toast-slot). */
 function Toast({ toast }) {
   return (
-    <div
-      className="vu-toast"
-      data-tone={toast.tone}
-      data-out={toast.out ? 'true' : 'false'}
-      role={toast.tone === 'danger' ? 'alert' : 'status'}
-      onMouseEnter={() => holdToast(toast.id)}
-      onMouseLeave={() => releaseToast(toast.id)}
-    >
-      <span className="vu-toast-dot" aria-hidden="true" />
-      <div style={S('flex:1;min-width:0')}>
-        <div className="vu-toast-title">{toast.title}</div>
-        {toast.message ? <div className="vu-toast-msg">{toast.message}</div> : null}
-        {toast.actionLabel ? (
-          <button
-            type="button"
-            className="vu-toast-act"
-            onClick={() => {
-              try {
-                toast.onAction && toast.onAction();
-              } finally {
-                dismissToast(toast.id);
-              }
-            }}
-          >
-            {toast.actionLabel}
+    <div className="vu-toast-slot" data-out={toast.out ? 'true' : undefined}>
+      <div className="vu-toast-fit">
+        <div
+          className="vu-toast"
+          data-tone={toast.tone}
+          data-out={toast.out ? 'true' : 'false'}
+          role={toast.tone === 'danger' ? 'alert' : 'status'}
+          aria-live={toast.tone === 'danger' ? 'assertive' : 'polite'}
+          onMouseEnter={() => holdToast(toast.id)}
+          onMouseLeave={() => releaseToast(toast.id)}
+          onFocus={() => holdToast(toast.id)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) releaseToast(toast.id); }}
+        >
+          <span className="vu-toast-dot" aria-hidden="true" />
+          <div style={S('flex:1;min-width:0')}>
+            <div className="vu-toast-title">{toast.title}</div>
+            {toast.message ? <div className="vu-toast-msg">{toast.message}</div> : null}
+            {toast.actionLabel ? (
+              <button
+                type="button"
+                className="vu-toast-act"
+                onClick={() => {
+                  try {
+                    toast.onAction && toast.onAction();
+                  } finally {
+                    dismissToast(toast.id);
+                  }
+                }}
+              >
+                {toast.actionLabel}
+              </button>
+            ) : null}
+            {toast.secondLabel ? (
+              <button
+                type="button"
+                className="vu-toast-act"
+                onClick={() => {
+                  try {
+                    toast.onSecond && toast.onSecond();
+                  } finally {
+                    dismissToast(toast.id);
+                  }
+                }}
+              >
+                {toast.secondLabel}
+              </button>
+            ) : null}
+          </div>
+          <button type="button" className="vu-toast-x" aria-label="Dismiss" onClick={() => dismissToast(toast.id)}>
+            <Icon name="x" size={15} />
           </button>
-        ) : null}
+        </div>
       </div>
-      <button type="button" className="vu-toast-x" aria-label="Dismiss" onClick={() => dismissToast(toast.id)}>
-        <Icon name="x" size={15} />
-      </button>
     </div>
   );
 }
@@ -187,6 +339,7 @@ function Modal({ entry }) {
 
   return (
     <div
+      id={`${entry.id}-scrim`}
       className="vu-scrim"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && entry.dismissable !== false) close('scrim');
@@ -250,7 +403,6 @@ function Modal({ entry }) {
 function Confirm({ entry, padTop }) {
   const [text, setText] = useState('');
   const [invalid, setInvalid] = useState(false);
-  const [shake, setShake] = useState(false);
   const need = entry.requireText || '';
   const matches = !need || text.trim() === need;
 
@@ -260,9 +412,10 @@ function Confirm({ entry, padTop }) {
   };
   const tryConfirm = () => {
     if (!matches) {
+      // The field says what to type; focus goes there to type it.
       setInvalid(true);
-      setShake(true);
-      setTimeout(() => setShake(false), 420);
+      const input = document.getElementById(`${entry.id}-text`);
+      if (input) input.focus();
       return;
     }
     finish(true);
@@ -298,13 +451,14 @@ function Confirm({ entry, padTop }) {
           type="button"
           data-autofocus={need ? undefined : true}
           aria-describedby={need && !matches ? `${entry.id}-require` : undefined}
-          className={cx('vu-btn', H.press, entry.tone === 'danger' ? 'vu-btn-destroy' : 'vu-btn-primary', shake && 'vu-shake')}
+          className={cx('vu-btn', H.press, entry.tone === 'danger' ? 'vu-btn-destroy' : 'vu-btn-primary')}
           onClick={tryConfirm}
           style={s(
             'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none',
             'padding:0 18px;height:44px;border-radius:10px',
             // Until the typed text matches, it wears the shared disabled look
-            // (mist fill, ink-3 label) but stays clickable so it can shake.
+            // (mist fill, ink-3 label) but stays clickable, so a press shows
+            // the field's error and puts focus there.
             matches
               ? `border:1px solid ${entry.tone === 'danger' ? C.emberDeep : C.ember};background:${entry.tone === 'danger' ? C.emberDeep : C.ember};color:#fff`
               : `border:1px solid ${C.mist};background:${C.mist};color:${C.ink3}`,
@@ -336,6 +490,12 @@ function nextFocusable(el) {
 function Menu({ menu }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: -9999, top: -9999 });
+
+  // Closing fades a copy out (leaveGhost), the way dialogs and toasts leave.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    return () => leaveGhost(el);
+  }, []);
 
   useLayoutEffect(() => {
     const el = ref.current;

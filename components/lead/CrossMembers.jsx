@@ -368,7 +368,7 @@ export function TeamMembersManager({ p }) {
                     <div style={S('min-width:0')}>
                       <div style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{app.applicant_name}</div>
                       <div style={S(`margin-top:3px;${SMALL}`)}>
-                        {app.position ? `Applied as ${app.position}` : 'Joined through your join link'}
+                        {app.position ? `Applied as ${app.position}` : app.assignment && app.assignment.inviteId ? 'Joined with your invite link' : 'Applied on VolunteerU'}
                         {a.role ? (acked ? ', read their briefing' : ", hasn't read their briefing") : ''}
                       </div>
                       <LastCheckIn app={app} p={p} />

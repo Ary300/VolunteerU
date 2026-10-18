@@ -15,9 +15,18 @@ import { S } from '../lib/style.js';
 import AppShell from './AppShell.jsx';
 import { SkeletonRows } from './ui.jsx';
 
+/* True once any frame has mounted in this tab. Only the first page of a
+   visit is hydrated from server HTML; every later page arrives through the
+   client router, where the store is already loaded, so it renders the real
+   screen on its first pass instead of flashing the skeleton for a frame. */
+let clientReady = false;
+
 function useMounted() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [mounted, setMounted] = useState(clientReady);
+  useEffect(() => {
+    clientReady = true;
+    setMounted(true);
+  }, []);
   return mounted;
 }
 
@@ -56,11 +65,13 @@ export function ScreenFallback({ bare }) {
   );
 }
 
-export default function AppFrame({ children }) {
+/* `loading` is for route loading.js files: the same chrome around a static
+   placeholder, without the first-visit tours (they wait for the real page). */
+export default function AppFrame({ children, loading = false }) {
   const mounted = useMounted();
   if (!mounted) return <ScreenFallback bare />;
   return (
-    <AppShell>
+    <AppShell loading={loading}>
       <Suspense fallback={<ScreenFallback />}>{children}</Suspense>
     </AppShell>
   );

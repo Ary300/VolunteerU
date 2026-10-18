@@ -16,9 +16,10 @@ import { S } from '../../lib/style.js';
 import { C, F, CATEGORIES } from '../../lib/tokens.js';
 import { useSnapshot } from '../../lib/store.js';
 import { Button, Icon } from '../ui.jsx';
-import { SearchBar, CategoryRow, ListingCard, NonprofitRow, DateBlock, whenParts, Sep, WHEN_OPTIONS } from '../vu/index.js';
+import { SearchBar, CategoryRow, ListingCard, NonprofitRow, DateBlock, whenParts, Sep, WHEN_OPTIONS, ShareHoursCard } from '../vu/index.js';
 import { MarketingHeader, MarketingFooter, useMarketingLinks, scrollToAnchor } from '../Marketing.jsx';
 import { searchListings, searchWebNonprofits, parseState, listingShifts } from '../../lib/listings.js';
+import { isVolunteerPlace } from '../../lib/nonprofitRules.js';
 import { inferYear, shiftDates } from '../../lib/calendar.js';
 import { whenWindow } from '../DiscoverListings.jsx';
 import { pickPhotos, PHOTOS, DONATION_PHOTOS } from '../../lib/photos.js';
@@ -39,13 +40,11 @@ const ART_CHOICES = {
   // A group at work, nobody posing.
   shift: ['reading4', 'reading', 'shelter', 'reading3'],
   lead: ['shelter', 'reading2', 'reading', 'reading4'],
-  // A volunteer filling in a sign-in sheet; then a sorting table.
-  hours: ['outdoor', 'reading5', 'shelter', 'reading2'],
 };
 /* trail.jpg is left out on purpose: its subject poses for the camera with
    crossed arms, which reads as stock. A listing may still use it as a cover.
    The pair fills first so it keeps both photos when choices run short. */
-const ART_ORDER = ['shift', 'lead', 'hours'];
+const ART_ORDER = ['shift', 'lead'];
 /* Crops for the wide 16:10 art frame, where the card crop would cut heads. */
 const ART_POS = { reading5: 'center 12%' };
 /* Photos from one Pexels shoot show the same people at the same table, so
@@ -66,7 +65,7 @@ const shootOf = (key) => (PHOTOS[key] && PHOTOS[key].shoot) || ART_SHOOTS[key] |
    photo may fall back to a shoot a card shows, so the same models never
    turn up again further down the page. A photo never repeats. When the pair
    gets one photo it runs as `wide`, one frame across both columns, so the
-   columns stay level. With no hours photo that section runs as text. */
+   columns stay level. */
 const FALLBACK_SLOTS = new Set(['shift']);
 function pickArt(taken) {
   const used = new Set([HERO_PHOTO, ...taken]);
@@ -118,19 +117,22 @@ function gridAndRows(list, photos) {
 /* With no search yet, a spread of causes from IRS records. */
 const DEFAULT_ORG_QUERIES = ['food bank', 'animal shelter', 'public library', 'homeless shelter'];
 
-/* Signed-out visitors start in Carmel, Indiana, where VolunteerU is built. */
-const HOME_AREA = 'Carmel, IN';
-const HOME_CITY = 'Carmel';
-/* Real Carmel nonprofits: ProPublica pages for "Carmel" in Indiana, kept to
-   rows whose city is Carmel. Churches, political groups, sports clubs and
-   boosters are left out of the default list since they rarely take student
-   volunteers; a search still finds them. */
-const CARMEL_PAGES = [0, 1, 2];
-const CARMEL_SKIP = /church|baptist|baha|lutheran|methodist|presbyterian|wesleyan|catholic|assembly|ministr|democrat|republican|building corp|golf|lacrosse|baseball|hockey|rugby|wrestling|swim|basketball|soccer|football|runners|teachers assoc|fop|lodge|\bpto\b|booster|club|diwali|christkindl/i;
-const CAUSE_ORDER = ['Environment', 'Education', 'Human services', 'Youth', 'Health', 'Arts', 'Civic', 'Disaster relief', 'Food & hunger', 'Homelessness', 'Animals', 'Nonprofit'];
-/* Listings in or near Carmel sort first in the default view. */
-const CARMEL_RE = /\bcarmel\b/i;
-const NEARBY_RE = /\b(indiana|indianapolis|fishers|westfield|noblesville|zionsville|hamilton county)\b|,\s*in\b/i;
+/* Signed-out visitors start in Indianapolis, the region VolunteerU serves. */
+const HOME_AREA = 'Indianapolis, IN';
+const HOME_CITY = 'Indianapolis';
+/* Real Indianapolis nonprofits: the first ProPublica pages of IRS records for
+   Indianapolis, kept to rows whose city is Indianapolis. The preview
+   skips only records that clearly can't take a teen volunteer, by the rule
+   in lib/nonprofitRules.js (clubs, lodges, unions, business leagues, HOAs,
+   boosters and PTOs, political groups, family foundations, holding
+   corporations). Churches and youth sports stay: both run on volunteers.
+   The "See all" link opens every record on Discover with the true total. */
+const HOME_PAGES = [0, 1, 2];
+const CAUSE_ORDER = ['Environment', 'Education', 'Human services', 'Youth', 'Health', 'Arts', 'Civic', 'Disaster relief', 'Food & hunger', 'Homelessness', 'Animals', 'Recreation', 'Religion', 'Nonprofit'];
+/* Listings in Indianapolis sort first in the default view, then the towns
+   around it. */
+const HOME_RE = /\b(indianapolis|indy)\b/i;
+const NEARBY_RE = /\b(indiana|carmel|fishers|westfield|noblesville|zionsville|greenwood|lawrence|speedway|beech grove|avon|plainfield|brownsburg|hamilton county|marion county)\b|,\s*in\b/i;
 
 const LANDING_CSS = `
 .lp-hero { position:relative; height:580px; margin-top:8px; }
@@ -166,11 +168,8 @@ const LANDING_CSS = `
 .lp-band { margin-top:104px; scroll-margin-top:76px; }
 .lp-how { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:72px; align-items:center; padding:64px 0; border-top:1px solid ${C.line}; border-bottom:1px solid ${C.line}; }
 .lp-how-p { margin:14px 0 0; max-width:460px; font:400 17px/1.5 ${F.body}; color:${C.ink2}; text-wrap:pretty; }
-/* No photo: the FAQ's rhythm, heading left and the copy under a hairline
-   in the right column, so the two sections line up. */
-.lp-how--text { grid-template-columns:minmax(0,4fr) minmax(0,8fr); align-items:start; padding:0; border:0; }
-.lp-how--text .lp-how-copy { padding-top:22px; box-shadow:inset 0 1px 0 ${C.line}; }
-.lp-how--text .lp-how-p { margin:0; max-width:640px; }
+.lp-how-act { margin-top:24px; }
+.lp-how-card { width:100%; max-width:400px; justify-self:center; }
 .lp-start { scroll-margin-top:96px; }
 .lp-rows { margin-top:48px; }
 .lp-rows.is-only { margin-top:22px; }
@@ -199,7 +198,7 @@ const LANDING_CSS = `
   .lp-under { padding-left:28px; }
   .lp-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .lp-how { grid-template-columns:minmax(0,1fr); gap:40px; }
-  .lp-how--text { gap:24px; }
+  .lp-how-card { justify-self:start; }
   .lp-list { grid-template-columns:minmax(0,1fr); border-top:1px solid ${C.line}; }
   .lp-list > li:nth-child(-n+2) { border-top:0; }
   .lp-faq { grid-template-columns:minmax(0,1fr); gap:24px; margin-top:88px; }
@@ -226,6 +225,7 @@ const LANDING_CSS = `
   .lp-cats .vu-cats { margin:0 -16px; padding:0 16px; scroll-padding:0 16px; }
   .lp-sec { margin-top:40px; }
   .lp-sec-head h2 { font-size:23px; }
+  .lp-sec-head { flex-wrap:wrap; row-gap:12px; }
   .lp-grid { display:flex; gap:12px; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; margin:16px -16px 0; padding:0 16px; scroll-padding:0 16px; }
   .lp-grid::-webkit-scrollbar { display:none; }
   .lp-grid > * { flex:0 0 248px; scroll-snap-align:start; }
@@ -239,7 +239,6 @@ const LANDING_CSS = `
   .lp-pair-ph.is-wide { aspect-ratio:4/3; margin-top:20px; }
   .lp-band { margin-top:56px; }
   .lp-how { padding:40px 0; }
-  .lp-how--text { padding:0; }
   .lp-how-p { font-size:15px; }
   .lp-rows { margin-top:32px; }
   .lp-rows.is-only { margin-top:16px; }
@@ -305,11 +304,11 @@ function arrange(rows, when) {
   return dated.concat(undated);
 }
 
-/* Carmel listings first, then the rest of central Indiana, then everything
+/* Indianapolis listings first, then the rest of central Indiana, then everything
    else, keeping the date order inside each group. */
 function localRank(l) {
   const where = `${l.site || ''} ${l.location || ''}`;
-  if (CARMEL_RE.test(where)) return 0;
+  if (HOME_RE.test(where)) return 0;
   return NEARBY_RE.test(where) ? 1 : 2;
 }
 function localFirst(rows) {
@@ -373,22 +372,22 @@ function listingFilters({ q, near, cat }) {
   return { q, near, causes: c && c.cause ? [c.cause] : [], place: cat === 'online' ? 'online' : 'all' };
 }
 
-/* One page of ProPublica results for "Carmel" in Indiana. */
-async function carmelPage(page) {
-  const res = await fetch(`/api/nonprofits?q=${HOME_CITY}&state=IN&page=${page}`);
+/* One page of ProPublica results for Indianapolis. */
+async function homePage(page) {
+  const res = await fetch(`/api/nonprofits?city=${HOME_CITY}&state=IN&page=${page}`);
   if (!res.ok) throw new Error(`nonprofits ${res.status}`);
   const data = await res.json();
-  return Array.isArray(data && data.organizations) ? data.organizations : [];
+  return { rows: Array.isArray(data && data.organizations) ? data.organizations : [], total: Number(data && data.total) || 0, capped: Boolean(data && data.capped) };
 }
 
-/* Carmel nonprofits, one per cause in turn so the list mixes causes. */
-async function loadCarmelOrgs(max) {
-  const pages = await Promise.all(CARMEL_PAGES.map(carmelPage));
+/* Indianapolis nonprofits, one per cause in turn so the list mixes causes. */
+async function loadHomeOrgs(max) {
+  const pages = await Promise.all(HOME_PAGES.map(homePage));
   const seen = new Set();
-  const rows = pages.flat().filter((o) => {
+  const rows = pages.flatMap((p) => p.rows).filter((o) => {
     if (!o || seen.has(o.ein)) return false;
     seen.add(o.ein);
-    return String(o.city || '').toLowerCase() === 'carmel' && o.cause !== 'Religion' && !CARMEL_SKIP.test(o.name || '');
+    return String(o.city || '').toLowerCase() === HOME_CITY.toLowerCase() && isVolunteerPlace(o);
   });
   const byCause = new Map();
   for (const o of rows) {
@@ -400,13 +399,14 @@ async function loadCarmelOrgs(max) {
   for (let i = 0; out.length < max && queues.some((l) => l[i]); i++) {
     for (const l of queues) if (l[i] && out.length < max) out.push(l[i]);
   }
-  return out;
+  // The town's true total from ProPublica, for "See all".
+  return Object.assign(out, { total: pages[0] ? pages[0].total : 0, capped: Boolean(pages[0] && pages[0].capped) });
 }
 
 async function loadOrgs({ q, near, cat }, homeRegion) {
   const c = CATEGORIES.find((x) => x.key === cat);
   const place = near || homeRegion || '';
-  if (!q && !near && !(c && c.cause) && homeRegion === HOME_AREA) return loadCarmelOrgs(MAX_ORGS);
+  if (!q && !near && !(c && c.cause) && homeRegion === HOME_AREA) return loadHomeOrgs(MAX_ORGS);
   if (q || (c && c.cause)) {
     const rows = await searchWebNonprofits({ q, near: place, causes: c && c.cause ? [c.cause] : [], throwOnError: true });
     return rows.slice(0, MAX_ORGS);
@@ -518,8 +518,8 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
   const title = searched
     ? describe(query)
     : week
-      ? (nearHome || (home && !pool.length) ? 'Open this week around Carmel' : 'Open this week')
-      : nearHome ? 'Open around Carmel' : 'Open on VolunteerU';
+      ? (nearHome || (home && !pool.length) ? 'Open this week around Indianapolis' : 'Open this week')
+      : nearHome ? 'Open around Indianapolis' : 'Open on VolunteerU';
   const rowsTitle = searched ? 'More results' : week ? 'More this week' : 'More opportunities';
   let body;
   if (state.status === 'loading') body = <SkeletonCards />;
@@ -538,7 +538,7 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
       />
     ) : (
       <Notice
-        title={home ? 'Nothing posted near Carmel this week' : 'Nothing posted this week'}
+        title={home ? 'Nothing posted near Indianapolis this week' : 'Nothing posted this week'}
         body={laterCount ? `${laterCount} ${laterCount === 1 ? 'opportunity has' : 'opportunities have'} later dates. The nonprofits below take volunteers too.` : 'Organizations and student projects show up here once they post. The nonprofits below take volunteers too.'}
         action={
           <div style={S('display:flex;gap:12px;flex-wrap:wrap')}>
@@ -596,14 +596,18 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discove
   const what = query.q ? `Nonprofits for “${query.q}”` : c && c.cause ? `${c.label} nonprofits` : 'Registered nonprofits';
   const nationwide = near && !parseState(near);
   const home = near === HOME_AREA && !query.q && !query.near && !(c && c.cause);
-  const title = home ? 'Nonprofits in Carmel' : near && !nationwide ? `${what} near ${near}` : what;
+  const title = home ? 'Nonprofits in Indianapolis' : near && !nationwide ? `${what} near ${near}` : what;
   const sub = home
-    ? 'From IRS nonprofit records for Carmel, Indiana. Each one opens its ProPublica page with the address.'
+    ? 'From IRS nonprofit records for Indianapolis. Each one opens a page with its address, map and any open shifts.'
     : nationwide
     ? `From IRS nonprofit records, all states. Add a state to “${near}” to narrow it.`
     : near
-      ? 'From IRS nonprofit records. Each one opens its ProPublica page with the address.'
+      ? 'From IRS nonprofit records. Each one opens a page with its address, map and any open shifts.'
       : 'From IRS nonprofit records. Search a city or state to see ones near you.';
+  // Every Indianapolis record, on Discover's Nonprofits tab, with ProPublica's real total.
+  const seeAll = home && state.status === 'done' && state.total > 0
+    ? <Link className="lp-link" href={`/discover?${new URLSearchParams({ view: 'nonprofits', near: HOME_AREA }).toString()}`}>See all {state.total.toLocaleString('en-US')}{state.capped ? '+' : ''} nonprofits in Indianapolis</Link>
+    : null;
   let body;
   if (state.status === 'loading') {
     body = <div aria-hidden="true" className="vu-np-grid lp-np">{Array.from({ length: 4 }).map((_, i) => <div key={i} style={S(`height:73px;box-shadow:inset 0 -1px 0 ${C.line}`)} />)}</div>;
@@ -619,8 +623,7 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discove
             key={o.ein}
             name={titleCase(o.name)}
             parts={[o.cause && o.cause !== 'Nonprofit' ? o.cause.replace('&', 'and') : '', [titleCase(o.city), o.state].filter(Boolean).join(', ')]}
-            href={o.url || `https://projects.propublica.org/nonprofits/organizations/${o.ein}`}
-            external
+            href={`/nonprofits/${o.ein}`}
           />
         ))}
       </div>
@@ -633,7 +636,7 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discove
           <h2 id="lp-np-h">{title}</h2>
           <p className="lp-sub">{sub}</p>
         </div>
-        {authed && rows.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null}
+        {seeAll || (authed && rows.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null)}
       </div>
       {body}
     </section>
@@ -678,30 +681,37 @@ function VolunteerOrLead({ goSearch, startProject, art }) {
 
 const HOURS_COPY = 'Sign up for a shift, go, and log your hours afterward. The organizer confirms them in the app, so there’s no paper form to chase. From your profile you can download your hours as a CSV for your school counselor.';
 
-/* Hours: plain copy and a photo between two rules, or with no photo the
-   FAQ's two columns. The anchor id stays #how-it-works for the header link
-   in both, so the link's target never moves when the art changes. */
-function HoursSection({ art }) {
-  const heading = <h2 id="lp-how-h" className="lp-h1">Log your hours</h2>;
+/* Hours: the copy and one action on the left, and on the right the real
+   hour card from the profile. Signed out it is the empty card, with a
+   sentence where the number goes; signed in it is the student's own card
+   with their confirmed hours. Nothing on it is made up. The anchor id stays
+   #how-it-works for the header link. */
+function HoursSection({ authed, account, confirmed, onSignUp }) {
   return (
     <section id="how-it-works" className="lp-band" aria-labelledby="lp-how-h">
       <div className="mk-wrap">
-        {art.hours ? (
-          <div className="lp-how">
-            <div>
-              {heading}
-              <p className="lp-how-p">{HOURS_COPY}</p>
-            </div>
-            <ArtPhoto photo={art.hours} />
-          </div>
-        ) : (
-          <div className="lp-how lp-how--text">
-            {heading}
-            <div className="lp-how-copy">
-              <p className="lp-how-p">{HOURS_COPY}</p>
+        <div className="lp-how">
+          <div>
+            <h2 id="lp-how-h" className="lp-h1">Log your hours</h2>
+            <p className="lp-how-p">{HOURS_COPY}</p>
+            <div className="lp-how-act">
+              {authed ? (
+                <Link className="lp-link" href="/profile">Open your profile</Link>
+              ) : (
+                <Button variant="dark" onClick={onSignUp}>Sign up to log hours</Button>
+              )}
             </div>
           </div>
-        )}
+          <div className="lp-how-card">
+            <ShareHoursCard
+              bare
+              name={authed ? account.name : ''}
+              grade={authed ? account.grade : ''}
+              school={authed ? account.school : ''}
+              confirmed={authed ? confirmed : 0}
+            />
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -709,7 +719,7 @@ function HoursSection({ art }) {
 
 const FAQS = [
   { q: 'Is it free?', a: 'Yes. Students and organizations don’t pay anything to use VolunteerU.' },
-  { q: 'Where do the nonprofits come from?', a: 'IRS records, through ProPublica’s Nonprofit Explorer. Each one links to its ProPublica page with the address, so you can contact them about volunteering.' },
+  { q: 'Where do the nonprofits come from?', a: 'IRS records, through ProPublica’s Nonprofit Explorer. Each one has a page here with its address, a map, IRS facts and any shifts posted on VolunteerU, plus a link to its filings on ProPublica.' },
   { q: 'How do my hours get confirmed?', a: 'After a shift, log your hours on that project. Once the organizer approves them, they count as confirmed. Hours you log on your own stay in a separate total.' },
   { q: 'Do I need a 501(c)(3) to start a student project?', a: 'No. Anyone 13 or older can start one. If a school, library or nonprofit supervises it, you can ask for a verified badge from your project page.' },
   { q: 'What does the verified badge mean?', a: 'Someone on the VolunteerU team reviewed the organization and its staff contact by hand. Owners can’t give themselves the badge.' },
@@ -800,7 +810,7 @@ export default function Landing() {
         if (id === reqRef.current) setOpps({ status: 'error', items: [] });
       });
     loadOrgs(next, homeRegion)
-      .then((rows) => { if (id === reqRef.current) setOrgs({ status: 'done', rows }); })
+      .then((rows) => { if (id === reqRef.current) setOrgs({ status: 'done', rows, total: Number(rows.total) || 0, capped: Boolean(rows.capped) }); })
       .catch((err) => {
         console.warn('[landing] nonprofit search failed', err);
         if (id === reqRef.current) setOrgs({ status: 'error', rows: [] });
@@ -811,6 +821,37 @@ export default function Landing() {
     run(EMPTY_QUERY);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeRegion]);
+
+  // Arriving from another page at /#student-projects or /#search: the jump
+  // runs before the results and nonprofit rows above the anchor have grown,
+  // so it lands too high. Keep the anchor in place while the page settles,
+  // until the visitor scrolls on their own. #search also gets the cursor.
+  useEffect(() => {
+    const hash = typeof window !== 'undefined' ? decodeURIComponent(window.location.hash.slice(1)) : '';
+    if (!hash || typeof ResizeObserver === 'undefined') return undefined;
+    let done = false;
+    const stop = () => { done = true; };
+    const pin = () => {
+      if (done) return;
+      const el = document.getElementById(hash);
+      if (el) el.scrollIntoView({ block: 'start' });
+    };
+    const ro = new ResizeObserver(pin);
+    ro.observe(document.body);
+    const events = ['wheel', 'touchstart', 'keydown', 'mousedown'];
+    events.forEach((ev) => window.addEventListener(ev, stop, { passive: true, once: true }));
+    pin();
+    if (hash === 'search') {
+      const input = document.querySelector('#search input[type="search"]');
+      if (input) input.focus({ preventScroll: true });
+    }
+    const t = setTimeout(() => { stop(); ro.disconnect(); }, 2500);
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+      events.forEach((ev) => window.removeEventListener(ev, stop));
+    };
+  }, []);
 
   function showResults() {
     const el = resultsRef.current;
@@ -890,8 +931,8 @@ export default function Landing() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={PHOTOS.food2.src} alt="Students in volunteer shirts sorting donated food" fetchPriority="high" />
             <div className="lp-hero-copy">
-              <h1 id="lp-hero-h">Find somewhere to volunteer in Carmel this week</h1>
-              <p>Open shifts and nonprofits around Carmel, Hamilton County and Indianapolis.</p>
+              <h1 id="lp-hero-h">Find somewhere to volunteer in Indianapolis this week</h1>
+              <p>Open shifts and nonprofits across Indianapolis and the towns around it.</p>
             </div>
           </div>
           <div className="lp-hero-search">
@@ -902,7 +943,7 @@ export default function Landing() {
               onWhere={(v) => { setWhere(v); if (hint) setHint(''); }}
               when={when}
               onWhen={setWhen}
-              wherePlaceholder="Carmel, IN"
+              wherePlaceholder="Indianapolis, IN"
               onSubmit={onSearch}
               busy={opps.status === 'loading' && query !== EMPTY_QUERY}
               label="Search opportunities and nonprofits"
@@ -947,7 +988,12 @@ export default function Landing() {
         <VolunteerOrLead goSearch={goSearch} startProject={startProject} art={art} />
         </div>
 
-        <HoursSection art={art} />
+        <HoursSection
+          authed={links.authed}
+          account={store.account || {}}
+          confirmed={Number((store.stats && store.stats.verifiedHours) || 0)}
+          onSignUp={() => router.push(links.signUp)}
+        />
 
         <div className="mk-wrap">
           <Faq />
