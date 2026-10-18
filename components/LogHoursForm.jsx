@@ -11,15 +11,24 @@
    ========================================================================== */
 
 import { useId, useState } from 'react';
-import { S, s, cx, H } from '../lib/style.js';
-import { Field, TextArea, Select, Pressable } from './ui.jsx';
+import { S, cx, H } from '../lib/style.js';
+import { C, F, R, CATEGORIES } from '../lib/tokens.js';
+import { Field, TextArea, Select, Button, Icon } from './ui.jsx';
 import { openModal, toast } from '../lib/overlays.js';
 import { logHours, validateHours } from '../lib/db.js';
 import { CAUSE_OPTIONS } from '../lib/createDraft.js';
 
+/** The display label for a stored cause ("Food & hunger" reads "Food and hunger",
+    as on the category row). Free-text causes print as written. */
+export function causeLabel(name) {
+  const t = String(name || '').trim().toLowerCase();
+  const c = CATEGORIES.find((x) => x.cause && x.cause.toLowerCase() === t);
+  return c ? c.label : String(name || '');
+}
+
 const CATEGORY_OPTIONS = [
   { v: '', l: 'Choose a category' },
-  ...CAUSE_OPTIONS.map((c) => ({ v: c, l: c })),
+  ...CAUSE_OPTIONS.map((c) => ({ v: c, l: causeLabel(c) })),
   { v: 'Community', l: 'Community' },
   { v: 'Other', l: 'Other' },
 ];
@@ -124,9 +133,9 @@ function DateField({ label, value, onChange, min, max, error, required }) {
   const eid = `${fid}-err`;
   return (
     <div>
-      <label htmlFor={fid} style={S('display:block;font:500 12px/1 Geist;color:#57504A')}>
+      <label htmlFor={fid} style={S(`display:block;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>
         {label}
-        {required ? <span aria-hidden="true" style={S('color:#C2603C')}>{' *'}</span> : null}
+        {required ? <span aria-hidden="true" style={S(`color:${C.ember}`)}>{' *'}</span> : null}
       </label>
       <input
         id={fid}
@@ -139,8 +148,8 @@ function DateField({ label, value, onChange, min, max, error, required }) {
         data-invalid={error ? 'true' : undefined}
         aria-describedby={error ? eid : undefined}
         onChange={(e) => onChange(e.target.value)}
-        className={H.input}
-        style={S('margin-top:8px;display:block;width:100%;min-width:0;padding:11px 14px;border-radius:10px;border:1px solid #E8E1D9;background:#fff;font:450 15px/1.15 Geist;color:#1A1714;transition:border-color .16s ease')}
+        className={cx('vu-input', H.input)}
+        style={S(`margin-top:8px;display:block;width:100%;min-width:0;height:46px;padding:0 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.3 ${F.body};color:${C.ink};font-variant-numeric:tabular-nums;transition:border-color .16s ease, box-shadow .16s ease`)}
       />
       {error ? <div className="vu-err" id={eid}>{error}</div> : null}
     </div>
@@ -185,12 +194,12 @@ export function LogHoursForm({ api, onDone }) {
         required
         error={err.activity}
       />
-      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+      <div className="vu-2col-keep" style={S('margin-top:16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px')}>
         <Field
           label="Organization (optional)"
           value={f.org}
           onChange={(v) => set('org', v)}
-          placeholder="e.g. Riverbend Food Bank"
+          placeholder="e.g. Gleaners Food Bank"
           maxLength={60}
         />
         <Select
@@ -200,7 +209,7 @@ export function LogHoursForm({ api, onDone }) {
           options={CATEGORY_OPTIONS}
         />
       </div>
-      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+      <div className="vu-2col-keep" style={S('margin-top:16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px')}>
         <DateField label="Date" value={f.date} onChange={(v) => set('date', v)} min={isoEarliest()} max={today} error={err.date} required />
         <Field
           label="Hours"
@@ -213,7 +222,7 @@ export function LogHoursForm({ api, onDone }) {
           hint="Up to 24 for one day"
         />
       </div>
-      <div style={S('margin-top:14px')}>
+      <div style={S('margin-top:16px')}>
         <TextArea
           label="Note (optional)"
           value={f.note}
@@ -224,26 +233,17 @@ export function LogHoursForm({ api, onDone }) {
           counter
         />
       </div>
-      <div style={S('margin-top:14px;padding:11px 13px;border-radius:11px;background:#FDF3E7;border:1px solid #F3E3CD;font:450 12px/1.5 Geist;color:#8A5A20')}>
-        Organizers can't confirm these. For a project you joined on VolunteerU, log hours from that project on Home so the organizer can confirm them.
-      </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable
-          label="Cancel"
-          onClick={() => api && api.close && api.close()}
-          className={cx(H.secondary, H.press)}
-          style={S('display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer')}
-        >
+      <p style={S(`margin:16px 0 0;display:flex;gap:10px;align-items:flex-start;font:400 13px/1.45 ${F.body};color:${C.ink2}`)}>
+        <Icon name="info" size={16} style={{ marginTop: 1 }} />
+        <span>Organizers can't confirm these. For a project you joined on VolunteerU, log hours from that project on Home so the organizer can confirm them.</span>
+      </p>
+      <div style={S(`margin-top:20px;padding-top:16px;border-top:1px solid ${C.line};display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap`)}>
+        <Button variant="outline" onClick={() => api && api.close && api.close()}>
           Cancel
-        </Pressable>
-        <Pressable
-          label="Log hours"
-          onClick={save}
-          className={cx(H.primary, H.press)}
-          style={s('display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer')}
-        >
+        </Button>
+        <Button variant="primary" icon="plus" onClick={save}>
           Log hours
-        </Pressable>
+        </Button>
       </div>
     </div>
   );
@@ -253,7 +253,7 @@ export function LogHoursForm({ api, onDone }) {
 export function openLogHours(onDone) {
   openModal({
     title: 'Log your hours',
-    subtitle: 'For volunteering you did outside VolunteerU.',
+    subtitle: 'For volunteering outside VolunteerU.',
     Body: ({ api }) => <LogHoursForm api={api} onDone={onDone} />,
   });
 }

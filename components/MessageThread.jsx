@@ -4,14 +4,20 @@
    MessageThread.jsx, a conversation tied to an application
    Opened from either side (organizer or volunteer). Loads the thread, polls for
    replies every few seconds, and sends. Messages stay inside the app.
+   Your own messages sit on the right in ink, theirs on the left in mist.
    ========================================================================== */
 
 import { useEffect, useRef, useState } from 'react';
-import { S, s, cx, H } from '../lib/style.js';
+import { S, s } from '../lib/style.js';
+import { C, F, R } from '../lib/tokens.js';
 import { toast } from '../lib/overlays.js';
 import { loadMessages, sendMessage, myId as getMyId } from '../lib/listings.js';
+import { Button, Icon } from './ui.jsx';
 
 const POLL_MS = 5000;
+// Two messages from the same person this close together read as one group,
+// so only the last of them carries a timestamp.
+const GROUP_MS = 5 * 60 * 1000;
 
 /** "Oct 17, 3:04 PM" for a message's created_at, or '' when it can't be read. */
 function stamp(iso) {
@@ -19,6 +25,16 @@ function stamp(iso) {
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+
+/** True when `next` continues `m`'s group (same sender, a few minutes apart). */
+function sameGroup(m, next) {
+  if (!m || !next || m.sender_id !== next.sender_id) return false;
+  const a = new Date(m.created_at).getTime();
+  const b = new Date(next.created_at).getTime();
+  return Number.isFinite(a) && Number.isFinite(b) && b - a < GROUP_MS;
+}
+
+const NOTE = `margin:auto;max-width:300px;text-align:center;font:400 14px/1.5 ${F.body};color:${C.ink2}`;
 
 export default function MessageThread({ applicationId, recipientId, recipientName = 'them' }) {
   const [msgs, setMsgs] = useState([]);
@@ -81,59 +97,74 @@ export default function MessageThread({ applicationId, recipientId, recipientNam
   const canSend = !busy && Boolean(text.trim());
 
   return (
-    <div style={S('display:flex;flex-direction:column;height:min(58vh,440px)')}>
-      <div ref={listRef} role="log" aria-live="polite" aria-label={`Messages with ${recipientName}`} style={S('flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:2px')}>
+    <div style={S('display:flex;flex-direction:column;height:min(60vh,460px)')}>
+      <div
+        ref={listRef}
+        role="log"
+        aria-live="polite"
+        aria-label={`Messages with ${recipientName}`}
+        style={S('flex:1;overflow-y:auto;display:flex;flex-direction:column;padding:4px 2px 8px')}
+      >
         {status === 'error' && msgs.length === 0 ? (
-          <div role="alert" style={S('margin:auto;max-width:300px;text-align:center;font:450 13px/1.5 Geist;color:#57504A')}>
-            Couldn't load these messages. Check your connection and try again.
-            <div style={S('margin-top:10px')}>
-              <button
-                type="button"
-                onClick={() => { setStatus('loading'); load(); }}
-                className={cx(H.secondary, H.press)}
-                style={S('padding:0 14px;height:34px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 12px/1 Geist;color:#1A1714;cursor:pointer')}
-              >
-                Try again
-              </button>
+          <div role="alert" style={S(NOTE)}>
+            Couldn&apos;t load these messages. Check your connection and try again.
+            <div style={S('margin-top:12px')}>
+              <Button size="sm" icon="refresh" onClick={() => { setStatus('loading'); load(); }}>Try again</Button>
             </div>
           </div>
         ) : null}
         {status === 'loading' && msgs.length === 0 ? (
-          <div role="status" style={S('margin:auto;text-align:center;font:450 13px/1.5 Geist;color:#8A8179')}>
-            Loading messages
-          </div>
+          <div role="status" style={S(NOTE)}>Loading messages</div>
         ) : null}
         {status === 'ok' && msgs.length === 0 ? (
-          <div style={S('margin:auto;max-width:280px;text-align:center;font:450 13px/1.5 Geist;color:#8A8179')}>
+          <div style={S(NOTE)}>
+            <span aria-hidden="true" style={S(`display:grid;place-items:center;margin:0 auto 12px;width:44px;height:44px;border-radius:50%;background:${C.mist};color:${C.ink2}`)}>
+              <Icon name="message" size={20} />
+            </span>
             No messages yet. Say hello to {recipientName}.
           </div>
         ) : null}
-        {msgs.map((m) => {
+        {msgs.map((m, i) => {
           const mine = me != null && m.sender_id === me;
-          const when = stamp(m.created_at);
+          const prev = msgs[i - 1];
+          const next = msgs[i + 1];
+          const joinsPrev = sameGroup(prev, m);
+          const joinsNext = sameGroup(m, next);
+          const when = joinsNext ? '' : stamp(m.created_at);
+          // The corner nearest the sender's side tightens inside a group, so
+          // a run of messages reads as one block. Both values are on the
+          // radius scale (photo 16, control 10).
+          const corners = mine
+            ? `16px ${joinsPrev ? 10 : 16}px ${joinsNext ? 10 : 16}px 16px`
+            : `${joinsPrev ? 10 : 16}px 16px 16px ${joinsNext ? 10 : 16}px`;
           return (
             <div
               key={m.id}
               style={s(
-                'max-width:80%;display:flex;flex-direction:column;gap:3px',
+                'max-width:min(80%,440px);display:flex;flex-direction:column;gap:4px',
+                joinsPrev ? 'margin-top:3px' : 'margin-top:12px',
                 mine ? 'align-self:flex-end;align-items:flex-end' : 'align-self:flex-start;align-items:flex-start',
               )}
             >
               <div
                 className="vu-break"
                 style={s(
-                  'padding:10px 13px;border-radius:14px;font:450 14px/1.45 Geist;white-space:pre-wrap',
-                  mine ? 'background:#C2603C;color:#fff' : 'background:#F6F2EE;color:#332D28',
+                  `padding:10px 14px;border-radius:${corners};font:400 15px/1.45 ${F.body};white-space:pre-wrap`,
+                  mine ? `background:${C.ink};color:#fff` : `background:${C.mist};color:${C.ink}`,
                 )}
               >
                 {m.body}
               </div>
-              {when ? <div style={S('padding:0 4px;font:450 11px/1.2 Geist;color:#A9A097')}>{mine ? `You, ${when}` : when}</div> : null}
+              {when ? (
+                <div style={S(`padding:0 4px;font:400 13px/1.2 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>
+                  {mine ? `You, ${when}` : when}
+                </div>
+              ) : null}
             </div>
           );
         })}
       </div>
-      <div style={S('margin-top:12px;display:flex;gap:8px;align-items:flex-end')}>
+      <div style={S(`padding-top:12px;border-top:1px solid ${C.line};display:flex;gap:8px;align-items:flex-end`)}>
         <textarea
           value={text}
           aria-label={`Message ${recipientName}`}
@@ -144,23 +175,15 @@ export default function MessageThread({ applicationId, recipientId, recipientNam
               send();
             }
           }}
-          placeholder={`Message ${recipientName}`}
+          placeholder="Write a message"
           maxLength={2000}
           rows={1}
-          style={S('flex:1;min-width:0;resize:none;padding:11px 14px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;font:450 14px/1.4 Geist;color:#1A1714;max-height:120px')}
+          className="vu-input"
+          style={S(`flex:1;min-width:0;resize:none;padding:12px 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.35 ${F.body};color:${C.ink};max-height:120px`)}
         />
-        <button
-          type="button"
-          onClick={send}
-          disabled={!canSend}
-          className={cx(H.primary, H.press)}
-          style={s(
-            'flex:none;padding:0 16px;height:44px;border-radius:12px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist',
-            canSend ? 'cursor:pointer' : 'cursor:default;opacity:.55',
-          )}
-        >
+        <Button variant="primary" icon="send" onClick={send} disabled={!canSend} busy={busy}>
           {busy ? 'Sending' : 'Send'}
-        </button>
+        </Button>
       </div>
     </div>
   );

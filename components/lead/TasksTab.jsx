@@ -6,9 +6,10 @@
    attendance and hours for projects whose orgType is 'team'.
    ========================================================================== */
 
-import { useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, Field, Select, TextArea, EmptyState, ImageSlot, Icon, SectionLabel } from '../ui.jsx';
+import { Pressable, Field, Select, TextArea, EmptyState, Icon, Avatar, Button } from '../ui.jsx';
+import { C, F, R, CAUSE } from '../../lib/tokens.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
 import {
   taskRoles, tasksOf, taskStats, roleOf,
@@ -16,9 +17,8 @@ import {
   addTask, updateTask, setTaskStatus, assignTask, deleteTask,
 } from '../../lib/db.js';
 import { TeamMembersManager } from './CrossMembers.jsx';
-import { syncListing } from './Tabs.jsx';
-
-const MONO = "'Geist Mono',monospace";
+import { loadProjectMembers } from '../../lib/listings.js';
+import { syncListing, useNarrow, DialogActions, H2, LABEL, META, SMALL, NUM, RULE, TH } from './Tabs.jsx';
 
 const COLUMNS = [
   { key: 'todo', label: 'To do' },
@@ -30,12 +30,62 @@ const COL_LABEL = { todo: 'To do', doing: 'In progress', done: 'Done' };
 const NEXT = { todo: 'doing', doing: 'done', done: null };
 const PREV = { todo: null, doing: 'todo', done: 'doing' };
 
-const BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease';
-const BTN_PRIMARY = `${BTN};border:1px solid #A8482A;background:#C2603C;color:#fff`;
-const BTN_BRAND = `${BTN};border:1px solid #E7C0AC;background:#fff;color:#C2603C`;
-const MODAL_CANCEL = 'display:inline-flex;align-items:center;justify-content:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer';
-const MODAL_PRIMARY = 'display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer';
-const CARD_BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:5px;flex:1;height:30px;border-radius:8px;font:500 12px/1 Geist;cursor:pointer';
+/* Roles keep the color value the rest of the app stores (Create, the member
+   view and db.js all read it), and draw it as the muted cause pair that does
+   the same job, so a role reads like a cause chip. Ember stays reserved for
+   the primary action, so the stored "Red" (#C2603C) draws as the civic
+   indigo and no role is red. Lead.jsx's ROLE_DOT map draws the same tones. */
+const RF_COLORS = [
+  { c: '#C2603C', fg: CAUSE.civic.fg, bg: CAUSE.civic.bg, n: 'Indigo' },
+  { c: '#3F6B4E', fg: CAUSE.environment.fg, bg: CAUSE.environment.bg, n: 'Green' },
+  { c: '#5B6BB0', fg: CAUSE.education.fg, bg: CAUSE.education.bg, n: 'Blue' },
+  { c: '#8A5A20', fg: CAUSE.animals.fg, bg: CAUSE.animals.bg, n: 'Amber' },
+  { c: '#9B4A6B', fg: CAUSE.arts.fg, bg: CAUSE.arts.bg, n: 'Plum' },
+  { c: '#4A7C8A', fg: CAUSE.health.fg, bg: CAUSE.health.bg, n: 'Teal' },
+];
+
+/* A role saved while "Red" drew as the food tone may hold that value. */
+const LEGACY_RED = CAUSE.food.fg.toUpperCase();
+
+/** { fg, bg } to draw a stored role color with. */
+export function roleTone(color) {
+  const raw = String(color || '').toUpperCase();
+  const hit = RF_COLORS.find((x) => x.c.toUpperCase() === raw || x.fg.toUpperCase() === raw || (raw === LEGACY_RED && x.c === '#C2603C'));
+  return hit ? { fg: hit.fg, bg: hit.bg } : { fg: color || C.ink2, bg: C.mist };
+}
+
+/* Accepted members who joined through the join link. Their team role lives on
+   the application's assignment (Members from your join link), not the roster.
+   Reloads when another screen changes applications. */
+function useLinkMembers(listingId) {
+  const [apps, setApps] = useState([]);
+  useEffect(() => {
+    if (!listingId) return undefined;
+    let live = true;
+    const load = () => loadProjectMembers(listingId)
+      .then((rows) => { if (live) setApps(rows || []); })
+      .catch((err) => console.error('[lead] could not load join-link members for role counts', err));
+    load();
+    window.addEventListener('vu:applications-changed', load);
+    return () => {
+      live = false;
+      window.removeEventListener('vu:applications-changed', load);
+    };
+  }, [listingId]);
+  return apps;
+}
+
+/** How many members hold each role: link members by their application's
+    role, roster rows the lead added by teamRoleId. A roster row tied to a
+    loaded application counts once, by the application. */
+function roleMemberCounts(members, linkApps) {
+  const counts = {};
+  const bump = (id) => { if (id) counts[id] = (counts[id] || 0) + 1; };
+  const appIds = new Set(linkApps.map((a) => a.id));
+  linkApps.forEach((a) => bump(a.assignment && a.assignment.role && a.assignment.role.id));
+  members.filter((m) => !(m.appId && appIds.has(m.appId))).forEach((m) => bump(m.teamRoleId));
+  return counts;
+}
 
 /* Older workspaces stored the task name as `t`. */
 function titleOf(task) {
@@ -47,13 +97,18 @@ export default function TasksTab({ p }) {
   const tasks = tasksOf(p);
   const stats = taskStats(p);
   const members = p.people.filter((x) => x.st !== 'Removed' && x.st !== 'Inactive');
+  const stackBoard = useNarrow(900);
+  const linkApps = useLinkMembers(p.listingId);
+  const memberCounts = roleMemberCounts(members, linkApps);
 
+  /* A role on a task reads as text with its color dot, no tinted chip. */
   function roleChip(roleId) {
     const r = roleOf(p, roleId);
     if (!r) return null;
+    const t = roleTone(r.color);
     return (
-      <span style={s('display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;font:500 11px/1 Geist', `background:${r.color}18`, `color:${r.color}`)}>
-        <span style={s('width:7px;height:7px;border-radius:50%;flex:none', `background:${r.color}`)} />
+      <span style={S(`display:inline-flex;align-items:center;gap:6px;min-width:0;font:500 13px/18px ${F.body};color:${C.ink2}`)}>
+        <span aria-hidden="true" style={s('width:7px;height:7px;border-radius:50%;flex:none', `background:${t.fg}`)} />
         {r.name}
       </span>
     );
@@ -99,6 +154,8 @@ export default function TasksTab({ p }) {
   }
 
   function taskMenu(e, task) {
+    // Keep the trigger: React clears currentTarget once the click is handled.
+    const anchor = e.currentTarget;
     menuFromEvent(
       e,
       [
@@ -113,7 +170,8 @@ export default function TasksTab({ p }) {
       ].filter(Boolean),
       async (key) => {
         if (key === 'edit') editTask(task);
-        else if (key === 'assign') assignMenu(e, task);
+        // Open the member menu after this menu has finished closing, or its close takes the new one with it.
+        else if (key === 'assign') setTimeout(() => assignMenu({ currentTarget: anchor }, task), 0);
         else if (key === 'delete') {
           const ok = await confirmDialog({ title: 'Delete this task?', body: `"${titleOf(task)}" comes off the board.`, confirmLabel: 'Delete task', cancelLabel: 'Keep it' });
           if (ok) {
@@ -128,143 +186,171 @@ export default function TasksTab({ p }) {
   }
 
   return (
-    <div style={S('margin-top:22px;display:flex;flex-direction:column;gap:18px')}>
+    <div style={S('margin-top:32px;display:flex;flex-direction:column')}>
       {/* roles & briefings */}
-      <div style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-        <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+      <section aria-labelledby="tt-roles">
+        <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
           <div style={S('min-width:0')}>
-            <SectionLabel>Roles</SectionLabel>
-            <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#8A8179')}>Members see their role's briefing and confirm they've read it.</div>
+            <h2 id="tt-roles" style={S(H2)}>Roles</h2>
+            <p style={S(`margin:6px 0 0;${META}`)}>Members see their role's briefing and confirm they've read it.</p>
           </div>
-          <Pressable label="Add a role" onClick={() => editRole(null)} className={cx(H.secondary, H.press)} style={S(BTN_BRAND)}>
-            <Icon name="plus" size={14} />
+          <Button variant="outline" size="sm" icon="plus" onClick={() => editRole(null)} aria-label="Add a role">
             Add role
-          </Pressable>
+          </Button>
         </div>
         {roles.length ? (
-          <div className="vu-3col" style={S('margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px')}>
+          <ul className="vu-2col" style={S('margin:16px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:0 32px')}>
             {roles.map((r) => {
               const taskCount = tasks.filter((t) => t.roleId === r.id).length;
+              const memberCount = memberCounts[r.id] || 0;
+              const t = roleTone(r.color);
               return (
-                <Pressable
-                  key={r.id}
-                  label={`Edit ${r.name}`}
-                  onClick={() => editRole(r)}
-                  className={cx(H.card, H.press)}
-                  style={S('display:block;text-align:left;padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;cursor:pointer;transition:border-color .16s ease')}
-                >
-                  <div style={S('display:flex;align-items:center;justify-content:space-between;gap:8px')}>
-                    <div style={S('display:flex;align-items:center;gap:8px;min-width:0')}>
-                      <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${r.color}`)} />
-                      <div className="vu-trunc" style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{r.name}</div>
-                    </div>
-                    <span style={S('color:#A19891;flex:none')}><Icon name="edit" size={13} /></span>
-                  </div>
-                  <div style={S('margin-top:8px;font:450 12px/1.55 Geist;color:#57504A;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden')}>
-                    {r.briefing || 'No briefing yet. Add one so members know what to do first.'}
-                  </div>
-                  <div style={S('margin-top:10px;font:450 12px/1 Geist;color:#8A8179')}>{taskCount} {taskCount === 1 ? 'task' : 'tasks'}</div>
-                </Pressable>
+                <li key={r.id} style={S(`border-top:1px solid ${C.line};${RULE};margin-bottom:-1px`)}>
+                  <Pressable
+                    label={`Edit ${r.name}`}
+                    onClick={() => editRole(r)}
+                    className={cx(H.row, H.press)}
+                    style={S('display:flex;align-items:flex-start;gap:14px;padding:16px 0;cursor:pointer;transition:background .16s ease')}
+                  >
+                    <span aria-hidden="true" style={s('flex:none;width:10px;height:10px;border-radius:50%;margin-top:7px', `background:${t.fg}`)} />
+                    <span style={S('min-width:0;flex:1')}>
+                      <span style={S('display:flex;align-items:baseline;justify-content:space-between;gap:10px')}>
+                        <span className="vu-trunc" style={S(LABEL)}>{r.name}</span>
+                        <span style={S(`flex:none;${SMALL};${NUM}`)}>
+                          {memberCount} {memberCount === 1 ? 'member' : 'members'}, {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                        </span>
+                      </span>
+                      <span style={S(`margin-top:3px;${SMALL};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden`)}>
+                        {r.briefing || 'No briefing yet. Add one so members know what to do first.'}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" style={S(`flex:none;color:${C.ink3};margin-top:10px`)}><Icon name="chevron-right" size={18} /></span>
+                  </Pressable>
+                </li>
               );
             })}
-          </div>
+          </ul>
         ) : (
-          <div style={S('margin-top:14px')}>
-            <EmptyState compact icon="flag" title="No roles yet" body="Add a role with a short briefing so members know what they own." cta="Add a role" onCta={() => editRole(null)} />
-          </div>
+          <EmptyState compact icon="flag" title="No roles yet" body="Add a role with a short briefing so members know what they own." cta="Add a role" onCta={() => editRole(null)} />
         )}
-      </div>
+      </section>
 
       {/* members who joined through the public link */}
-      <TeamMembersManager p={p} />
+      <div style={S('margin-top:48px')}>
+        <TeamMembersManager p={p} />
+      </div>
 
       {/* board */}
-      <div style={S('display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-        <div style={S('min-width:0')}>
-          <h2 style={S('margin:0;font:600 18px/1.25 Geist;letter-spacing:-0.025em')}>Task board</h2>
-          <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>
-            {stats.total ? `${stats.done} of ${stats.total} done. ` : ''}Only you see this board. Give members tasks from the list above.
+      <section aria-labelledby="tt-board" style={S('margin-top:48px')}>
+        <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+          <div style={S('min-width:0')}>
+            <h2 id="tt-board" style={S(H2)}>Task board</h2>
+            <p style={S(`margin:6px 0 0;${META}`)}>
+              {stats.total ? `${stats.done} of ${stats.total} done. ` : ''}Only you see this board. Give members tasks from the list above.
+            </p>
           </div>
+          <Button variant="primary" size="sm" icon="plus" onClick={() => editTask(null)} aria-label="Add a task">
+            Add task
+          </Button>
         </div>
-        <Pressable label="Add a task" onClick={() => editTask(null)} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-          <Icon name="plus" size={14} />
-          Add task
-        </Pressable>
-      </div>
-      {stats.total ? (
-        <div role="progressbar" aria-label="Tasks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.pct} style={S('height:6px;border-radius:99px;background:#F1EBE4;overflow:hidden;margin-top:-6px')}>
-          <div style={s('height:100%;border-radius:99px;background:#C2603C;transition:width .3s ease', `width:${stats.pct}%`)} />
-        </div>
-      ) : null}
-      <div className="vu-scroll-x" style={S('display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:14px;overflow-x:auto')}>
-        {COLUMNS.map((col) => {
-          const colTasks = tasks.filter((t) => t.status === col.key);
-          return (
-            <div key={col.key} style={S('border-radius:14px;border:1px solid #E8E1D9;background:#FCFAF8;overflow:hidden;min-width:240px')}>
-              <div style={S('padding:13px 15px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:8px')}>
-                <div style={S('font:600 13px/1 Geist;color:#1A1714')}>{col.label}</div>
-                <span style={S(`font:500 11px/1 ${MONO};color:#8A8179`)}>{colTasks.length}</span>
-              </div>
-              <div style={S('padding:12px;display:flex;flex-direction:column;gap:10px;min-height:60px')}>
-                {colTasks.map((task) => {
-                  const who = assigneeOf(task);
-                  const title = titleOf(task);
-                  return (
-                    <div key={task.id} style={S('padding:13px;border-radius:11px;border:1px solid #EFE7DE;background:#fff')}>
-                      <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:8px')}>
-                        <div className="vu-break" style={s('font:500 13.5px/1.35 Geist;color:#1A1714;min-width:0', task.status === 'done' ? 'text-decoration:line-through;color:#8A8179' : '')}>{title}</div>
-                        <Pressable label={`More actions for ${title}`} expanded={false} onClick={(e) => taskMenu(e, task)} className={cx(H.toInk, H.press)} style={S('flex:none;display:grid;place-items:center;width:26px;height:26px;margin:-4px -4px 0 0;border-radius:7px;color:#8A8179;cursor:pointer')}>
-                          <Icon name="more" size={16} />
-                        </Pressable>
-                      </div>
-                      {task.detail ? <div className="vu-break" style={S('margin-top:6px;font:450 12px/1.45 Geist;color:#8A8179')}>{task.detail}</div> : null}
-                      {task.due ? <div style={S('margin-top:6px;font:450 12px/1.3 Geist;color:#8A8179')}>Due {task.due}</div> : null}
-                      {roleOf(p, task.roleId) || who || members.length ? (
-                        <div style={S('margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                          {roleChip(task.roleId)}
-                          {who ? (
-                            <span style={S('display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 2px;border-radius:99px;background:#F6F2EE')}>
-                              <span style={S('width:18px;height:18px;border-radius:50%;overflow:hidden;flex:none')}>
-                                <ImageSlot src={''} shape="circle" placeholder="face" />
-                              </span>
-                              <span style={S('font:500 11px/1 Geist;color:#57504A')}>{who.short || who.n}</span>
-                            </span>
-                          ) : members.length ? (
-                            <Pressable label={`Assign ${title}`} expanded={false} onClick={(e) => assignMenu(e, task)} className={cx(H.secondary, H.press)} style={S('display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:99px;border:1px dashed #D8D0C7;background:#fff;font:500 11px/1 Geist;color:#8A8179;cursor:pointer')}>
-                              <Icon name="plus" size={11} />
-                              Assign
-                            </Pressable>
-                          ) : null}
+        <div style={S(`margin-top:24px;display:grid;grid-template-columns:${stackBoard ? 'minmax(0,1fr)' : 'repeat(3,minmax(0,1fr))'};gap:${stackBoard ? 32 : 28}px`)}>
+          {COLUMNS.map((col) => {
+            const colTasks = tasks.filter((t) => t.status === col.key);
+            return (
+              <div key={col.key} role="group" aria-label={`${col.label}, ${colTasks.length}`} style={S('min-width:0')}>
+                <div style={S(`padding-bottom:10px;border-bottom:2px solid ${C.ink};display:flex;align-items:baseline;justify-content:space-between;gap:8px`)}>
+                  <h3 style={S(`margin:0;font:600 15px/1.2 ${F.body};color:${C.ink}`)}>{col.label}</h3>
+                  <span style={S(`${TH};${NUM}`)}>{colTasks.length}</span>
+                </div>
+                <ul style={S('margin:0;padding:0;list-style:none')}>
+                  {colTasks.map((task) => {
+                    const who = assigneeOf(task);
+                    const title = titleOf(task);
+                    const done = task.status === 'done';
+                    return (
+                      <li key={task.id} style={S(`padding:16px 0;${RULE}`)}>
+                        <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:8px')}>
+                          <div className="vu-break" style={s(`font:600 15px/1.35 ${F.body};min-width:0`, done ? `color:${C.ink2};text-decoration:line-through;text-decoration-color:${C.ink3}` : `color:${C.ink}`)}>{title}</div>
+                          <Pressable label={`More actions for ${title}`} expanded={false} onClick={(e) => taskMenu(e, task)} className={cx(H.icon, H.press)} style={S(`flex:none;display:grid;place-items:center;width:36px;height:36px;margin:-8px -8px 0 0;border-radius:${R.control};color:${C.ink3};cursor:pointer`)}>
+                            <Icon name="more" size={18} />
+                          </Pressable>
                         </div>
-                      ) : null}
-                      <div style={S('margin-top:11px;display:flex;gap:6px')}>
-                        {PREV[task.status] ? (
-                          <Pressable label={`Move ${title} back to ${COL_LABEL[PREV[task.status]]}`} onClick={() => move(task, PREV[task.status])} className={cx(H.secondary, H.press)} style={S(`${CARD_BTN};border:1px solid #E8E1D9;background:#fff;color:#6B635C`)}>
-                            <Icon name="chevron-left" size={13} />
-                            Back
-                          </Pressable>
+                        {task.detail ? <div className="vu-break" style={S(`margin-top:4px;${SMALL}`)}>{task.detail}</div> : null}
+                        {(() => {
+                          // One meta line: due date · role · who has it (or Assign).
+                          // A finished task never asks to be assigned.
+                          const role = roleChip(task.roleId);
+                          const parts = [
+                            task.due ? <span key="due" style={S(NUM)}>Due {task.due}</span> : null,
+                            role ? <span key="role" style={S('display:inline-flex;min-width:0')}>{role}</span> : null,
+                            who ? (
+                              <span key="who" style={S(`display:inline-flex;align-items:center;gap:6px;color:${C.ink}`)}>
+                                <span style={S('width:20px;height:20px;border-radius:50%;overflow:hidden;flex:none')}>
+                                  <Avatar name={who.n} fs={9} />
+                                </span>
+                                {who.short || who.n}
+                              </span>
+                            ) : members.length && !done ? (
+                              <button
+                                key="assign"
+                                type="button"
+                                aria-label={`Assign ${title}`}
+                                aria-haspopup="menu"
+                                aria-expanded="false"
+                                onClick={(e) => assignMenu(e, task)}
+                                className={cx('vu-link', H.press)}
+                                style={S(`display:inline-flex;align-items:center;background:none;border:0;padding:0;cursor:pointer;font:600 13px/18px ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px`)}
+                              >
+                                Assign
+                              </button>
+                            ) : null,
+                          ].filter(Boolean);
+                          if (!parts.length) return null;
+                          return (
+                            <div style={S(`margin-top:8px;display:flex;align-items:center;flex-wrap:wrap;row-gap:4px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>
+                              {parts.map((el, i) => (
+                                <Fragment key={el.key}>
+                                  {i ? <span className="vu-sep" aria-hidden="true" style={S('padding:0 6px')}>·</span> : null}
+                                  {el}
+                                </Fragment>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        {PREV[task.status] || NEXT[task.status] ? (
+                          <div style={S('margin-top:12px;display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap')}>
+                            {NEXT[task.status] ? (
+                              <Button variant={NEXT[task.status] === 'done' ? 'dark' : 'outline'} size="sm" icon={NEXT[task.status] === 'done' ? 'check' : 'arrow-right'} onClick={() => move(task, NEXT[task.status])} aria-label={NEXT[task.status] === 'done' ? `Mark ${title} done` : `Start ${title}`}>
+                                {NEXT[task.status] === 'done' ? 'Mark done' : 'Start'}
+                              </Button>
+                            ) : null}
+                            {PREV[task.status] ? (
+                              <button
+                                type="button"
+                                onClick={() => move(task, PREV[task.status])}
+                                aria-label={`Move ${title} back to ${COL_LABEL[PREV[task.status]]}`}
+                                className={cx('vu-link', H.press)}
+                                style={S(`background:none;border:0;padding:0;cursor:pointer;font:600 13px/1.2 ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px`)}
+                              >
+                                Move back
+                              </button>
+                            ) : null}
+                          </div>
                         ) : null}
-                        {NEXT[task.status] ? (
-                          <Pressable label={NEXT[task.status] === 'done' ? `Mark ${title} done` : `Start ${title}`} onClick={() => move(task, NEXT[task.status])} className={cx(H.secondary, H.press)} style={S(`${CARD_BTN};border:1px solid #E7C0AC;background:#FAF6F3;color:#C2603C;font-weight:600`)}>
-                            {NEXT[task.status] === 'done' ? <Icon name="check" size={13} /> : null}
-                            {NEXT[task.status] === 'done' ? 'Mark done' : 'Start'}
-                            {NEXT[task.status] === 'done' ? null : <Icon name="chevron-right" size={13} />}
-                          </Pressable>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-                {!colTasks.length ? (
-                  <div style={S('padding:16px 8px;text-align:center;font:450 12px/1.5 Geist;color:#8A8179')}>
-                    {col.key === 'todo' ? 'No tasks to start' : col.key === 'doing' ? 'Nothing in progress' : 'Nothing done yet'}
-                  </div>
-                ) : null}
+                      </li>
+                    );
+                  })}
+                  {!colTasks.length ? (
+                    <li style={S(`padding:16px 0;${RULE};${SMALL}`)}>
+                      {col.key === 'todo' ? 'No tasks to start' : col.key === 'doing' ? 'Nothing in progress' : 'Nothing done yet'}
+                    </li>
+                  ) : null}
+                </ul>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
@@ -284,20 +370,21 @@ function TaskForm({ api, project, task, roles, members }) {
   return (
     <div>
       <Field label="Task" value={f.title} onChange={(v) => { setF((x) => ({ ...x, title: v })); if (err) setErr(''); }} placeholder="e.g. Book Millbrook Park for Nov 7" maxLength={90} required error={err} />
-      <div style={S('margin-top:14px')}>
+      <div style={S('margin-top:16px')}>
         <TextArea label="Details (optional)" value={f.detail} onChange={(v) => setF((x) => ({ ...x, detail: v }))} maxLength={300} minHeight={64} placeholder="e.g. Call the parks office before Friday" />
       </div>
-      <div className="vu-2col-keep" style={S(`margin-top:14px;display:grid;grid-template-columns:${members.length ? '1fr 1fr' : '1fr'};gap:14px`)}>
+      <div className="vu-2col-keep" style={S(`margin-top:16px;display:grid;grid-template-columns:${members.length ? '1fr 1fr' : '1fr'};gap:14px`)}>
         <Select label="Role" value={f.roleId} options={roleOpts} onChange={(v) => setF((x) => ({ ...x, roleId: v }))} />
         {members.length ? <Select label="Assign to" value={f.assigneeId} options={memberOpts} onChange={(v) => setF((x) => ({ ...x, assigneeId: v }))} /> : null}
       </div>
-      <div style={S('margin-top:14px')}>
+      <div style={S('margin-top:16px')}>
         <Select label="Column" value={f.status} options={statusOpts} onChange={(v) => setF((x) => ({ ...x, status: v }))} />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>Cancel</Pressable>
-        <Pressable
-          label={task ? 'Save task' : 'Add task'}
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">Cancel</Button>
+        <Button
+          variant="primary"
+          aria-label={task ? 'Save task' : 'Add task'}
           onClick={() => {
             if (!f.title.trim()) { setErr('Enter a task.'); return; }
             const data = { title: f.title.trim(), detail: f.detail.trim(), roleId: f.roleId || null, assigneeId: f.assigneeId || null, status: f.status };
@@ -306,52 +393,49 @@ function TaskForm({ api, project, task, roles, members }) {
             api.close();
             toast({ title: task ? 'Task saved' : 'Task added', message: data.title, tone: 'ok', timeout: 2000 });
           }}
-          className={cx(H.primary, H.press)}
-          style={S(MODAL_PRIMARY)}
         >
           {task ? 'Save task' : 'Add task'}
-        </Pressable>
-      </div>
+        </Button>
+      </DialogActions>
     </div>
   );
 }
 
-const RF_COLORS = [
-  { c: '#C2603C', n: 'Terracotta' },
-  { c: '#3F6B4E', n: 'Green' },
-  { c: '#5B6BB0', n: 'Blue' },
-  { c: '#8A5A20', n: 'Brown' },
-  { c: '#9B4A6B', n: 'Plum' },
-  { c: '#4A7C8A', n: 'Teal' },
-];
-
 function RoleForm({ api, project, role }) {
-  const [f, setF] = useState({ name: role ? role.name : '', briefing: role ? role.briefing || '' : '', color: role ? role.color : '#C2603C' });
+  const [f, setF] = useState({ name: role ? role.name : '', briefing: role ? role.briefing || '' : '', color: role ? role.color || RF_COLORS[0].c : RF_COLORS[0].c });
   const [err, setErr] = useState('');
   return (
     <div>
       <Field label="Role name" value={f.name} onChange={(v) => { setF((x) => ({ ...x, name: v })); if (err) setErr(''); }} placeholder="e.g. Outreach" maxLength={40} required error={err} />
-      <div role="radiogroup" aria-label="Role color" style={S('margin-top:14px;display:flex;gap:7px;flex-wrap:wrap')}>
-        {RF_COLORS.map(({ c, n }) => (
-          <Pressable
-            key={c}
-            role="radio"
-            aria-checked={f.color === c ? 'true' : 'false'}
-            label={n}
-            onClick={() => setF((x) => ({ ...x, color: c }))}
-            style={s('width:26px;height:26px;border-radius:50%;cursor:pointer;display:grid;place-items:center;color:#fff', `background:${c}`, `box-shadow:0 0 0 2px #fff, 0 0 0 4px ${f.color === c ? '#1A1714' : 'transparent'}`)}
-          >
-            {f.color === c ? <Icon name="check" size={13} /> : null}
-          </Pressable>
-        ))}
+      <div style={S('margin-top:16px')}>
+        <div id="rf-color" style={S(`font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Color</div>
+        <div role="group" aria-labelledby="rf-color" style={S('margin-top:10px;display:flex;gap:10px;flex-wrap:wrap')}>
+          {RF_COLORS.map(({ c, fg, n }) => {
+            const on = roleTone(f.color).fg === fg;
+            return (
+              <Pressable
+                key={c}
+                pressed={on}
+                label={`Set color, ${n}`}
+                title={n}
+                onClick={() => setF((x) => ({ ...x, color: c }))}
+                style={s('width:30px;height:30px;border-radius:50%;cursor:pointer;display:grid;place-items:center;color:#fff', `background:${fg}`, `box-shadow:0 0 0 2px #fff, 0 0 0 4px ${on ? C.ink : 'transparent'}`)}
+              >
+                {on ? <Icon name="check" size={15} stroke={2.25} /> : null}
+              </Pressable>
+            );
+          })}
+        </div>
       </div>
-      <div style={S('margin-top:14px')}>
+      <div style={S('margin-top:16px')}>
         <TextArea label="Briefing" value={f.briefing} onChange={(v) => setF((x) => ({ ...x, briefing: v }))} maxLength={600} minHeight={120} placeholder="e.g. Email science teachers and post updates" />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap')}>
-        {role ? (
-          <Pressable
-            label={`Delete ${role.name}`}
+      <DialogActions
+        left={role ? (
+          <Button
+            variant="danger"
+            icon="trash"
+            aria-label={`Delete ${role.name}`}
             onClick={async () => {
               const ok = await confirmDialog({ title: `Delete ${role.name}?`, body: 'Its tasks stay on the board without a role.', confirmLabel: 'Delete role', cancelLabel: 'Keep it' });
               if (ok) {
@@ -361,34 +445,29 @@ function RoleForm({ api, project, role }) {
                 toast({ title: 'Role deleted', message: role.name, tone: 'ok' });
               }
             }}
-            className={cx(H.danger, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:40px;border-radius:11px;border:1px solid #EBD3C8;background:#fff;font:600 13px/1 Geist;color:#A8482A;cursor:pointer')}
           >
-            <Icon name="trash" size={14} />
             Delete role
-          </Pressable>
-        ) : <span />}
-        <div style={S('display:flex;gap:10px')}>
-          <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>Cancel</Pressable>
-          <Pressable
-            label={role ? 'Save role' : 'Add role'}
-            onClick={() => {
-              if (!f.name.trim()) { setErr('Enter a role name.'); return; }
-              const data = { name: f.name.trim(), briefing: f.briefing.trim(), color: f.color };
-              if (role) updateTaskRole(project.id, role.id, data);
-              else addTaskRole(project.id, data);
-              // Members read roles from the published listing.
-              syncListing(project.id);
-              api.close();
-              toast({ title: role ? 'Role saved' : 'Role added', message: data.name, tone: 'ok', timeout: 2000 });
-            }}
-            className={cx(H.primary, H.press)}
-            style={S(MODAL_PRIMARY)}
-          >
-            {role ? 'Save role' : 'Add role'}
-          </Pressable>
-        </div>
-      </div>
+          </Button>
+        ) : null}
+      >
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">Cancel</Button>
+        <Button
+          variant="primary"
+          aria-label={role ? 'Save role' : 'Add role'}
+          onClick={() => {
+            if (!f.name.trim()) { setErr('Enter a role name.'); return; }
+            const data = { name: f.name.trim(), briefing: f.briefing.trim(), color: f.color };
+            if (role) updateTaskRole(project.id, role.id, data);
+            else addTaskRole(project.id, data);
+            // Members read roles from the published listing.
+            syncListing(project.id);
+            api.close();
+            toast({ title: role ? 'Role saved' : 'Role added', message: data.name, tone: 'ok', timeout: 2000 });
+          }}
+        >
+          {role ? 'Save role' : 'Add role'}
+        </Button>
+      </DialogActions>
     </div>
   );
 }

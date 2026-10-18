@@ -7,33 +7,42 @@
    for a task-based team. Progress is the member's own, saved on their
    application row so the same view follows them across devices. Renders nothing
    until they've been accepted somewhere.
+
+   Each project is a plain block (no card chrome): a header with the
+   listing's own photo when it has one, "You're in" and the project name, then
+   two columns (steps or tasks on the left, notes from the organizer and
+   check-in on the right) and the hours the member logged for it, as rows.
+   Blocks are separated by a rule.
    ========================================================================== */
 
 import { useEffect, useId, useState } from 'react';
 import Link from 'next/link';
-import { S, s, cx, H } from '../lib/style.js';
+import { S, s } from '../lib/style.js';
+import { C, F, R } from '../lib/tokens.js';
 import { loadMyMemberships, updateMemberState, setMyTaskStatus, logMemberHours, removeMemberHours, checkInMember, myShiftSignUps } from '../lib/listings.js';
 import { openModal, toast, confirmDialog } from '../lib/overlays.js';
 import { syncMyServiceHours } from '../lib/db.js';
 import { checkInWindow, shiftDates } from '../lib/calendar.js';
-import { Field, Pressable, Icon } from './ui.jsx';
+import { Field, Icon, Button, StatusText, IconButton } from './ui.jsx';
+import { Sep } from './vu/ListingCard.jsx';
+import { photoFor } from '../lib/photos.js';
+import DateBlock, { dateParts } from './vu/DateBlock.jsx';
 import MessageThread from './MessageThread.jsx';
-import { nextShiftInfo, shiftLabel } from './screens/JoinListing.jsx';
+import { formatShiftTime } from './screens/JoinListing.jsx';
+import { causeOf, causeKey } from '../lib/tokens.js';
 import { isoToday, isoEarliest, shortDateLabel, validateLogHours, cleanHoursInput } from './LogHoursForm.jsx';
 
-const LABEL = 'font:600 13px/1.2 Geist;letter-spacing:-0.01em;color:#6B635C';
-const CHIP = 'padding:4px 9px;border-radius:7px;font:500 12px/1 Geist';
-const BTN_SECONDARY = 'flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 13px;height:34px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;cursor:pointer';
-const BTN_PRIMARY = 'flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:34px;border-radius:9px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 12px/1 Geist;cursor:pointer';
-const MODAL_SECONDARY = 'display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;cursor:pointer';
-const MODAL_PRIMARY = 'display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer';
 const HOURS_PREVIEW = 5;
-/* Rows inside a project card are plain lines with a hairline between them,
-   so the card doesn't hold a stack of bordered boxes. */
-const ROW_RULE = 'border-top:1px solid #F1EBE4';
-const rowRule = (i) => (i > 0 ? ROW_RULE : '');
 /* checkInMember error codes whose message is safe to show as written. */
 const CHECK_IN_REFUSALS = ['NOT_STARTED', 'ENDED', 'SIGNED_OUT'];
+
+/* Type used inside a project block. */
+const H3 = `margin:0;font:600 15px/1.3 ${F.body};color:${C.ink}`;
+const SMALL = `font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+const COUNT = `font:400 13px/1.3 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums;white-space:nowrap`;
+const ROW_RULE = `border-top:1px solid ${C.line}`;
+/* Organizer notes and briefings are plain text under their heading, no fill. */
+const NOTE = `margin:0;font:400 15px/1.5 ${F.body};color:${C.ink};white-space:pre-wrap`;
 
 /* Only ever hand the browser an http(s) link the organizer pasted. Anything
    with another scheme (javascript:, data:, mailto slipups) is dropped; a bare
@@ -47,19 +56,61 @@ export function safeUrl(raw) {
   return '';
 }
 
+/* What each kind of step is, named at the start of its meta line. */
 const KIND = {
-  meeting: { icon: 'clock', label: 'Meeting', bg: '#EEF3FB', color: '#4A5A9E' },
-  form: { icon: 'file', label: 'Form', bg: '#FDF3E7', color: '#8A5A20' },
-  training: { icon: 'award', label: 'Training', bg: '#EAF3EC', color: '#3F6B4E' },
-  check: { icon: 'check', label: 'Step', bg: '#F6F2EE', color: '#57504A' },
+  meeting: { label: 'Meeting' },
+  form: { label: 'Form' },
+  training: { label: 'Training' },
+  check: { label: 'Step' },
 };
 
-/** Session strings arrive as "Sat, Oct 24 · 10:00 AM-11:00 AM"; show them the way
-    every screen does ("Sat, Oct 24 at 10–11 AM"). Text that isn't a shift comes back
-    with any "·" turned into a comma. */
+/* A stored session ("Sat, Oct 24 · 10:00 AM-11:00 AM", "Sat, Oct 24 at 1:00-4:00 PM"
+   or "Sat, Oct 24, 1:00-4:00 PM") split into its date text and its time in the
+   house format ("10 to 11 AM"). Null for empty or "Not scheduled", and for text
+   that isn't a dated shift. */
+function sessionParts(text) {
+  const t = String(text || '').trim();
+  if (!t || /not scheduled/i.test(t)) return null;
+  const m = /^(.+?)\s*·\s*(.+)$/.exec(t) || /^(.+?)\s+at\s+(.+)$/.exec(t) || /^([A-Za-z]{3},\s*[A-Za-z]{3}\s+\d{1,2}),\s*(.+)$/.exec(t);
+  if (m && dateParts(m[1]) && /\d|noon|midnight/i.test(m[2])) return { date: m[1].trim(), time: formatShiftTime(m[2].trim()) };
+  return dateParts(t) && !m ? { date: t, time: '' } : null;
+}
+
+/** "Sat, Oct 24 · 10 to 11 AM", the way every card and row writes a shift.
+    Text that isn't a shift comes back with any "·" turned into a comma. */
 function plain(text) {
-  const info = nextShiftInfo(text);
-  return info ? info.label : String(text || '').replace(/\s*·\s*/g, ', ');
+  const p = sessionParts(text);
+  if (!p) return String(text || '').replace(/\s*·\s*/g, ', ');
+  return p.time ? `${p.date} · ${p.time}` : p.date;
+}
+
+/** Just the time of a stored session ("10 to 11 AM"), '' when it has none. */
+function sessionTime(text) {
+  const p = sessionParts(text);
+  return p ? p.time : '';
+}
+
+/** A shift sign-up ({ d, t }) in the same words as plain(). */
+function signUpLabel(sh) {
+  if (!sh) return '';
+  const t = formatShiftTime(sh.t);
+  return t ? `${sh.d} · ${t}` : String(sh.d || '');
+}
+
+/** True when a sign-up ({ d, t }) is for the shift a stored session names. */
+function sameShift(sh, session) {
+  const a = sh && dateParts(sh.d);
+  const p = sessionParts(session);
+  const b = p && dateParts(p.date);
+  if (!a || !b) return false;
+  return a.month === b.month && a.day === b.day && formatShiftTime(sh.t) === p.time;
+}
+
+/** The cause as the rest of the app names it ("Food and hunger"); free text
+    the cause list doesn't know is shown as written. */
+function causeLabel(cause) {
+  if (!cause) return '';
+  return causeKey(cause) === 'other' ? cause : causeOf(cause).label;
 }
 
 /** The shift label when one is posted, '' for none or "Not scheduled". */
@@ -99,7 +150,15 @@ function archivedLabel(closedAt) {
   return d.toLocaleDateString('en-US', sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** "1 hr", "2.5 hrs" for chips and tight rows. */
+/** "Oct 14" for an organizer note's timestamp, '' when it has none. */
+function noteDate(at) {
+  if (!at) return '';
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** "1 hr", "2.5 hrs" for tight rows and the hours sub line. */
 function hrs(n) {
   const h = Math.round(Number(n || 0) * 10) / 10;
   return `${h} ${h === 1 ? 'hr' : 'hrs'}`;
@@ -127,10 +186,14 @@ function resolveRole(assignment, listingRoles, position) {
   return name ? byName(name) : null;
 }
 
-export default function MemberProjects() {
+/* hoursInRail: the page already shows the student's hours summary (Home's
+   rail), so each project titles its list by name and leaves out its own
+   confirmed/waiting line instead of saying the same totals twice. /crew
+   passes nothing and keeps the "Your hours" summary per project. */
+export default function MemberProjects({ hoursInRail = false } = {}) {
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
-  // Prefix for each card's heading id, so "Message organizer" keeps its
+  // Prefix for each block's heading id, so "Message organizer" keeps its
   // visible text as its name and points at the project name for context.
   const uid = useId();
 
@@ -227,7 +290,7 @@ export default function MemberProjects() {
       title: 'Remove these hours?',
       body: `${h.activity}, ${h.date} (${hoursWord(h.hrs)}) comes off your hours for ${app.listings.name}. You can log it again later.`,
       confirmLabel: 'Remove hours',
-      cancelLabel: 'Keep it',
+      cancelLabel: 'Cancel',
       tone: 'danger',
     });
     if (!ok) return;
@@ -272,77 +335,143 @@ export default function MemberProjects() {
     });
   }
 
+  const ordered = [...rows].sort((a, b) => Number(!!a.listings.unlisted) - Number(!!b.listings.unlisted));
+
   return (
-    <section aria-label="Projects you're in" style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-      <h2 style={S('margin:0;font:600 16px/1.3 Geist;letter-spacing:-0.015em;color:#1A1714')}>Projects you&apos;re in</h2>
-      <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:12px')}>
-        {[...rows].sort((a, b) => Number(!!a.listings.unlisted) - Number(!!b.listings.unlisted)).map((app) => {
-          const l = app.listings;
-          const isTeam = l.org_type === 'team';
-          // The listing is hidden from members once the organizer archives or
-          // pauses it, so only the saved copy comes back: no shifts, no steps.
-          const closed = !!l.unlisted;
-          // Archiving stamps closedAt on each member's row (markProjectClosed).
-          // A listing that's only paused or unlisted has no stamp, and one the
-          // organizer brought back is readable again, so neither reads archived.
-          const archivedOn = closed ? archivedLabel(app.assignment && app.assignment.closedAt) : null;
-          const meta = [l.cause, l.site, app.position].filter(Boolean).join(', ') || 'Student project';
-          const nameId = `${uid}-name-${app.id}`;
-          return (
-            <article key={app.id} aria-label={l.name} style={S('padding:16px 18px;border-radius:14px;background:#FCFAF8;border:1px solid #F1EBE4')}>
-              <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-                <div style={S('min-width:0;flex:1 1 220px')}>
-                  <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                    <h3 id={nameId} style={S('margin:0;font:600 16px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714')}>{l.name}</h3>
-                    {archivedOn !== null ? <span style={s(CHIP, 'background:#F6F2EE;color:#6B635C')}>Archived</span> : null}
-                  </div>
-                  <div className="vu-break" style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>{meta}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => message(app)}
-                  aria-describedby={nameId}
-                  className={cx(H.secondary, H.press)}
-                  style={S(BTN_SECONDARY)}
-                >
-                  <Icon name="message" size={14} />
-                  Message organizer
-                </button>
-              </div>
-
-              {closed ? (
-                <div style={S('margin-top:12px;font:450 13px/1.5 Geist;color:#57504A')}>
-                  {archivedOn !== null
-                    ? `The organizer archived ${l.name}${archivedOn ? ` on ${archivedOn}` : ''}, so there are no more shifts. Your hours stay on your profile.`
-                    : `${l.name} isn't running right now, so there are no shifts to check in to.`}
-                </div>
-              ) : isTeam ? <TeamMember app={app} onAck={ackBriefing} onToggleTask={toggleTask} /> : <VolunteerMember app={app} onToggle={toggleStep} />}
-
-              {(l.announcements || []).length ? (
-                <div style={S('margin-top:16px;padding-top:14px;border-top:1px solid #EFE8E0')}>
-                  <div style={S(LABEL)}>From the organizer</div>
-                  <div style={S('margin-top:8px;display:flex;flex-direction:column;gap:10px')}>
-                    {l.announcements.slice(0, 3).map((an) => (
-                      <blockquote key={an.id} className="vu-break" style={S('margin:0;padding:1px 0 1px 12px;border-left:2px solid #E7C0AC;font:450 13px/1.55 Geist;color:#332D28;white-space:pre-wrap')}>
-                        {an.body}
-                      </blockquote>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {closed || nothingToCheckInTo(l) ? null : <MemberCheckIn app={app} onCheckIn={() => checkInFor(app)} />}
-
-              <MemberHours app={app} onLog={() => logHoursFor(app)} onRemove={(h) => removeHour(app, h)} />
-            </article>
-          );
-        })}
-      </div>
+    <section aria-label="Projects you're in" className="vu-sec">
+      {ordered.map((app, i) => (
+        <ProjectBlock
+          key={app.id}
+          app={app}
+          first={i === 0}
+          nameId={`${uid}-name-${app.id}`}
+          onMessage={() => message(app)}
+          onToggleStep={toggleStep}
+          onAck={ackBriefing}
+          onToggleTask={toggleTask}
+          onCheckIn={() => checkInFor(app)}
+          onLog={() => logHoursFor(app)}
+          onRemove={(h) => removeHour(app, h)}
+          hoursInRail={hoursInRail}
+        />
+      ))}
     </section>
   );
 }
 
-function MemberHours({ app, onLog, onRemove }) {
+/* The listing's own cover, the same image /join and the applications list
+   show for it, as a 72px thumb. A listing without one (or whose photo fails to
+   load) gets nothing, and the title block starts at the left edge. Stock
+   photos never stand in for a listing the member is in. */
+function ProjectImage({ listing }) {
+  const photo = photoFor(listing, { seed: false });
+  const src = photo && (photo.sm || photo.src);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  if (!src || broken) return null;
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      decoding="async"
+      onError={() => setBroken(true)}
+      style={{ display: 'block', flex: 'none', width: 72, height: 72, objectFit: 'cover', objectPosition: photo.pos || 'center', borderRadius: R.control, background: C.mist }}
+    />
+  );
+}
+
+/* One project the member is in. The inner div holds the whole block so the
+   name, its message button and its hours all live in one container. */
+function ProjectBlock({ app, first, nameId, onMessage, onToggleStep, onAck, onToggleTask, onCheckIn, onLog, onRemove, hoursInRail }) {
+  const l = app.listings;
+  const isTeam = l.org_type === 'team';
+  // The listing is hidden from members once the organizer archives or
+  // pauses it, so only the saved copy comes back: no shifts, no steps.
+  const closed = !!l.unlisted;
+  // Archiving stamps closedAt on each member's row (markProjectClosed).
+  // A listing that's only paused or unlisted has no stamp, and one the
+  // organizer brought back is readable again, so neither reads archived.
+  const archivedOn = closed ? archivedLabel(app.assignment && app.assignment.closedAt) : null;
+  // One meta line, each fact once: cause, the member's role, the place.
+  const meta = [causeLabel(l.cause), app.position, l.site].filter(Boolean);
+  const notes = (l.announcements || []).slice(0, 3);
+  const showCheckIn = !(closed || nothingToCheckInTo(l));
+
+  return (
+    <article aria-labelledby={nameId} style={S(first ? '' : `margin-top:48px;padding-top:40px;${ROW_RULE}`)}>
+      <div>
+        <div style={S('display:flex;align-items:center;gap:20px;flex-wrap:wrap')}>
+          <div style={S('display:flex;align-items:center;gap:16px;min-width:0;flex:1 1 320px')}>
+            <ProjectImage listing={l} />
+            <div style={S('min-width:0;flex:1')}>
+              {archivedOn !== null ? (
+                <StatusText tone="mute">Archived</StatusText>
+              ) : closed ? (
+                <StatusText tone="mute">Paused</StatusText>
+              ) : (
+                <StatusText tone="ok">You&apos;re in</StatusText>
+              )}
+              <h2 id={nameId} className="vu-break" style={S(`margin:8px 0 0;font:650 clamp(21px,2.4vw,26px)/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`)}>{l.name}</h2>
+              {meta.length ? (
+                <div className="vu-break" style={S(`margin-top:4px;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>
+                  {meta.map((m, i) => <span key={i}>{i ? <Sep /> : null}{m}</span>)}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <Button size="sm" icon="message" onClick={onMessage} aria-describedby={nameId}>
+            Message organizer
+          </Button>
+        </div>
+
+        <div style={S('margin-top:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:28px 40px;align-items:start')}>
+          <div style={S(notes.length || showCheckIn ? 'min-width:0' : 'min-width:0;max-width:640px')}>
+            {closed ? (
+              <p style={S(`margin:0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
+                {archivedOn !== null
+                  ? `The organizer archived ${l.name}${archivedOn ? ` on ${archivedOn}` : ''}, so there are no more shifts. Your hours stay on your profile.`
+                  : `${l.name} isn't running right now, so there are no shifts to check in to.`}
+              </p>
+            ) : isTeam ? (
+              <TeamMember app={app} onAck={onAck} onToggleTask={onToggleTask} />
+            ) : (
+              <VolunteerMember app={app} onToggle={onToggleStep} />
+            )}
+          </div>
+
+          {notes.length || showCheckIn ? (
+            <div style={S('min-width:0;display:flex;flex-direction:column;gap:20px')}>
+              {notes.length ? (
+                <div>
+                  <h3 style={S(`${H3};margin-bottom:8px`)}>From the organizer</h3>
+                  <ul style={S('margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px')}>
+                    {notes.map((an) => {
+                      const on = noteDate(an.at);
+                      return (
+                        <li key={an.id}>
+                          <p className="vu-break" style={S(NOTE)}>{an.body}</p>
+                          {on ? <div style={S(`margin-top:2px;${SMALL}`)}>{on}</div> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+              {showCheckIn ? <MemberCheckIn app={app} onCheckIn={onCheckIn} /> : null}
+            </div>
+          ) : null}
+        </div>
+
+        <MemberHours app={app} nameId={nameId} onLog={onLog} onRemove={onRemove} hoursInRail={hoursInRail} />
+      </div>
+    </article>
+  );
+}
+
+function MemberHours({ app, nameId, onLog, onRemove, hoursInRail }) {
   const [showAll, setShowAll] = useState(false);
   const log = (app.member_state && app.member_state.hoursLog) || [];
   const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
@@ -359,71 +488,100 @@ function MemberHours({ app, onLog, onRemove }) {
   ];
   const shown = showAll ? rows : rows.slice(0, HOURS_PREVIEW);
   return (
-    <div style={S('margin-top:16px;padding-top:14px;border-top:1px solid #EFE8E0')}>
-      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap')}>
-        <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-          <div style={S(LABEL)}>Your hours</div>
-          {rows.length ? (
-            <>
-              <span style={s(CHIP, 'background:#EAF3EC;color:#3F6B4E')}>{hrs(confirmedSum)} confirmed</span>
-              {waitingSum > 0 ? <span style={s(CHIP, 'background:#FDF3E7;color:#8A5A20')}>{hrs(waitingSum)} waiting</span> : null}
-            </>
+    <div style={S('margin-top:40px')}>
+      <div style={S('display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+        <div style={S('min-width:0')}>
+          <h3 className="vu-t-h3s vu-break" style={S(`margin:0;color:${C.ink}`)}>
+            {hoursInRail ? `Hours on ${app.listings.name}` : 'Your hours'}
+          </h3>
+          {rows.length && !hoursInRail ? (
+            <p style={S(`margin:4px 0 0;${SMALL};font-variant-numeric:tabular-nums`)}>
+              <span>{hrs(confirmedSum)} confirmed</span>
+              {waitingSum > 0 ? <><Sep /><span>{hrs(waitingSum)} waiting on the organizer</span></> : null}
+            </p>
           ) : null}
         </div>
-        <button type="button" onClick={onLog} className={cx(H.secondary, H.press)} style={S(BTN_SECONDARY)}>
-          <Icon name="plus" size={14} />
-          Log hours
-        </button>
+        <Button size="sm" icon="plus" onClick={onLog} aria-describedby={nameId}>Log hours</Button>
       </div>
       {rows.length ? (
-        <div style={S('margin-top:6px;display:flex;flex-direction:column')}>
-          {shown.map((h, i) => {
-            const v = h.v;
+        <div className="vu-list" style={S('margin-top:12px')}>
+          {shown.map((h) => {
+            const when = dateParts(h.date);
+            const hasDate = !!when;
+            // The date block carries the weekday, day and month, so the meta
+            // line adds only what it can't show: a year that isn't this one
+            // and where the hours came from. Empty meta means no second line.
+            const otherYear = hasDate && when.date.getFullYear() !== new Date().getFullYear() ? String(when.date.getFullYear()) : '';
+            const meta = [
+              hasDate ? otherYear : h.date,
+              h.posted ? 'From attendance' : '',
+            ].filter(Boolean);
             return (
-              <div key={h.key} style={s('display:flex;align-items:center;gap:10px;padding:6px 0', rowRule(i))}>
-                <span className="vu-break" style={s('font:450 13px/1.35 Geist;flex:1;min-width:0', v ? 'color:#57504A' : 'color:#332D28')}>{h.activity}, {h.date}</span>
-                <span style={S("font:500 12px/1 'Geist Mono',monospace;color:#332D28;flex:none")}>{hrs(h.hrs)}</span>
-                {v ? (
-                  <span title={h.posted ? 'Posted by the organizer from attendance' : 'Confirmed by the organizer'} style={S('flex:none;width:28px;height:28px;display:grid;place-items:center;color:#3F6B4E')}>
-                    <Icon name="check" size={14} label="Confirmed" />
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${h.activity}, ${h.date}`}
-                    title="Remove"
-                    onClick={() => onRemove(h)}
-                    className={cx(H.press)}
-                    style={S('flex:none;width:28px;height:28px;display:grid;place-items:center;border-radius:7px;border:0;background:none;color:#8A8179;cursor:pointer')}
-                  >
-                    <Icon name="x" size={14} />
-                  </button>
-                )}
+              // Two grid cells: the date, then one wrapping line of title and
+              // hours. On a wide row the hours sit at the right edge; on a
+              // phone they drop under the title, still beside the date.
+              <div key={h.key} className={hasDate ? 'vu-row' : 'vu-row vu-row--nolead'} style={S(`grid-template-columns:${hasDate ? 'auto ' : ''}minmax(0,1fr)`)}>
+                {hasDate ? <DateBlock date={h.date} size="md" month /> : null}
+                <div style={S('min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px')}>
+                  {/* A 240px basis makes every row wrap the same way on a
+                      phone instead of only the ones with long titles. */}
+                  <div style={S('min-width:0;flex:1 1 240px')}>
+                    <span className="vu-row-t">{h.activity}</span>
+                    {meta.length ? <span className="vu-row-m">{meta.map((m, i) => <span key={i}>{i ? <Sep /> : null}{m}</span>)}</span> : null}
+                  </div>
+                  <div className="vu-row-end" style={S('flex:none')}>
+                    <span className="vu-row-num">{hrs(h.hrs)}</span>
+                    {h.v ? (
+                      <StatusText tone="ok" title={h.posted ? 'Posted by the organizer from attendance' : 'Confirmed by the organizer'}>Confirmed</StatusText>
+                    ) : (
+                      <>
+                        <StatusText tone="wait">Waiting</StatusText>
+                        <IconButton
+                          icon="trash"
+                          label={`Remove ${hrs(h.hrs)} for ${h.activity}, ${h.date}`}
+                          onClick={() => onRemove(h)}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })}
           {rows.length > HOURS_PREVIEW ? (
-            <button type="button" onClick={() => setShowAll((x) => !x)} aria-expanded={showAll} className={cx(H.press)} style={S('margin-top:4px;align-self:flex-start;border:0;background:none;padding:4px 2px;font:600 12px/1 Geist;color:#C2603C;cursor:pointer')}>
-              {showAll ? 'Show fewer' : `Show all ${rows.length}`}
-            </button>
+            <div style={S('padding-top:12px')}>
+              <Button variant="ghost" size="sm" onClick={() => setShowAll((x) => !x)} aria-expanded={showAll}>
+                {showAll ? 'Show fewer' : `Show all ${rows.length}`}
+              </Button>
+            </div>
           ) : null}
         </div>
       ) : (
-        <div style={S('margin-top:8px;font:450 13px/1.5 Geist;color:#8A8179')}>Log the time you put in here, and {app.listings.name} can confirm it.</div>
+        <p style={S(`margin:8px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>Nothing logged yet. Log your time after a shift and {app.listings.name} can confirm it.</p>
       )}
     </div>
   );
 }
 
-/* "Sat, Oct 24 at 8 AM", the moment check-in opens. */
-function opensAtLabel(d) {
-  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+/* When check-in opens: "at 9 AM" on the shift's own day (the date is already
+   on screen), "Fri, Oct 23 at 11 PM" when it opens the day before. */
+function opensAtLabel(d, session) {
   const h = d.getHours();
   const m = d.getMinutes();
-  if (h === 0 && m === 0) return day;
-  return `${day} at ${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
+  const time = `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
+  const sp = dateParts(sessionParts(session) ? sessionParts(session).date : session);
+  const sameDay = !!sp && sp.date.getMonth() === d.getMonth() && sp.date.getDate() === d.getDate();
+  if (sameDay) return h === 0 && m === 0 ? 'when the day starts' : `at ${time}`;
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return h === 0 && m === 0 ? day : `${day} at ${time}`;
 }
 
+const STRONG = `font-weight:600;color:${C.ink}`;
+
+/* The check-in block. The date block names the day once; the lines next to it
+   say what the member has to do with that shift. A member who hasn't signed
+   up for the next shift is asked to sign up instead of being told when
+   check-in opens, so the block never reads as if they're going. */
 function MemberCheckIn({ app, onCheckIn }) {
   const checkins = (app.member_state && app.member_state.checkins) || [];
   const last = checkins[0];
@@ -433,52 +591,96 @@ function MemberCheckIn({ app, onCheckIn }) {
   // (same rule checkInMember enforces), so there's no button a week early.
   const win = scheduled ? checkInWindow(nextSession) : { state: 'unknown' };
   const doneForThis = !!(last && scheduled && last.session && plain(last.session) === nextSession);
-  let note = null;
-  if (win.state === 'early') note = `Check-in opens ${opensAtLabel(win.opensAt)}.`;
-  else if (win.state === 'over') note = 'No new shift posted yet. If you went, log your hours.';
-  const canCheckIn = (win.state === 'open' || win.state === 'unknown') && !doneForThis;
   // The volunteer's own upcoming sign-ups, soonest first, so they can see
   // which shift they picked and get to the shift list to change it.
   const startOf = (x) => { const d = shiftDates(x); return d ? d.start.getTime() : Infinity; };
   const mySignUps = myShiftSignUps(app).filter((x) => !x.past).sort((a, b) => startOf(a) - startOf(b));
-  return (
-    <div style={S('margin-top:16px;padding-top:14px;border-top:1px solid #EFE8E0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-      <div style={S('min-width:0;flex:1 1 220px')}>
-        <div style={S(LABEL)}>Check in</div>
-        <div style={S('margin-top:6px;font:450 13px/1.45 Geist;color:#57504A')}>
-          {scheduled ? (
-            <>{win.state === 'over' ? 'Last shift' : 'Next shift'} <span style={S('color:#1A1714;font-weight:500')}>{nextSession}</span></>
-          ) : 'Check in when you get there.'}
-        </div>
+  const over = win.state === 'over';
+  const forNext = scheduled ? mySignUps.find((x) => sameShift(x, nextSession)) : null;
+  const others = mySignUps.filter((x) => x !== forNext);
+  // Scheduled, still ahead, and the member hasn't picked it: ask them to sign up.
+  const askToSignUp = scheduled && !over && !mySignUps.length;
+  let note = null;
+  if (win.state === 'early' && forNext) note = `Check-in opens ${opensAtLabel(win.opensAt, nextSession)}`;
+  else if (over) note = 'No new shift posted yet. If you went, log your hours.';
+  // Checking in again for the same shift stays possible (a mistyped code, a
+  // second visit that day); the label says it's another check-in.
+  const canCheckIn = win.state === 'open' || win.state === 'unknown';
+  const time = sessionTime(nextSession);
+  const moreLine = (n) => `${n} more ${n === 1 ? 'shift' : 'shifts'}`;
+  const shiftsHref = app.listing_id ? `/join/${app.listing_id}#vu-join-apply` : '';
+
+  // The heading names what the block is about right now. "Check in" only
+  // when there's something to check in to: a shift the member signed up for
+  // whose window is open, or a project with no posted shift (check in on
+  // arrival). Otherwise it names the shift the lines describe.
+  const heading = !scheduled || (forNext && canCheckIn) ? 'Check in' : over ? 'Last shift' : 'Next shift';
+
+  let lines;
+  if (!scheduled) {
+    lines = 'Check in when you get there.';
+  } else if (askToSignUp) {
+    lines = <b style={S(STRONG)}>{nextSession}</b>;
+  } else if (forNext) {
+    lines = (
+      <>
+        <b style={S(STRONG)}>Signed up</b>
+        {time ? <><Sep />{time}</> : null}
+        {others.length ? <><Sep />{moreLine(others.length)}</> : null}
+      </>
+    );
+  } else {
+    lines = (
+      <>
+        {time ? <b style={S(STRONG)}>{time}</b> : null}
         {mySignUps.length ? (
-          <div style={S('margin-top:6px;font:450 13px/1.45 Geist;color:#57504A')}>
-            Signed up for <span style={S('color:#1A1714;font-weight:500')}>{shiftLabel(mySignUps[0])}</span>
-            {mySignUps.length > 1 ? ` and ${mySignUps.length - 1} more` : ''}
+          <div style={S('margin-top:2px')}>
+            Signed up for <b style={S(STRONG)}>{signUpLabel(mySignUps[0])}</b>
+            {mySignUps.length > 1 ? ` and ${moreLine(mySignUps.length - 1)}` : ''}
           </div>
         ) : null}
-        {app.listing_id ? (
+      </>
+    );
+  }
+
+  return (
+    <div>
+      <h3 style={S(H3)}>{heading}</h3>
+      <div style={S('margin-top:10px;display:flex;align-items:center;gap:14px')}>
+        {scheduled && !askToSignUp ? <DateBlock date={app.listings.next_session} size="md" month /> : null}
+        <div style={S(`min-width:0;flex:1;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>{lines}</div>
+      </div>
+      {last ? (
+        <div style={S(`margin-top:10px;display:flex;align-items:center;gap:6px;font:500 13px/1.4 ${F.body};color:${C.confirmed}`)}>
+          <Icon name="check-circle" size={16} />
+          <span>{doneForThis ? 'Checked in for this shift' : checkedInLine(last)}</span>
+        </div>
+      ) : null}
+      <div style={S('margin-top:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
+        {askToSignUp && shiftsHref ? (
+          <Button variant="dark" size="sm" href={shiftsHref} aria-label={`Sign up for a shift at ${app.listings.name}`}>
+            Sign up
+          </Button>
+        ) : null}
+        {canCheckIn ? (
+          // Ember only while the check-in window is actually open; ink otherwise,
+          // so a page of projects doesn't carry an Ember button per block.
+          <Button variant={win.state === 'open' ? 'primary' : askToSignUp ? 'outline' : 'dark'} size="sm" onClick={onCheckIn}>
+            {last ? 'Check in again' : 'Check in'}
+          </Button>
+        ) : null}
+        {note && !doneForThis ? <span style={S(SMALL)}>{note}</span> : null}
+        {shiftsHref && !askToSignUp ? (
           <Link
-            href={`/join/${app.listing_id}`}
+            href={shiftsHref}
             aria-label={`See shifts for ${app.listings.name}`}
-            className={cx(H.press)}
-            style={S('margin-top:6px;display:block;width:fit-content;font:600 12px/1.4 Geist;color:#C2603C;text-decoration:none')}
+            className="vu-link-ul"
+            style={S(`font:600 13px/1.4 ${F.body}`)}
           >
             See shifts
           </Link>
         ) : null}
-        {last ? (
-          <div style={S('margin-top:6px;display:inline-flex;align-items:center;gap:6px;font:450 12px/1.4 Geist;color:#3F6B4E')}>
-            <Icon name="check" size={13} />
-            <span>{checkedInLine(last)}</span>
-          </div>
-        ) : null}
-        {note && !doneForThis ? <div style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#8A8179')}>{note}</div> : null}
       </div>
-      {canCheckIn ? (
-        <button type="button" onClick={onCheckIn} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-          {last ? 'Check in again' : 'Check in'}
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -495,24 +697,22 @@ function CheckInForm({ session, onSave, onCancel }) {
   return (
     <div>
       {session ? (
-        <div style={S('margin-bottom:14px;padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#57504A')}>
-          Shift <span style={S('color:#1A1714;font-weight:500')}>{session}</span>
-        </div>
+        <p style={S(`margin:0 0 20px;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
+          Shift <b style={S(`font-weight:600;color:${C.ink}`)}>{plain(session)}</b>
+        </p>
       ) : null}
-      <div>
-        <Field
-          label="Check-in code (optional)"
-          value={code}
-          onChange={(v) => setCode(v.replace(/\D/g, '').slice(0, 8))}
-          placeholder="e.g. 3586"
-          inputMode="numeric"
-          maxLength={8}
-          hint="Your organizer checks this code. No code? Leave it blank."
-        />
-      </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={onCancel} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>Cancel</Pressable>
-        <Pressable label="Check in" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>{busy ? 'Checking in' : 'Check in'}</Pressable>
+      <Field
+        label="Check-in code (optional)"
+        value={code}
+        onChange={(v) => setCode(v.replace(/\D/g, '').slice(0, 8))}
+        placeholder="e.g. 3586"
+        inputMode="numeric"
+        maxLength={8}
+        hint="Your organizer checks this code. No code? Leave it blank."
+      />
+      <div style={S('margin-top:20px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={save} busy={busy}>{busy ? 'Checking in' : 'Check in'}</Button>
       </div>
     </div>
   );
@@ -524,9 +724,9 @@ function DateInput({ label, value, onChange, min, max, error, required }) {
   const eid = `${fid}-err`;
   return (
     <div>
-      <label htmlFor={fid} style={S('display:block;font:500 12px/1 Geist;color:#57504A')}>
+      <label htmlFor={fid} style={S(`display:block;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>
         {label}
-        {required ? <span aria-hidden="true" style={S('color:#C2603C')}>{' *'}</span> : null}
+        {required ? <span aria-hidden="true" style={S(`color:${C.ember}`)}>{' *'}</span> : null}
       </label>
       <input
         id={fid}
@@ -539,8 +739,8 @@ function DateInput({ label, value, onChange, min, max, error, required }) {
         data-invalid={error ? 'true' : undefined}
         aria-describedby={error ? eid : undefined}
         onChange={(e) => onChange(e.target.value)}
-        className={H.input}
-        style={S('margin-top:8px;display:block;width:100%;min-width:0;padding:11px 14px;border-radius:10px;border:1px solid #E8E1D9;background:#fff;font:450 15px/1.15 Geist;color:#1A1714;transition:border-color .16s ease')}
+        className="vu-input"
+        style={S(`margin-top:8px;display:block;width:100%;min-width:0;height:46px;padding:0 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.2 ${F.body};color:${C.ink};transition:border-color .16s ease`)}
       />
       {error ? <div className="vu-err" id={eid}>{error}</div> : null}
     </div>
@@ -565,27 +765,37 @@ function MemberHoursForm({ onSave, onCancel }) {
   return (
     <div>
       <Field label="What you did" value={f.activity} onChange={(v) => setF((x) => ({ ...x, activity: v }))} placeholder="e.g. Sorted donations" maxLength={80} required error={err.activity} />
-      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+      <div className="vu-2col-keep" style={S('margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
         <DateInput label="Date" value={f.date} onChange={(v) => setF((x) => ({ ...x, date: v }))} min={isoEarliest()} max={today} required error={err.date} />
         <Field label="Hours" value={f.hrs} onChange={(v) => setF((x) => ({ ...x, hrs: cleanHoursInput(v) }))} placeholder="e.g. 2.5" inputMode="decimal" required error={err.hrs} />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={onCancel} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>Cancel</Pressable>
-        <Pressable label="Log hours" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>{busy ? 'Logging hours' : 'Log hours'}</Pressable>
+      <div style={S('margin-top:20px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={save} busy={busy}>{busy ? 'Logging hours' : 'Log hours'}</Button>
       </div>
     </div>
   );
 }
 
+/* The square a step or task row toggles. Ink when done. */
 function CheckBox({ on }) {
   return (
     <span
       aria-hidden="true"
-      style={s('width:19px;height:19px;border-radius:6px;flex:none;margin-top:1px;display:grid;place-items:center', on ? 'background:#3F6B4E;color:#fff' : 'background:#fff;border:1px solid #D8D0C7;color:transparent')}
+      style={s(
+        'width:20px;height:20px;border-radius:6px;flex:none;margin-top:1px;display:grid;place-items:center',
+        on ? `background:${C.ink};color:#fff` : `background:#fff;box-shadow:inset 0 0 0 1.5px ${C.line2};color:transparent`,
+      )}
     >
-      {on ? <Icon name="check" size={12} stroke={2.5} /> : null}
+      {on ? <Icon name="check" size={13} stroke={2.5} /> : null}
     </span>
   );
+}
+
+/* "2 of 3 done", or "Ready to start" once every required step is checked. */
+function ProgressCount({ done, total, readyLabel }) {
+  if (readyLabel && done >= total) return <StatusText tone="ok">{readyLabel}</StatusText>;
+  return <span style={S(COUNT)}>{done} of {total} done</span>;
 }
 
 /* Volunteer program: the steps the member works through before their first shift. */
@@ -594,74 +804,63 @@ function VolunteerMember({ app, onToggle }) {
   const done = (app.member_state && app.member_state.pipeline) || {};
   const required = steps.filter((x) => x.required !== false);
   const cleared = required.filter((x) => done[x.id]).length;
-  const ready = required.length === 0 || cleared === required.length;
 
   if (!steps.length) {
     return (
-      <div style={S('margin-top:12px;font:450 13px/1.5 Geist;color:#57504A')}>
-        No steps before your first shift.
+      <div>
+        <h3 style={S(H3)}>Before your first shift</h3>
+        <p style={S(`margin:6px 0 0;${SMALL}`)}>Nothing to do before your first shift.</p>
       </div>
     );
   }
 
   return (
-    <div style={S('margin-top:16px')}>
-      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-        <div style={S(LABEL)}>Before your first shift</div>
-        <span style={s(CHIP, ready ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20')}>
-          {ready ? 'All done' : `${cleared} of ${required.length} done`}
-        </span>
+    <div>
+      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;min-height:24px')}>
+        <h3 style={S(H3)}>Before your first shift</h3>
+        <ProgressCount done={cleared} total={required.length} readyLabel="Ready to start" />
       </div>
-      <div style={S('margin-top:6px;display:flex;flex-direction:column')}>
-        {steps.map((step, i) => {
-          const k = KIND[step.kind] || KIND.check;
-          const on = !!done[step.id];
-          const href = safeUrl(step.link);
-          const actionLabel = step.kind === 'meeting' ? 'Join call' : step.kind === 'form' ? 'Open form' : 'Open link';
-          const timing = step.kind === 'form' ? (step.due ? `Due ${step.due}` : '') : (step.when || '');
-          return (
-            <div
-              key={step.id}
-              style={s('display:flex;align-items:center;gap:8px;flex-wrap:wrap', rowRule(i))}
+      {steps.map((step) => {
+        const k = KIND[step.kind] || KIND.check;
+        const on = !!done[step.id];
+        const href = safeUrl(step.link);
+        const actionLabel = step.kind === 'meeting' ? 'Join call' : step.kind === 'form' ? 'Open form' : 'Open link';
+        // "Form due Oct 30", "Meeting, Mon 5 PM", or just the kind.
+        const when = step.kind === 'form' ? (step.due ? `${k.label} due ${plain(step.due)}` : '') : (step.when ? `${k.label}, ${plain(step.when)}` : '');
+        return (
+          <div key={step.id} style={S(`display:flex;align-items:flex-start;gap:12px;${ROW_RULE}`)}>
+            <button
+              type="button"
+              aria-pressed={on}
+              onClick={() => onToggle(app, step.id)}
+              style={S('flex:1;min-width:0;text-align:left;display:flex;align-items:flex-start;gap:12px;padding:12px 0;background:transparent;border:0;cursor:pointer;color:inherit')}
             >
-              <button
-                type="button"
-                aria-pressed={on}
-                onClick={() => onToggle(app, step.id)}
-                style={S('flex:1 1 220px;min-width:0;text-align:left;display:flex;align-items:flex-start;gap:11px;padding:11px 0;background:transparent;border:0;cursor:pointer')}
-              >
-                <CheckBox on={on} />
-                <span style={S('min-width:0;flex:1')}>
-                  <span style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                    {/* The kind icon sits before the title, so a long title can't wrap it onto a line of its own. */}
-                    <span style={S('min-width:0;display:flex;align-items:flex-start;gap:7px')}>
-                      <span title={k.label} style={s('flex:none;white-space:nowrap;display:inline-flex;align-items:center;padding:2px 5px;border-radius:6px', `background:${k.bg}`, `color:${k.color}`)}>
-                        <Icon name={k.icon} size={12} label={k.label} />
-                      </span>
-                      <span style={s('min-width:0;font:600 13.5px/1.3 Geist', on ? 'color:#3F6B4E' : 'color:#1A1714')}>{step.label}</span>
-                    </span>
-                    {step.required === false ? <span style={S('font:450 11px/1 Geist;color:#8A8179')}>Optional</span> : null}
-                    {timing ? <span style={s(CHIP, 'padding:3px 7px;font-size:11px', 'background:#EEF3FB;color:#4A5A9E')}>{plain(timing)}</span> : null}
-                  </span>
-                  {step.note ? <span style={S('display:block;margin-top:4px;font:450 12px/1.45 Geist;color:#8A8179')}>{step.note}</span> : null}
+              <CheckBox on={on} />
+              <span style={S('min-width:0;flex:1')}>
+                <span style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
+                  <span style={s(`min-width:0;font:600 14px/1.35 ${F.body}`, on ? `color:${C.ink2};text-decoration:line-through;text-decoration-color:${C.ink3}` : `color:${C.ink}`)}>{step.label}</span>
+                  {step.required === false ? <span style={S(`font:400 13px/1 ${F.body};color:${C.ink3}`)}>Optional</span> : null}
                 </span>
-              </button>
-              {href ? (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cx(H.secondary, H.press)}
-                  style={S('flex:none;margin:0 0 10px auto;display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:32px;border-radius:9px;border:1px solid #E7C0AC;background:#fff;font:600 12px/1 Geist;color:#C2603C;text-decoration:none;cursor:pointer')}
-                >
-                  {actionLabel}
-                  <Icon name="external" size={13} label="opens in a new tab" />
-                </a>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
+                <span className="vu-break" style={S(`display:block;margin-top:2px;${SMALL}`)}>
+                  {[when || k.label, step.note].filter(Boolean).join('. ')}
+                </span>
+              </span>
+            </button>
+            {href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="vu-btn vu-btn-outline"
+                style={S(`flex:none;margin-top:8px;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:600 13px/1 ${F.body};color:${C.ink};text-decoration:none;white-space:nowrap`)}
+              >
+                {actionLabel}
+                <Icon name="external" size={14} label="opens in a new tab" />
+              </a>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -677,36 +876,36 @@ function TeamMember({ app, onAck, onToggleTask }) {
 
   if (!role && !tasks.length) {
     return (
-      <div style={S('margin-top:12px;font:450 13px/1.5 Geist;color:#57504A')}>
-        Your organizer hasn&apos;t given you a role or tasks yet.
+      <div>
+        <h3 style={S(H3)}>Your role</h3>
+        <p style={S(`margin:6px 0 0;${SMALL}`)}>Your organizer hasn&apos;t given you a role or tasks yet.</p>
       </div>
     );
   }
 
   return (
-    <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:16px')}>
+    <div style={S('display:flex;flex-direction:column;gap:28px')}>
       {role ? (
         <div>
-          <div style={S('display:flex;align-items:center;gap:8px')}>
-            <span aria-hidden="true" style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${role.color || '#C2603C'}`)} />
-            <div style={S(LABEL)}>Your role</div>
-            <div style={S('font:600 13px/1.2 Geist;color:#1A1714')}>{role.name}</div>
+          <div style={S('display:flex;align-items:baseline;gap:8px;flex-wrap:wrap')}>
+            <h3 style={S(H3)}>Your role</h3>
+            <span style={S(`display:inline-flex;align-items:center;gap:7px;font:400 15px/1.3 ${F.body};color:${C.ink}`)}>
+              <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${role.color || C.ink2}`)} />
+              {role.name}
+            </span>
           </div>
           {role.briefing ? (
-            <blockquote className="vu-break" style={S('margin:10px 0 0;padding:1px 0 1px 12px;border-left:2px solid #E7C0AC;font:450 13.5px/1.6 Geist;color:#332D28')}>
+            <p className="vu-break" style={S(`${NOTE};margin-top:8px`)}>
               {role.briefing}
-            </blockquote>
+            </p>
           ) : null}
           <div style={S('margin-top:12px')}>
             {acked ? (
-              <span style={S('display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;background:#EAF3EC;font:600 12px/1 Geist;color:#3F6B4E')}>
-                <Icon name="check" size={13} />
-                Briefing read
-              </span>
+              <StatusText tone="ok">Briefing read</StatusText>
             ) : (
-              <button type="button" onClick={() => onAck(app, role.id)} className={cx(H.primary, H.press)} style={S('padding:0 15px;height:38px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
+              <Button variant="dark" size="sm" onClick={() => onAck(app, role.id)}>
                 I&apos;ve read the briefing
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -714,33 +913,31 @@ function TeamMember({ app, onAck, onToggleTask }) {
 
       {tasks.length ? (
         <div>
-          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-            <div style={S(LABEL)}>Your tasks</div>
-            <span style={s(CHIP, doneCount === tasks.length ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20')}>{doneCount} of {tasks.length} done</span>
+          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px')}>
+            <h3 style={S(H3)}>Your tasks</h3>
+            <ProgressCount done={doneCount} total={tasks.length} />
           </div>
-          <div style={S('margin-top:6px;display:flex;flex-direction:column')}>
-            {tasks.map((t, i) => {
-              const on = doneMap[t.id] === 'done';
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => onToggleTask(app, t.id)}
-                  style={s('text-align:left;display:flex;align-items:flex-start;gap:11px;padding:11px 0;border:0;background:transparent;cursor:pointer', rowRule(i))}
-                >
-                  <CheckBox on={on} />
-                  <span style={S('min-width:0;flex:1')}>
-                    <span style={s('font:600 13.5px/1.3 Geist', on ? 'color:#3F6B4E;text-decoration:line-through' : 'color:#1A1714')}>{t.title}</span>
-                    {t.detail ? <span style={S('display:block;margin-top:4px;font:450 12px/1.45 Geist;color:#8A8179')}>{t.detail}</span> : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {tasks.map((t) => {
+            const on = doneMap[t.id] === 'done';
+            return (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => onToggleTask(app, t.id)}
+                style={S(`width:100%;text-align:left;display:flex;align-items:flex-start;gap:12px;padding:12px 0;border:0;background:transparent;cursor:pointer;color:inherit;${ROW_RULE}`)}
+              >
+                <CheckBox on={on} />
+                <span style={S('min-width:0;flex:1')}>
+                  <span style={s(`font:600 14px/1.35 ${F.body}`, on ? `color:${C.ink2};text-decoration:line-through;text-decoration-color:${C.ink3}` : `color:${C.ink}`)}>{t.title}</span>
+                  {t.detail ? <span className="vu-break" style={S(`display:block;margin-top:3px;${SMALL}`)}>{t.detail}</span> : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
       ) : role && acked ? (
-        <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>No tasks assigned yet.</div>
+        <p style={S(`margin:0;${SMALL}`)}>No tasks assigned yet.</p>
       ) : null}
     </div>
   );

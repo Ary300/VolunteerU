@@ -5,54 +5,88 @@
    ========================================================================== */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot, Pressable, EmptyState, ErrorState, SkeletonRows, Icon } from '../ui.jsx';
+import { S, s } from '../../lib/style.js';
+import { C, F, R } from '../../lib/tokens.js';
+import { ImageSlot, EmptyState, ErrorState, SkeletonRows, Icon, Button } from '../ui.jsx';
+import { ListingCard, StatusText, statusTone, DateBlock, Sep } from '../vu/index.js';
+import { usePhotoPicker, photoFor } from '../../lib/photos.js';
 import { useSnapshot } from '../../lib/store.js';
 import { toast } from '../../lib/overlays.js';
 import {
   markNotificationsSeen, getNotificationsSeenAt,
   getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus,
 } from '../../lib/db.js';
-import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications } from '../../lib/listings.js';
-import { nextShiftInfo } from './JoinListing.jsx';
+import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications, listingShifts } from '../../lib/listings.js';
+import { nextShiftInfo, shiftLabel } from './JoinListing.jsx';
 
-const MONO = "'Geist Mono',monospace";
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const TONE_DOT = { ok: '#3F6B4E', warn: '#8A5A20', danger: '#A8482A', brand: '#C2603C', accepted: '#3F6B4E', declined: '#A8482A', rating: '#C2603C', announcement: '#5B6BB0', application: '#8A5A20' };
+const LEDE = `margin:8px 0 0;max-width:620px;font:400 15px/1.5 ${F.body};color:${C.ink2}`;
+const META = `font:400 14px/1.4 ${F.body};color:${C.ink2}`;
 
-const PAGE = 'padding:32px 40px 96px';
-const TITLE = 'margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em';
-const LEDE = 'margin:8px 0 0;font:450 15px/1.5 Geist;color:#6B635C';
-const BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 15px;height:36px;border-radius:10px;font:600 13px/1 Geist;cursor:pointer;white-space:nowrap';
-const PRIMARY = `${BTN};border:1px solid #A8482A;background:#C2603C;color:#fff`;
-const SECONDARY = `${BTN};border:1px solid #E4DDD4;background:#fff;color:#57504A`;
-const CHIP = `display:inline-flex;align-items:center;gap:4px;padding:5px 9px;border-radius:7px;font:500 11px/1 ${MONO}`;
+/** Page header: one h1 and an optional line under it. */
+function PageHead({ title, sub }) {
+  return (
+    <header>
+      <h1 className="vu-t-h1" style={S(`color:${C.ink}`)}>{title}</h1>
+      {sub ? <p style={S(LEDE)}>{sub}</p> : null}
+    </header>
+  );
+}
+
+/* An empty screen (CARDS.md 4.1): one sentence and, only where a next step
+   helps, one underlined link 12px below. No heading, no box, no filled
+   button, so each screen's empty state reads as its own line of copy. */
+function EmptyNote({ children, linkLabel, href }) {
+  return (
+    <div className="vu-empty" style={S(`padding-top:20px;border-top:1px solid ${C.line}`)}>
+      <p style={S(`margin:0;max-width:560px;font:400 15px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{children}</p>
+      {linkLabel && href ? (
+        <p style={S('margin:12px 0 0')}>
+          <Link href={href} className="vu-link-ul" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{linkLabel}</Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The feed types the user's own Settings > Notifications switches hide
+    (lib/listings.js loadMyNotifications reads the same prefs), as the
+    switch labels written into a sentence. A missing value counts as on. */
+function mutedNotifLabels(prefs) {
+  const np = (prefs && prefs.notifications) || {};
+  return [
+    np.applicationUpdates === false ? 'application updates' : '',
+    np.crewMessages === false ? 'project messages' : '',
+  ].filter(Boolean);
+}
+
+/* When a notification arrived, in one format for every row (VOICE.md
+   dates and times): "Today at 3:40 PM" for today, the short date "Oct 11"
+   for anything earlier, plus the year only when it falls before the
+   current school year (which starts in August). */
+function clockLabel(d) {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  if (h === 12 && m === 0) return 'noon';
+  const hour = h % 12 || 12;
+  const mins = m ? `:${String(m).padStart(2, '0')}` : '';
+  return `${hour}${mins} ${h < 12 ? 'AM' : 'PM'}`;
+}
 
 function notifWhen(at) {
   if (!at) return '';
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return '';
-  const diff = (Date.now() - d.getTime()) / 1000;
-  if (diff < 60) return 'Just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function StatusChip({ st }) {
-  const meta = applicationStatus(st);
-  return <span style={S(`${CHIP};background:${meta.bg};color:${meta.color}`)}>{meta.label}</span>;
-}
-
-function VerifiedChip() {
-  return (
-    <span style={S(`${CHIP};background:#EAF3EC;color:#3F6B4E`)}>
-      <Icon name="check" size={11} stroke={2.4} /> Verified
-    </span>
-  );
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return `Today at ${clockLabel(d)}`;
+  const schoolYearStart = new Date(now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1, 7, 1);
+  const opts = d < schoolYearStart
+    ? { month: 'short', day: 'numeric', year: 'numeric' }
+    : { month: 'short', day: 'numeric' };
+  return d.toLocaleDateString('en-US', opts);
 }
 
 /* ---- notification centre -------------------------------------------------- */
@@ -92,24 +126,78 @@ function mergeFeed(...lists) {
   return out.slice(0, 40);
 }
 
+/* A row (CARDS.md 3.2): an Ember dot for unread or nothing, the title, then
+   "{age} · {body}". No icon tile, no tinted background, nothing trailing:
+   the whole row is the link. */
+function NotificationRow({ n, fresh }) {
+  const when = notifWhen(n.at);
+  const cls = fresh ? 'vu-row vu-notif' : 'vu-row vu-row--nolead vu-notif';
+  const inner = (
+    <>
+      {fresh ? (
+        <span className="vu-row-dot" style={S('align-self:start;margin-top:6px')}>
+          <span className="vu-sr">Unread</span>
+        </span>
+      ) : null}
+      <span style={S('display:block;min-width:0')}>
+        <span className="vu-row-t" style={S(`white-space:normal;overflow-wrap:anywhere;font-weight:${fresh ? 600 : 500}`)}>{n.title}</span>
+        {when || n.body ? (
+          <span className="vu-row-m vu-row-m--wrap" style={S('overflow-wrap:anywhere')}>
+            {when ? <span style={S('font-variant-numeric:tabular-nums')}>{when}</span> : null}
+            {when && n.body ? <Sep /> : null}
+            {n.body || null}
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+  return (
+    <li style={S('list-style:none')}>
+      {n.href ? (
+        <Link href={n.href} className={cls} data-unread={fresh ? 'true' : undefined} style={S('color:inherit;text-decoration:none')}>
+          {inner}
+        </Link>
+      ) : (
+        <div className={cls} data-unread={fresh ? 'true' : undefined}>{inner}</div>
+      )}
+    </li>
+  );
+}
+
+function FeedGroup({ title, items, fresh, first }) {
+  if (!items.length) return null;
+  return (
+    <section style={S(first ? 'margin-top:28px' : 'margin-top:44px')} aria-label={title || 'Notifications'}>
+      {title ? <h2 className="vu-t-h3s" style={S(`margin:0 0 12px;color:${C.ink}`)}>{title}</h2> : null}
+      <ul className="vu-list" style={S('margin:0;padding:0')}>
+        {items.map((n) => <NotificationRow key={n.id} n={n} fresh={fresh} />)}
+      </ul>
+    </section>
+  );
+}
+
 export function Notifications() {
-  const router = useRouter();
   const { state } = useSnapshot();
   // A lead's feed is new applications and messages from their volunteers, so
   // the subtitle and empty state describe that instead of a volunteer's.
   const openProjects = (state.projects || []).filter((p) => p && !p.archived);
   const leads = openProjects.length > 0;
-  const homeProject = openProjects.find((p) => p.id === state.activeProjectId) || openProjects[0] || null;
+  const muted = mutedNotifLabels(state.prefs);
   const [notifs, setNotifs] = useState(null);
   const [ownerApps, setOwnerApps] = useState([]);
   const [failed, setFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
-  // Snapshot the prior "seen" time on mount so items that arrived since then
-  // keep their fresh highlight, even though we mark everything seen below.
-  const [seenAt, setSeenAt] = useState(0);
+  // Snapshot the prior "seen" time once per visit so items that arrived since
+  // then keep their unread look, even though everything is marked seen below.
+  // The ref guard matters in dev, where StrictMode runs this effect twice and
+  // the second run would otherwise read the time the first run just wrote.
+  const [seenAt, setSeenAt] = useState(Number.MAX_SAFE_INTEGER);
+  const captured = useRef(false);
 
   useEffect(() => {
-    setSeenAt(getNotificationsSeenAt());
+    if (captured.current) return;
+    captured.current = true;
+    setSeenAt(Number(getNotificationsSeenAt()) || 0);
     // Opening the page marks everything seen (clears the unread badge).
     markNotificationsSeen();
   }, []);
@@ -138,181 +226,149 @@ export function Notifications() {
     () => (notifs ? mergeFeed(notifs, ownerApplicationItems(ownerApps, state.projects)) : []),
     [notifs, ownerApps, state.projects],
   );
+  const isFresh = (n) => Boolean(n.at) && new Date(n.at).getTime() > seenAt;
+  const fresh = list.filter(isFresh);
+  const earlier = list.filter((n) => !isFresh(n));
 
+  const emptyFeed = !failed && notifs !== null && !list.length;
   let body;
   if (failed) {
     body = <ErrorState title="Couldn't load notifications" body="Check your connection and try again." onRetry={() => setNonce((n) => n + 1)} />;
   } else if (notifs === null) {
-    body = <div aria-busy="true" style={S('padding:18px 20px')}><SkeletonRows n={3} h={52} /></div>;
+    body = <div aria-busy="true" style={S('margin-top:28px')}><SkeletonRows n={3} h={64} /></div>;
   } else if (!list.length) {
+    // When the user's own switches hide part of the feed, say so and point
+    // at the switches instead of inviting them to apply again.
     body = (
-      <EmptyState
-        icon="bell"
-        title="No notifications yet"
-        body={leads
-          ? "Share your project's join link so volunteers can apply."
-          : "Apply to an opportunity and the organization's reply shows up here."}
-        cta={leads ? 'Open your project' : 'Search opportunities'}
-        onCta={() => router.push(leads && homeProject ? `/lead/${encodeURIComponent(homeProject.id)}/overview` : '/discover')}
-      />
+      <div style={S('margin-top:24px')}>
+        {muted.length ? (
+          <EmptyNote linkLabel="Notification settings" href="/settings/notifications">
+            {`You turned off ${muted.join(' and ')}, so they don't show up here.`}
+          </EmptyNote>
+        ) : (
+          <EmptyNote>
+            {leads
+              ? 'When a volunteer applies to your project or sends you a message, it shows up here.'
+              : 'When an organization answers one of your applications, it shows up here.'}
+          </EmptyNote>
+        )}
+      </div>
     );
   } else {
-    body = list.map((n) => {
-      const fresh = n.at && new Date(n.at).getTime() > seenAt;
-      return (
-        <Pressable
-          key={n.id}
-          label={n.body ? `${n.title}. ${n.body}` : n.title}
-          onClick={() => { if (n.href) router.push(n.href); }}
-          className={cx(H.row, H.press)}
-          style={s('display:flex;gap:13px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #F1EBE4;cursor:pointer;transition:background .16s ease', fresh ? 'background:#FCFAF8' : '')}
-        >
-          <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px', `background:${TONE_DOT[n.type] || '#C2603C'}`)} />
-          <div style={S('flex:1;min-width:0')}>
-            <div style={S('font:600 14px/1.35 Geist;color:#1A1714')}>{n.title}</div>
-            {n.body ? <div style={S('margin-top:5px;font:450 13px/1.5 Geist;color:#8A8179;overflow-wrap:anywhere')}>{n.body}</div> : null}
-          </div>
-          <div style={S(`font:500 11px/1 ${MONO};color:#8A8179;flex:none;margin-top:4px`)}>{notifWhen(n.at)}</div>
-        </Pressable>
-      );
-    });
+    body = (
+      <>
+        <FeedGroup title="New" items={fresh} fresh first />
+        <FeedGroup title={fresh.length ? 'Earlier' : ''} items={earlier} fresh={false} first={!fresh.length} />
+      </>
+    );
   }
 
   return (
-    <div className="vu-screen vu-pad-40" style={S(PAGE)}>
-      <h1 style={S(TITLE)}>Notifications</h1>
-      <p style={S(LEDE)}>
-        {leads
-          ? 'New applications and messages from volunteers on your projects.'
-          : 'Application decisions and updates from organizations you\'ve joined.'}
-      </p>
-      <div style={S('margin-top:26px;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>{body}</div>
+    <div className="vu-page">
+      <div style={S('max-width:1040px')}>
+        {/* An empty feed's own sentence says what lands here, so the
+            subtitle would only repeat it. */}
+        <PageHead
+          title="Notifications"
+          sub={emptyFeed ? '' : leads
+            ? 'New applications and messages from volunteers on your projects.'
+            : "Application decisions and updates from organizations you've joined."}
+        />
+        {body}
+      </div>
     </div>
   );
 }
 
-/* ---- rows shared by Saved and Friends -------------------------------------- */
+/* ---- cards shared by Saved and Friends ------------------------------------- */
 
-function RowShell({ thumb, children }) {
-  return (
-    <div className={cx('vu-media-row', H.card)} style={S('display:grid;grid-template-columns:180px 1fr;border-radius:14px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;transition:border-color .16s ease')}>
-      {thumb}
-      <div style={S('padding:18px 20px;min-width:0')}>{children}</div>
-    </div>
-  );
+/* The photo badge for the viewer's own application (CARDS.md 1.4): accepted
+   reads "You're in", pending reads "Applied", anything else shows nothing. */
+const APP_BADGE = { accepted: 'in', pending: 'applied' };
+const LOCAL_BADGE = { Accepted: 'in', Confirmed: 'in', Applied: 'applied', Pending: 'applied', Waiting: 'applied' };
+
+/** Org line for a live listing: the first part of its site ("Riverbend Food Bank"),
+    or '' for a remote site (line B already says Online). */
+function placeOf(listing) {
+  const place = String(listing.site || listing.location || '').trim();
+  const first = place.split(',')[0].trim();
+  return { place, first: /remote|online|virtual/i.test(first) ? '' : first };
 }
 
-/** A saved local catalogue opportunity (sign up goes to its next upcoming shift). */
-function OpportunityRow({ opp, router, trailing }) {
-  const next = upcomingShifts(opp).find((x) => spotsLeft(x) > 0);
-  const open = () => router.push(`/opportunity/${opp.id}`);
-  return (
-    <RowShell
-      thumb={
-        <Pressable className={cx('vu-media-thumb', H.press)} label={`${opp.title} at ${opp.org}`} onClick={open} style={S('min-height:150px;cursor:pointer')}>
-          <ImageSlot src={opp.img} shape="rect" placeholder={opp.ph} alt={opp.ph} />
-        </Pressable>
-      }
-    >
-      <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap')}>
-        <Pressable label={`Open ${opp.title}`} onClick={open} style={S('cursor:pointer;min-width:0')}>
-          <div style={S('font:600 17px/1.25 Geist;letter-spacing:-0.025em')}>{opp.title}</div>
-          <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>{[opp.org, opp.meta].filter(Boolean).join(', ')}</div>
-        </Pressable>
-        {opp.verified ? <VerifiedChip /> : null}
-      </div>
-      {opp.why ? <div style={S('margin-top:12px;font:450 13px/1.45 Geist;color:#6B635C')}>{opp.why}</div> : null}
-      <div className="vu-stack vu-stack-gap" style={S('margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-        <div style={S('font:450 13px/1.4 Geist;color:#6B635C')}>
-          {next ? `Next shift ${next.d}, ${spotsLeft(next)} of ${next.cap} spots left` : 'No upcoming shifts with space'}
-        </div>
-        {trailing}
-      </div>
-    </RowShell>
-  );
+/** True when the stored next shift is set and still ahead of now. */
+function hasUpcomingShift(raw) {
+  const info = nextShiftInfo(raw);
+  return Boolean(info && !info.past);
 }
 
-/** A saved live listing (posted by an organization or a student project). */
-function ListingRow({ listing, app, onRemove, router }) {
-  const official = (listing.org_class || 'student') === 'official';
-  const live = listing.status === 'live';
+/** ListingCard props shared by every live listing (org or student project).
+    The card reads date and time from the stored label: a past or missing
+    next shift falls back to the first published shift that hasn't ended,
+    else no date (the tile then says "No dates yet"). No buttons under the
+    card: the title opens /join/<id>, where Apply lives. */
+function liveCardProps(listing) {
+  const student = (listing.org_class || 'student') !== 'official';
   const isTeam = listing.org_type === 'team';
-  const shift = isTeam ? null : nextShiftInfo(listing.next_session);
-  const meta = [listing.cause, listing.site].filter(Boolean).join(', ');
-  const open = () => router.push(`/join/${listing.id}`);
+  const shifts = isTeam ? [] : listingShifts(listing);
+  const when = isTeam ? '' : hasUpcomingShift(listing.next_session) ? listing.next_session : shifts[0] ? shiftLabel(shifts[0]) : '';
+  const { first } = placeOf(listing);
+  return {
+    href: `/join/${listing.id}`,
+    title: listing.name,
+    org: student ? undefined : first || undefined,
+    verified: !student && Boolean(listing.verified),
+    byline: student ? first || undefined : undefined,
+    studentProject: student,
+    when,
+    moreDates: when && shifts.length > 1 ? shifts.length - 1 : 0,
+    online: listing.delivery === 'remote',
+    cause: listing.cause,
+  };
+}
+
+/** A local catalogue opportunity (its next upcoming shift with space). */
+function OpportunityCard({ opp, photo, saved, onToggleSave, badge }) {
+  const next = upcomingShifts(opp).find((x) => spotsLeft(x) > 0);
   return (
-    <RowShell
-      thumb={
-        <Pressable className={cx('vu-media-thumb', H.press)} label={`Open ${listing.name}`} onClick={open} style={S('min-height:150px;cursor:pointer')}>
-          <ImageSlot src={listing.cover} shape="rect" placeholder={listing.cause || 'opportunity'} alt="" />
-        </Pressable>
-      }
-    >
-      <Pressable label={`Open ${listing.name}`} onClick={open} style={S('cursor:pointer;display:block;min-width:0')}>
-        <span style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-          <span style={S('font:600 17px/1.25 Geist;letter-spacing:-0.025em;color:#1A1714')}>{listing.name}</span>
-          <span style={S(`${CHIP};${official ? 'background:#EAF3EC;color:#3F6B4E' : 'background:#FDF3E7;color:#8A5A20'}`)}>{official ? 'Nonprofit' : 'Student project'}</span>
-          {listing.verified ? <VerifiedChip /> : null}
-        </span>
-        {meta ? <span style={S('display:block;margin-top:5px;font:450 13px/1.4 Geist;color:#8A8179')}>{meta}</span> : null}
-        {listing.mission ? (
-          <span style={S('display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:10px;font:450 13px/1.5 Geist;color:#57504A')}>{listing.mission}</span>
-        ) : null}
-      </Pressable>
-      <div className="vu-stack vu-stack-gap" style={S('margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-        <div style={S('font:450 13px/1.4 Geist;color:#6B635C;display:flex;align-items:center;gap:6px')}>
-          {isTeam ? (
-            <>
-              <Icon name="laptop" size={14} /> Team project, no set shifts
-            </>
-          ) : (
-            <>
-              <Icon name="calendar" size={14} />
-              {shift && !shift.past ? `Next shift ${shift.label}` : 'No upcoming shift posted yet'}
-            </>
-          )}
-        </div>
-        <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-          <button type="button" onClick={onRemove} aria-label={`Remove ${listing.name} from saved`} className={cx(H.secondary, H.press)} style={S(SECONDARY)}>
-            Remove
-          </button>
-          {app ? (
-            <StatusChip st={app.status} />
-          ) : !live ? (
-            <span style={S(`${CHIP};background:#F6F2EE;color:#6B635C`)}>Paused</span>
-          ) : (
-            // The join page picks the role, takes a note and shows the
-            // parent's-OK notice, so applying always goes through it.
-            <button type="button" onClick={open} aria-label={`Apply to ${listing.name}`} className={cx(H.primary, H.press)} style={S(PRIMARY)}>
-              Apply
-            </button>
-          )}
-        </div>
-      </div>
-    </RowShell>
+    <ListingCard
+      href={`/opportunity/${opp.id}`}
+      title={opp.title}
+      org={opp.org}
+      verified={Boolean(opp.verified)}
+      when={next ? shiftLabel(next) : ''}
+      spots={next ? spotsLeft(next) : undefined}
+      photo={photo}
+      cause={opp.cause}
+      saved={saved}
+      onToggleSave={onToggleSave}
+      badge={badge}
+    />
   );
 }
 
 function GoneRow({ id }) {
   return (
-    <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-radius:14px;border:1px dashed #E0D8CF;background:#FCFAF8')}>
-      <div style={S('font:450 14px/1.4 Geist;color:#6B635C')}>A saved opportunity is no longer listed.</div>
-      <button
-        type="button"
-        onClick={() => { toggleSaved(id); toast({ title: 'Removed from saved', tone: 'brand' }); }}
-        className={cx(H.secondary, H.press)}
-        style={S(SECONDARY)}
-      >
-        Remove
-      </button>
-    </div>
+    <li className="vu-row vu-row--nolead" style={S('list-style:none')}>
+      <div style={S('min-width:0')}>
+        <span className="vu-row-t">Closed or taken down</span>
+        <span className="vu-row-m">This saved opportunity isn&apos;t listed anymore.</span>
+      </div>
+      <div className="vu-row-end">
+        <Button
+          size="sm"
+          aria-label="Remove a listing that's no longer listed from saved"
+          onClick={() => { toggleSaved(id); toast({ title: 'Removed from saved', tone: 'brand' }); }}
+        >
+          Remove
+        </Button>
+      </div>
+    </li>
   );
 }
 
 /* ---- saved ------------------------------------------------------------- */
 
 export function Saved() {
-  const router = useRouter();
   const { state } = useSnapshot();
   const ids = state.saved || [];
   const liveIds = ids.filter((id) => UUID_RX.test(String(id)));
@@ -360,118 +416,204 @@ export function Saved() {
     toast({ title: 'Removed from saved', message: name, tone: 'brand', actionLabel: 'Undo', onAction: () => toggleSaved(id) });
   }
 
+  // Sort every saved id into what it resolves to, keeping the saved order.
+  const entries = ids.map((id) => {
+    const opp = getOpportunity(id);
+    if (opp) return { id, kind: 'opp', opp, photoKey: { id, cover: opp.img, cause: opp.cause } };
+    const listing = cache.get(id);
+    if (listing === undefined && UUID_RX.test(String(id))) return { id, kind: 'loading' };
+    if (!listing) return { id, kind: 'gone' };
+    return { id, kind: 'listing', listing, photoKey: listing };
+  });
+  const shown = entries.filter((e) => e.kind === 'opp' || e.kind === 'listing');
+  const gone = entries.filter((e) => e.kind === 'gone');
+  const pending = entries.filter((e) => e.kind === 'loading');
+  const photos = usePhotoPicker(shown.map((e) => e.photoKey));
+
   const loading = !failed && liveIds.length > 0 && (apps === null || liveIds.some((id) => !cache.has(id)));
 
   let body;
   if (!ids.length) {
     body = (
-      <EmptyState
-        icon="bookmark"
-        title="Nothing saved yet"
-        body="Tap Save on any opportunity in Discover to keep it here."
-        cta="Search opportunities"
-        onCta={() => router.push('/discover')}
-      />
+      <EmptyNote linkLabel="Browse Discover" href="/discover">
+        Save an opportunity with its bookmark and it shows up here.
+      </EmptyNote>
     );
   } else if (failed) {
     body = <ErrorState title="Couldn't load your saved list" body="Check your connection and try again." onRetry={() => setNonce((n) => n + 1)} />;
   } else if (loading && apps === null) {
-    body = <SkeletonRows n={Math.min(ids.length, 3)} h={150} />;
+    body = <SkeletonRows n={Math.min(ids.length, 3)} h={120} />;
   } else {
-    body = ids.map((id) => {
-      const opp = getOpportunity(id);
-      if (opp) {
-        const local = applicationFor(opp.id);
-        return (
-          <OpportunityRow
-            key={id}
-            opp={opp}
-            router={router}
-            trailing={
-              <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                <button type="button" onClick={() => remove(opp.id, opp.title)} aria-label={`Remove ${opp.title} from saved`} className={cx(H.secondary, H.press)} style={S(SECONDARY)}>
-                  Remove
-                </button>
-                {local && local.st !== 'Withdrawn' ? (
-                  <StatusChip st={local.st} />
-                ) : (
-                  <button type="button" onClick={() => router.push(`/opportunity/${opp.id}`)} aria-label={`Pick a shift for ${opp.title}`} className={cx(H.primary, H.press)} style={S(PRIMARY)}>
-                    Pick a shift
-                  </button>
-                )}
-              </div>
-            }
-          />
-        );
-      }
-      const listing = cache.get(id);
-      if (listing === undefined && UUID_RX.test(String(id))) return <SkeletonRows key={id} n={1} h={150} />;
-      if (!listing) return <GoneRow key={id} id={id} />;
-      return (
-        <ListingRow
-          key={id}
-          listing={listing}
-          app={apps ? apps.get(listing.id) : null}
-          onRemove={() => remove(listing.id, listing.name)}
-          router={router}
-        />
-      );
-    });
+    body = (
+      <>
+        {shown.length || pending.length ? (
+          <div className="vu-grid-3">
+            {shown.map((e) => {
+              if (e.kind === 'opp') {
+                const { opp } = e;
+                const local = applicationFor(opp.id);
+                const st = local && local.st !== 'Withdrawn' ? applicationStatus(local.st).label : '';
+                return (
+                  <OpportunityCard
+                    key={e.id}
+                    opp={opp}
+                    photo={photos.get(e.id)}
+                    saved
+                    onToggleSave={() => remove(opp.id, opp.title)}
+                    badge={LOCAL_BADGE[st] || ''}
+                  />
+                );
+              }
+              const { listing } = e;
+              const app = apps ? apps.get(listing.id) : null;
+              return (
+                <ListingCard
+                  key={e.id}
+                  {...liveCardProps(listing)}
+                  photo={photos.get(listing.id)}
+                  saved
+                  onToggleSave={() => remove(listing.id, listing.name)}
+                  badge={app ? APP_BADGE[app.status] || '' : ''}
+                />
+              );
+            })}
+            {pending.map((e) => <SkeletonRows key={e.id} n={1} h={220} />)}
+          </div>
+        ) : null}
+        {gone.length ? (
+          <section style={S(shown.length || pending.length ? 'margin-top:56px' : '')} aria-label="No longer listed">
+            {shown.length || pending.length ? (
+              <h2 className="vu-t-h3s" style={S(`margin:0 0 12px;color:${C.ink}`)}>No longer listed</h2>
+            ) : null}
+            <ul className="vu-list" style={S('margin:0;padding:0')}>
+              {gone.map((e) => <GoneRow key={e.id} id={e.id} />)}
+            </ul>
+          </section>
+        ) : null}
+      </>
+    );
   }
 
+  const n = ids.length;
   return (
-    <div className="vu-screen vu-pad-40" style={S(PAGE)}>
-      <h1 style={S(TITLE)}>Saved</h1>
-      {ids.length ? <p style={S(LEDE)}>{ids.length} saved</p> : null}
-      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px')}>{body}</div>
+    <div className="vu-page">
+      <div style={S('max-width:1040px')}>
+        <PageHead title="Saved" sub={n ? `${n} saved ${n === 1 ? 'opportunity' : 'opportunities'}` : ''} />
+        <div style={S('margin-top:28px')}>{body}</div>
+      </div>
     </div>
   );
 }
 
 /* ---- friends going --------------------------------------------------------- */
 
+/** Live listings for a set of ids. A failed read reports `failed` instead of
+    treating every id as gone; ids a successful read didn't return are null. */
+function useLiveListings(ids) {
+  const [rows, setRows] = useState(() => new Map());
+  const [failed, setFailed] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const key = ids.join('|');
+  useEffect(() => {
+    if (!ids.length) return undefined;
+    let alive = true;
+    setFailed(false);
+    loadListingsByIds(ids)
+      .then((found) => {
+        if (!alive) return;
+        const byId = new Map((found || []).map((r) => [String(r.id), r]));
+        setRows(new Map(ids.map((id) => [id, byId.get(String(id)) || null])));
+      })
+      .catch((err) => {
+        console.error('[friends] load failed', err);
+        if (alive) setFailed(true);
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, nonce]);
+  const loading = !failed && ids.some((id) => !rows.has(id));
+  return { rows, failed, loading, retry: () => setNonce((n) => n + 1) };
+}
+
+/** Save or unsave from a card outside the Saved page, with a toast that says which. */
+function flipSaved(id, wasSaved) {
+  toggleSaved(id);
+  toast({ title: wasSaved ? 'Removed from saved' : 'Saved', tone: 'brand', actionLabel: 'Undo', onAction: () => toggleSaved(id) });
+}
+
 export function Friends() {
-  const router = useRouter();
   const { state } = useSnapshot();
-  const rows = (state.friendsGoing || []).map(getOpportunity).filter(Boolean);
-  const school = (state.account && state.account.school) || 'your school';
+  const going = state.friendsGoing || [];
+  // Catalogue opportunities resolve locally; published listings (uuid ids)
+  // are read from the backend, the same way Saved does it.
+  const liveIds = going.filter((id) => UUID_RX.test(String(id)) && !getOpportunity(id));
+  const live = useLiveListings(liveIds);
+  const entries = going
+    .map((id) => {
+      const opp = getOpportunity(id);
+      if (opp) return { id, opp, photoKey: { id, cover: opp.img, cause: opp.cause } };
+      const listing = live.rows.get(id);
+      return listing ? { id, listing, photoKey: listing } : null;
+    })
+    .filter(Boolean);
+  const photos = usePhotoPicker(entries.map((e) => e.photoKey));
+  const saved = state.saved || [];
+  const accountSchool = String((state.account && state.account.school) || '').trim();
+  const school = accountSchool || 'your school';
+
+  let body;
+  if (live.failed) {
+    body = <ErrorState title="Couldn't load these shifts" body="Check your connection and try again." onRetry={live.retry} />;
+  } else if (live.loading && !entries.length) {
+    body = <SkeletonRows n={Math.min(liveIds.length, 3)} h={120} />;
+  } else if (!entries.length) {
+    body = (
+      // Without a school on the account nobody can match, so the one step
+      // that helps is adding it. With one set, the sentence is enough.
+      accountSchool ? (
+        <EmptyNote>{`When students from ${accountSchool} sign up for shifts, they show up here.`}</EmptyNote>
+      ) : (
+        <EmptyNote linkLabel="Add your school in Settings" href="/settings/account">
+          Shifts that students from your school sign up for show up here.
+        </EmptyNote>
+      )
+    );
+  } else {
+    body = (
+      <div className="vu-grid-3">
+        {entries.map((e) => {
+          if (e.opp) {
+            const { opp } = e;
+            return (
+              <OpportunityCard
+                key={e.id}
+                opp={opp}
+                photo={photos.get(e.id)}
+                saved={saved.includes(opp.id)}
+                onToggleSave={() => flipSaved(opp.id, saved.includes(opp.id))}
+              />
+            );
+          }
+          const { listing } = e;
+          return (
+            <ListingCard
+              key={e.id}
+              {...liveCardProps(listing)}
+              photo={photos.get(listing.id)}
+              saved={saved.includes(listing.id)}
+              onToggleSave={() => flipSaved(listing.id, saved.includes(listing.id))}
+            />
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
-    <div className="vu-screen vu-pad-40" style={S(PAGE)}>
-      <h1 style={S(TITLE)}>Friends going</h1>
-      <p style={S(LEDE)}>
-        Shifts students from {school} signed up for.
-      </p>
-
-      <div style={S('margin-top:26px;display:flex;flex-direction:column;gap:14px')}>
-        {rows.length ? (
-          rows.map((opp) => (
-            <OpportunityRow
-              key={opp.id}
-              opp={opp}
-              router={router}
-              trailing={
-                <div style={S('display:flex;align-items:center;gap:12px;flex-wrap:wrap')}>
-                  {Number(opp.friendsGoing) > 0 ? (
-                    <div style={S('font:500 13px/1 Geist;color:#3F6B4E')}>{opp.friendsGoing} from your school</div>
-                  ) : null}
-                  <button type="button" onClick={() => router.push(`/opportunity/${opp.id}`)} aria-label={`See shifts for ${opp.title}`} className={cx(H.primary, H.press)} style={S(PRIMARY)}>
-                    See shifts
-                  </button>
-                </div>
-              }
-            />
-          ))
-        ) : (
-          <EmptyState
-            icon="users"
-            title="Nobody from your school yet"
-            body="When students from your school sign up for shifts, they show up here."
-            cta="Search opportunities"
-            onCta={() => router.push('/discover')}
-          />
-        )}
-      </div>
+    <div className="vu-page">
+      {/* An empty page's sentence already says what shows up here. */}
+      <PageHead title="Friends going" sub={entries.length || live.loading || live.failed ? `Shifts students from ${school} signed up for.` : ''} />
+      <div style={S('margin-top:28px')}>{body}</div>
     </div>
   );
 }
@@ -480,9 +622,9 @@ export function Friends() {
 
 function Fact({ label, children, tone }) {
   return (
-    <div style={S('display:flex;justify-content:space-between;gap:10px')}>
-      <span>{label}</span>
-      <span style={s('font-weight:500;text-align:right', `color:${tone || '#1A1714'}`)}>{children}</span>
+    <div style={S(`display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid ${C.line}`)}>
+      <dt style={S(`margin:0;${META}`)}>{label}</dt>
+      <dd style={s(`margin:0;font:600 14px/1.4 ${F.body};text-align:right;font-variant-numeric:tabular-nums`, `color:${tone || C.ink}`)}>{children}</dd>
     </div>
   );
 }
@@ -494,7 +636,7 @@ export function PeerProject({ id }) {
 
   if (!p) {
     return (
-      <div className="vu-pad-40" style={S(PAGE)}>
+      <div className="vu-page">
         <EmptyState
           icon="flag"
           title="This project isn't listed"
@@ -511,6 +653,8 @@ export function PeerProject({ id }) {
   const open = Math.max(0, cap - filled);
   const existing = applicationFor(p.id);
   const hasApp = existing && existing.st !== 'Withdrawn';
+  const photo = photoFor({ id: p.id, cover: p.img, cause: p.cause });
+  const word = hasApp ? applicationStatus(existing.st).label : '';
 
   function request() {
     if (p.listingId) {
@@ -527,56 +671,57 @@ export function PeerProject({ id }) {
   }
 
   return (
-    <div className="vu-screen vu-pad-40" style={S(PAGE)}>
-      <Pressable label="Back to Discover" onClick={() => router.push('/discover?kind=student')} className={H.toInk} style={S('display:inline-flex;align-items:center;gap:6px;font:500 13px/1 Geist;color:#8A8179;cursor:pointer;width:max-content')}>
-        <Icon name="arrow-left" size={14} /> Back to Discover
-      </Pressable>
+    <div className="vu-page">
+      <button
+        type="button"
+        onClick={() => router.push('/discover?kind=student')}
+        className="h-to-ink"
+        style={S(`display:inline-flex;align-items:center;gap:6px;padding:0;border:0;background:none;font:600 14px/1 ${F.body};color:${C.ink2};cursor:pointer`)}
+      >
+        <Icon name="arrow-left" size={16} /> Back to Discover
+      </button>
 
-      <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 340px;gap:26px;margin-top:18px;align-items:start')}>
-        <div>
-          <div style={S('border-radius:16px;overflow:hidden;border:1px solid #E8E1D9;height:300px')}>
-            <ImageSlot src={p.img} shape="rect" placeholder="project cover" />
+      <div className="vu-layout-rail" style={S('margin-top:20px')}>
+        <div style={S('min-width:0')}>
+          <div style={S(`position:relative;aspect-ratio:16 / 9;max-height:420px;width:100%;border-radius:${R.photo};overflow:hidden;background:${C.mist}`)}>
+            <ImageSlot src={photo ? photo.src : p.img} position={photo ? photo.pos : undefined} shape="rect" placeholder="project cover" alt="" />
           </div>
-          <div style={S('margin-top:22px;display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-            <span style={S(`${CHIP};background:#FDF3E7;color:#8A5A20`)}>Student project</span>
-            {p.cause ? <span style={S(`${CHIP};background:#F6F2EE;color:#57504A`)}>{p.cause}</span> : null}
-          </div>
-          <h1 style={S('margin:14px 0 0;font:600 34px/1.1 Geist;letter-spacing:-0.038em')}>{p.t}</h1>
-          <div style={S('margin-top:10px;font:450 15px/1.5 Geist;color:#6B635C')}>
-            {[p.lead && `Led by ${p.lead}`, p.org && `with ${p.org}`].filter(Boolean).join(' ')}
-          </div>
+          <h1 className="vu-t-h1" style={S(`margin-top:24px;color:${C.ink}`)}>{p.t}</h1>
+          <p style={S(`margin:10px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
+            {['Student project', p.lead && `led by ${p.lead}`, p.org && `with ${p.org}`, p.cause].filter(Boolean).map((t, i) => (
+              <span key={i}>{i ? <Sep /> : null}{t}</span>
+            ))}
+          </p>
           {p.blurb || p.mission ? (
-            <p style={S('margin:22px 0 0;max-width:600px;font:400 16px/1.65 Geist;color:#332D28;text-wrap:pretty')}>{p.blurb || p.mission}</p>
+            <p style={S(`margin:24px 0 0;max-width:640px;font:400 16px/1.6 ${F.body};color:${C.ink};text-wrap:pretty`)}>{p.blurb || p.mission}</p>
           ) : null}
         </div>
 
-        <div className="vu-sticky-side" style={S('display:flex;flex-direction:column;gap:14px;position:sticky;top:28px')}>
-          <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S('font:500 13px/1 Geist;color:#8A8179')}>Next meetup</div>
-            <div style={S('margin-top:8px;font:600 18px/1.25 Geist;letter-spacing:-0.025em')}>{p.next || 'Not scheduled yet'}</div>
-            <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
-              {p.role ? <Fact label="Role">{p.role}</Fact> : null}
-              {cap ? <Fact label="Team">{`${filled} of ${cap}`}</Fact> : null}
-              {cap ? <Fact label="Open spots" tone={open ? '#1A1714' : '#A8482A'}>{open || 'None right now'}</Fact> : null}
-              {p.org ? <Fact label="Confirms hours">{p.org}</Fact> : null}
-            </div>
-            {hasApp ? (
-              <div style={S('margin-top:18px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-                <StatusChip st={existing.st} />
-                <span style={S('font:450 13px/1.4 Geist;color:#6B635C')}>{applicationStatus(existing.st).detail}</span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={request}
-                className={cx(H.primary, H.press)}
-                style={S('margin-top:18px;width:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap;padding:0 18px;height:46px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer')}
-              >
-                {open || !cap ? 'Request a spot' : 'Join the waitlist'}
-              </button>
-            )}
+        <aside className="vu-sticky" aria-label="Join this project" style={S('min-width:0')}>
+          <h2 className="vu-t-h3s" style={S(`margin:0;color:${C.ink}`)}>Next meetup</h2>
+          <div style={S('margin-top:16px;display:flex;align-items:center;gap:14px')}>
+            {p.next ? <DateBlock date={p.next} size="md" /> : null}
+            <div style={S(`font:600 15px/20px ${F.body};color:${C.ink}`)}>{p.next || 'Not scheduled yet'}</div>
           </div>
-        </div>
+          <dl style={S('margin:16px 0 0')}>
+            {p.role ? <Fact label="Role">{p.role}</Fact> : null}
+            {cap ? <Fact label="Team">{`${filled} of ${cap}`}</Fact> : null}
+            {cap ? <Fact label="Open spots">{open || 'None right now'}</Fact> : null}
+            {p.org ? <Fact label="Confirms hours">{p.org}</Fact> : null}
+          </dl>
+          {hasApp ? (
+            <div style={S(`margin-top:16px;padding-top:16px;border-top:1px solid ${C.line};display:flex;flex-direction:column;align-items:flex-start;gap:8px`)}>
+              <StatusText tone={statusTone(word)}>{word}</StatusText>
+              <span style={S(META)}>{applicationStatus(existing.st).detail}</span>
+            </div>
+          ) : (
+            <div style={S('margin-top:16px')}>
+              <Button variant="primary" size="lg" full onClick={request}>
+                {open || !cap ? 'Request a spot' : 'Join the waitlist'}
+              </Button>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

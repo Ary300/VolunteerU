@@ -5,10 +5,14 @@
    Shell, tab bar, and the Overview / People / Positions / Shifts tabs.
    ========================================================================== */
 
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, EmptyState, Field, Select, Chip, Avatar, Icon, Checkbox } from '../ui.jsx';
+import { Pressable, EmptyState, Field, Select, TextArea, Chip, Avatar, Icon, Button, StatusPill, StatusText } from '../ui.jsx';
+import { C, F, R, CAUSE } from '../../lib/tokens.js';
+import { resolveCover, PHOTOS } from '../../lib/photos.js';
+import DateBlock from '../vu/DateBlock.jsx';
 import { useSnapshot, update as updateStore } from '../../lib/store.js';
 import { isPastShift, shiftDates, parseTimeRange } from '../../lib/calendar.js';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
@@ -16,24 +20,91 @@ import CrossApplications from '../CrossApplications.jsx';
 import TasksTab from '../lead/TasksTab.jsx';
 import PipelineTab from '../lead/PipelineTab.jsx';
 import AnnouncementBoard from '../AnnouncementBoard.jsx';
+import MessageThread from '../MessageThread.jsx';
 import {
+  whenLabel, stampLabel,
   getProject, taskProgress, toggleTask, pendingApplications, pendingHours,
-  positionLabel, positionAppsLabel, sessionStatus, sessionTone, shortSessions, filterPeople,
-  PERSON_TONE, tone, copyText, upsertPosition, duplicatePosition, deletePosition,
-  upsertSession, deleteSession, repeatWeekly, regenerateCode, setReminder, addPerson, updatePerson,
+  positionLabel, positionAppsLabel, sessionStatus, shortSessions, filterPeople,
+  copyText, upsertPosition, duplicatePosition, deletePosition,
+  upsertSession, deleteSession, repeatWeekly, regenerateCode, addPerson, updatePerson,
   removePerson, addNote, rosterCSV, download, setActiveProject, projects as allProjects,
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
   requestProjectVerification, parseSessionDate, formatSessionDate, uid, shortName,
 } from '../../lib/db.js';
-import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment } from '../../lib/listings.js';
+import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment, postAnnouncement } from '../../lib/listings.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
 } from '../lead/Tabs.jsx';
 
-const MONO = "'Geist Mono',monospace";
+/* ---- type and layout atoms (photo-first system, tokens from lib/tokens.js) ---- */
 
-/** Section heading inside a card: sentence case, no tracked caps. */
-const LABEL = 'font:600 14px/1.2 Geist;color:#1A1714';
+/** Section heading (h2): Funnel Display, sentence case, no eyebrow above it. */
+const H2 = `margin:0;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`;
+/** Rail heading (h2 in the 312px rail). */
+const H3 = `margin:0;font:600 18px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`;
+/** Old card heading, kept for dialogs and small sub-sections. */
+const LABEL = `font:600 15px/1.25 ${F.body};color:${C.ink}`;
+const META = `font:400 14px/1.4 ${F.body};color:${C.ink2}`;
+const SMALL = `font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+const NUM = 'font-variant-numeric:tabular-nums';
+/** A row divided from the next by a 1px rule. */
+const RULE = `border-bottom:1px solid ${C.line}`;
+/** Native checkboxes in tables: 16px, ink when checked. */
+const CHECK = `appearance:auto;-webkit-appearance:checkbox;width:16px;height:16px;flex:none;margin:0;accent-color:${C.ink};cursor:pointer`;
+/** Underlined ink text action ("Manage people"), links are never colored. */
+const TEXT_LINK = `font:600 14px/1.2 ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;cursor:pointer;background:none;border:0;padding:0`;
+
+/* Media-query rules for this screen (inline styles can't hold them).
+   - Phones: the Next shift facts wrap without a "·" starting a line.
+   - One column (< 1180px): the rail's needs block is hidden there, so the
+     first visible rail section would add a rule and 28px on top of the grid
+     gap. It starts flush instead. */
+const LEAD_CSS = `
+.vu-pl-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 20px; row-gap: 12px; align-items: center; }
+.vu-pl-row.has-end { grid-template-columns: 220px minmax(0, 1fr) auto; }
+.vu-pl-end { display: flex; align-items: center; justify-content: flex-end; }
+@media (max-width: 719px) {
+  .vu-pl-row, .vu-pl-row.has-end { grid-template-columns: minmax(0, 1fr) auto; }
+  .vu-pl-who { grid-column: 1; grid-row: 1; }
+  .vu-pl-end { grid-column: 2; grid-row: 1; }
+  .vu-pl-steps { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (max-width: 719px) {
+  .vu-lead-facts .vu-sep { display: none; }
+  .vu-lead-facts { column-gap: 14px; }
+}
+@media (max-width: 1179px) {
+  .vu-lead-aside > .vu-hide-mobile + .vu-rail-sec { margin-top: 0; padding-top: 0; border-top: 0; }
+}
+`;
+
+/** An activity row's age from its stored time ("12 min ago", "Oct 18").
+    Rows saved before times were stored and labeled "now" show no age
+    rather than a "now" that never changes. */
+function activityWhen(a) {
+  const label = whenLabel(a);
+  return a && a.at == null && /^(just )?now$/i.test(label.trim()) ? '' : label;
+}
+
+/** When someone was last at a shift. A real time wins; the old "Just now"
+    label (written when attendance was posted) becomes the date of the latest
+    posted shift they attended, and a row that was only added shows nothing. */
+function lastSeen(p, x) {
+  if (!x) return '';
+  if (x.lastAt != null) return whenLabel({ at: x.lastAt });
+  const saved = String(x.last || '').trim();
+  if (!/^(just )?now$/i.test(saved)) return saved;
+  let best = null;
+  for (const meta of (p && p.attendanceSessions) || []) {
+    if (!meta.posted) continue;
+    const row = ((p.attendance && p.attendance[meta.id]) || []).find((r) => r.personId === x.id);
+    if (!row || row.st === 'Absent' || !(Number(row.hrs) > 0)) continue;
+    const at = parseSessionDate(meta.d);
+    const t = at instanceof Date ? at.getTime() : NaN;
+    if (Number.isFinite(t) && (!best || t > best.t)) best = { t, d: meta.d };
+  }
+  return best ? String(best.d).replace(/^[A-Za-z]{3},\s*/, '') : '';
+}
 
 /** "3" not "3.0", "2.5" not "2.48". */
 function fmtHrs(n) {
@@ -42,6 +113,12 @@ function fmtHrs(n) {
 }
 
 /** "LIVE" -> "Live", "created Sep 2" -> "Created Sep 2". */
+/** "1 hr", "2.5 hrs". */
+function hrsText(n) {
+  const v = fmtHrs(n);
+  return `${v} ${v === '1' ? 'hr' : 'hrs'}`;
+}
+
 function sentence(v) {
   const t = String(v || '').trim();
   if (!t) return '';
@@ -60,7 +137,7 @@ function schoolLine(x) {
   return s || (x.appId ? 'Joined through your join link' : '');
 }
 
-/** "10:00 AM-11:00 AM" -> "10–11 AM", "3:30 PM-6:00 PM" -> "3:30–6 PM". Unreadable text passes through. */
+/** "10:00 AM-11:00 AM" -> "10 to 11 AM", "3:30 PM-6:00 PM" -> "3:30 to 6 PM". Unreadable text passes through. */
 function fmtTime(range) {
   const t = String(range || '').trim();
   const m = /^(\d{1,2})(?::(\d{2}))?\s*([AP]M)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i.exec(t);
@@ -71,7 +148,7 @@ function fmtTime(range) {
   const bm = m[6].toUpperCase();
   // "1:00-4:00 PM" writes the meridiem once; the start shares it.
   const am = m[3] ? m[3].toUpperCase() : bm;
-  return am === bm ? `${a}\u2013${b} ${bm}` : `${a} ${am}\u2013${b} ${bm}`;
+  return am === bm ? `${a} to ${b} ${bm}` : `${a} ${am} to ${b} ${bm}`;
 }
 
 /** Training labels were stored as "Required · 15 min"; show them with a comma. */
@@ -136,6 +213,29 @@ function confirmedMemberHours(app) {
   return Math.round(log.filter((h) => ok[h.id]).reduce((a, h) => a + (Number(h.hrs) || 0), 0) * 10) / 10;
 }
 
+/** Everything waiting on the lead, counted once for the whole screen.
+    Applications: the project's own pending rows plus pending join-link rows.
+    Hours: shifts logged on the People tab plus shifts members logged
+    themselves, with the hours and the people behind them. */
+function waitingTotals(p, linkApps) {
+  const localApps = pendingApplications(p);
+  const crossApps = linkApps.filter((a) => a.status === 'pending');
+  const localHours = pendingHours(p);
+  const memberHours = memberHoursWaiting(linkApps);
+  const hrs = [...localHours.map((q) => q.hrs), ...memberHours.map((r) => r.h.hrs)].reduce((a, n) => a + (Number(n) || 0), 0);
+  return {
+    apps: localApps.length + crossApps.length,
+    localApps,
+    crossApps: crossApps.length,
+    hours: {
+      count: localHours.length + memberHours.length,
+      hrs: Math.round(hrs * 10) / 10,
+      people: new Set([...localHours.map((q) => q.personId || q.n || q.id), ...memberHours.map((r) => r.app.id)]).size,
+      flagged: localHours.filter((q) => !q.ok).length,
+    },
+  };
+}
+
 /** Logged hours on accepted members that the lead hasn't confirmed yet. */
 function memberHoursWaiting(apps) {
   const out = [];
@@ -178,6 +278,9 @@ function openLinkSuggestions(p) {
  * removes anyone. `linkedApps` remembers who was added once, so a person the
  * lead removes from the roster stays removed.
  */
+/* An application's shift sign-ups, past ones included, as Attendance reads them. */
+const shiftPicks = (app) => myShiftSignUps(app).map((x) => ({ id: String(x.id), d: x.d || '', t: x.t || '' }));
+
 function applyMemberLinks(p, apps) {
   const linked = new Set(p.linkedApps || []);
   let suggestions = (p.linkSuggestions || []).slice();
@@ -197,6 +300,14 @@ function applyMemberLinks(p, apps) {
     const person = i >= 0 ? p.people[i] : null;
     if (app.status === 'accepted') {
       if (person) {
+        // The shifts their application signed up for, so Attendance expects
+        // them only there.
+        const picks = shiftPicks(app);
+        if (JSON.stringify(picks) !== JSON.stringify(person.signUps || [])) {
+          if (picks.length) person.signUps = picks;
+          else delete person.signUps;
+          changed = true;
+        }
         if (person.st === 'Inactive' && person.leftVia === 'app') {
           person.st = 'Active';
           delete person.leftVia;
@@ -258,10 +369,12 @@ function applyMemberLinks(p, apps) {
         accountId: app.applicant_id,
         linkAdded: true,
         linkHrs: hrs,
+        ...(shiftPicks(app).length ? { signUps: shiftPicks(app) } : {}),
       });
-      const at = app.decided_at ? new Date(app.decided_at) : null;
-      const when = at && !Number.isNaN(at.getTime()) && Date.now() - at.getTime() > 864e5 ? `${MONTH_ABBR[at.getMonth()]} ${at.getDate()}` : 'now';
-      p.activity = [{ id: uid('ac'), t: `${name} joined through your join link`, w: when }, ...(p.activity || [])].slice(0, 30);
+      // Stamped with when the lead accepted, so the row ages ("12 min ago", then "Oct 18").
+      const at = app.decided_at ? new Date(app.decided_at).getTime() : NaN;
+      const ms = Number.isFinite(at) ? at : Date.now();
+      p.activity = [{ id: uid('ac'), t: `${name} joined through your join link`, w: stampLabel(ms), at: ms }, ...(p.activity || [])].slice(0, 30);
       // Same name as a row the lead added: ask, never assume.
       const same = p.people.find((x) => unclaimedRow(x) && norm(x.n) === norm(name));
       if (same) suggestions = [...suggestions.filter((sg) => sg.appId !== app.id), { appId: app.id, personId: same.id }];
@@ -342,7 +455,7 @@ function confirmLinkSuggestion(projectId, appId, personId) {
     for (const pos of p.positions) {
       pos.filledCount = p.people.filter((x) => x.positionId === pos.id && (x.st === 'Active' || x.st === 'Onboarding')).length;
     }
-    p.activity = [{ id: uid('ac'), t: `${row.n} linked to the account they joined with`, w: 'now' }, ...(p.activity || [])].slice(0, 30);
+    p.activity = [{ id: uid('ac'), t: `${row.n} linked to the account they joined with`, w: stampLabel(), at: Date.now() }, ...(p.activity || [])].slice(0, 30);
     ok = true;
   });
   return ok;
@@ -375,7 +488,7 @@ function useListingApps(p) {
           setApps(mine);
           linkMembers(projectId, mine);
         })
-        .catch((err) => console.error('[lead] could not load applications', err));
+        .catch((err) => { if (alive) console.error('[lead] could not load applications', err); });
     load();
     const onVis = () => { if (document.visibilityState === 'visible') load(); };
     window.addEventListener('vu:applications-changed', load);
@@ -402,7 +515,7 @@ function useUnreadMessages(listingId, tab) {
     const load = () =>
       loadListingThreads(listingId)
         .then((threads) => { if (alive) setUnread(threads.reduce((a, t) => a + (t.unread || 0), 0)); })
-        .catch((err) => console.error('[lead] could not count unread messages', err));
+        .catch((err) => { if (alive) console.error('[lead] could not count unread messages', err); });
     load();
     const timer = setInterval(load, tab === 'messages' ? 8000 : 30000);
     const onVis = () => { if (document.visibilityState === 'visible') load(); };
@@ -416,30 +529,6 @@ function useUnreadMessages(listingId, tab) {
   return unread;
 }
 
-const TIME_END_RX = /^(?:(\d{1,2})(?::(\d{2}))?\s*(am|pm)?|noon|midnight)$/i;
-
-/** Error for a shift time range, or null. Accepts "10:00 AM-12:00 PM", "1:00-4:00 PM", "9 AM to noon". */
-function shiftTimeError(raw) {
-  const t = String(raw || '').trim();
-  const msg = 'Enter a time like 10:00 AM-12:00 PM.';
-  if (!t) return msg;
-  const parts = t.split(/\s*(?:-|–|\bto\b)\s*/i);
-  if (parts.length !== 2) return msg;
-  for (const part of parts) {
-    const m = TIME_END_RX.exec(part);
-    if (!m) return msg;
-    if (m[1] !== undefined) {
-      const h = Number(m[1]);
-      const mm = Number(m[2] || 0);
-      if (mm > 59 || (m[3] ? h < 1 || h > 12 : h > 23)) return msg;
-    }
-  }
-  const range = parseTimeRange(t);
-  if (!range) return msg;
-  if (range.end <= range.start) return 'The end time has to be after the start time.';
-  return null;
-}
-
 /** Navigate to the new-project wizard. /create explains when a project is
     blocked and links to the project that needs attendance. */
 function goCreateProject(router) {
@@ -449,10 +538,52 @@ function goCreateProject(router) {
 /* Header status chip. Turning off "Show project on Discover" pauses the
    listing, so the header says so instead of "Live". */
 function headerStatus(p) {
-  if (p.archived) return { label: 'Archived', bg: '#F6F2EE', color: '#57504A' };
+  if (p.archived) return { label: 'Archived', tone: 'mute' };
   const pub = (p.settings || []).find((r) => r.id === 'set-public');
-  if (pub && pub.on === false) return { label: 'Hidden', bg: '#FDF3E7', color: '#8A5A20' };
-  return { label: sentence(p.status), bg: '#EAF3EC', color: '#3F6B4E' };
+  if (pub && pub.on === false) return { label: 'Hidden', tone: 'wait' };
+  return { label: sentence(p.status), tone: 'ok' };
+}
+
+/** The project's own cover photo. A project without one shows nothing here:
+    the title leads, and no stand-in tile pretends to be a picture. */
+function ProjectTile({ p, size }) {
+  const photo = resolveCover(p.cover);
+  if (!photo) return null;
+  return (
+    <img
+      src={photo.sm || photo.src}
+      alt=""
+      width={size}
+      height={size}
+      style={S(`width:${size}px;height:${size}px;flex:none;object-fit:cover;object-position:${photo.pos || 'center'};border-radius:${size > 64 ? R.photo : R.control};background:${C.mist}`)}
+    />
+  );
+}
+
+/** Header status, as one meta line: a dot and the word for the listing
+    state, then the verification state and the created date as plain text. */
+const STATE_DOT = { ok: C.confirmed, wait: C.waiting, mute: C.ink3 };
+function HeaderMeta({ chip, verify, created }) {
+  const sep = <span className="vu-sep" aria-hidden="true" style={S('white-space:pre')}>{' · '}</span>;
+  return (
+    <p style={S(`margin:10px 0 0;display:flex;align-items:center;flex-wrap:wrap;row-gap:4px;${META}`)}>
+      <span style={S(`display:inline-flex;align-items:center;gap:7px;font-weight:600;color:${C.ink}`)}>
+        <i aria-hidden="true" style={S(`width:6px;height:6px;border-radius:50%;flex:none;background:${STATE_DOT[chip.tone] || C.ink3}`)} />
+        <span>{chip.label}</span>
+      </span>
+      {sep}
+      <span style={S('display:inline-flex;align-items:center;gap:4px')}>
+        <span>{verify.label}</span>
+        {verify.icon ? <span style={S(`color:${C.confirmed};display:inline-flex`)}><Icon name="badge-check" size={15} label="Verified" /></span> : null}
+      </span>
+      {created ? (
+        <>
+          {sep}
+          <span>{created}</span>
+        </>
+      ) : null}
+    </p>
+  );
 }
 
 const VOL_TABS = [
@@ -511,31 +642,93 @@ function useDocumentTitle(title) {
   }, [title]);
 }
 
+const MISSING_TITLE = "Project isn't available, VolunteerU";
+
+/* A project link that doesn't match any of this lead's projects: deleted,
+   someone else's, or mistyped. Says so and links to the projects they do run. */
+function ProjectMissing({ projects, tab }) {
+  const live = projects.filter((x) => !x.archived);
+  const list = [...live, ...projects.filter((x) => x.archived)];
+  return (
+    <div className="vu-page">
+      <section aria-labelledby="lead-missing" style={S('max-width:640px')}>
+        <h1 id="lead-missing" style={S(`margin:0;font:700 clamp(28px, 6.4vw, 36px)/1.08 ${F.display};letter-spacing:-0.03em;color:${C.ink}`)}>This project isn't available</h1>
+        <p style={S(`margin:12px 0 0;font:400 16px/1.55 ${F.body};color:${C.ink2}`)}>
+          It may have been deleted, or it belongs to another account. Open one of your projects instead.
+        </p>
+        <h2 style={S(`${H3};margin:36px 0 0`)}>Your projects</h2>
+        <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+          {list.map((x) => (
+            <li key={x.id} style={S(RULE)}>
+              <Link
+                href={`/lead/${x.id}/${tabsFor(x).some(([k]) => k === tab) ? tab : 'overview'}`}
+                onClick={() => setActiveProject(x.id)}
+                className={cx(H.row, H.press)}
+                style={S('display:flex;align-items:center;gap:14px;padding:14px 0;text-decoration:none;color:inherit')}
+              >
+                <ProjectTile p={x} size={48} />
+                <span style={S('min-width:0;flex:1')}>
+                  <span className="vu-trunc" style={S(`display:block;${LABEL}`)}>{x.name}</span>
+                  <span className="vu-trunc" style={S(`display:block;margin-top:3px;${SMALL}`)}>
+                    {[x.orgClass === 'official' ? 'Volunteer program' : 'Student project', x.archived ? 'Archived' : x.siteShort || x.site].filter(Boolean).map((m, i) => (
+                      <span key={i}>
+                        {i ? <span className="vu-sep" aria-hidden="true">{' · '}</span> : null}
+                        {m}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                <span aria-hidden="true" style={S(`color:${C.ink3};flex:none`)}><Icon name="chevron-right" size={18} /></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 export default function Lead({ projectId, tab: tabParam }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const { state } = useSnapshot();
 
-  const p = getProject(projectId || state.activeProjectId);
+  const owned = state.projects || [];
+  // /lead with a stale active id still opens one of the lead's projects. A
+  // project link (/lead/<id>/...) only ever opens that project.
+  const p = projectId ? getProject(projectId) : getProject(state.activeProjectId) || owned.find((x) => !x.archived) || owned[0] || null;
+  const missing = !p && !!projectId && owned.length > 0;
   const TABS = tabsFor(p);
   const tab = TABS.some(([k]) => k === tabParam) ? tabParam : 'overview';
   const tabLabel = (TABS.find(([k]) => k === tab) || [])[1] || 'Overview';
-  useDocumentTitle(p ? `${p.name} \u00b7 ${tabLabel}, VolunteerU` : LEAD_TITLE);
+  useDocumentTitle(p ? `${p.name} \u00b7 ${tabLabel}, VolunteerU` : missing ? MISSING_TITLE : LEAD_TITLE);
   const linkApps = useListingApps(p);
   const unreadMessages = useUnreadMessages(p ? p.listingId : null, tab);
 
+  if (missing) return <ProjectMissing projects={owned} tab={tab} />;
+
   if (!p) {
+    const photo = PHOTOS.outdoor;
     return (
-      <div className="vu-pad-40" style={S('padding:28px 40px 96px;display:flex;flex-direction:column;gap:20px')}>
+      <div className="vu-page" style={S('display:flex;flex-direction:column;gap:40px')}>
         <CrossApplications />
-        <EmptyState
-          icon="flag"
-          title="No student project yet"
-          body="Start one to take applications, plan shifts and confirm your team's hours."
-          cta="Start a student project"
-          onCta={() => goCreateProject(router)}
-        />
+        <section className="vu-2col" aria-labelledby="lead-empty" style={S('display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:32px 56px;align-items:center;max-width:1080px')}>
+          <div style={S('min-width:0')}>
+            <h1 id="lead-empty" style={S(`margin:0;font:700 clamp(30px, 7vw, 40px)/1.05 ${F.display};letter-spacing:-0.03em;color:${C.ink}`)}>No student project yet</h1>
+            <p style={S(`margin:14px 0 0;max-width:460px;font:400 16px/1.55 ${F.body};color:${C.ink2}`)}>
+              Post a project and other students can apply to help. You plan the shifts here and confirm everyone's hours after each one.
+            </p>
+            <div style={S('margin-top:24px')}>
+              <Button variant="primary" icon="plus" onClick={() => goCreateProject(router)}>Start a student project</Button>
+            </div>
+          </div>
+          <img
+            src={photo.src}
+            alt="A volunteer checking a sign-up sheet at a park cleanup"
+            style={S(`display:block;width:100%;aspect-ratio:4/3;object-fit:cover;object-position:${photo.pos};border-radius:${R.photo};background:${C.mist}`)}
+          />
+        </section>
       </div>
     );
   }
@@ -553,13 +746,12 @@ export default function Lead({ projectId, tab: tabParam }) {
   const goTab = (k) => router.push(`/lead/${p.id}/${k}`);
 
   const chip = headerStatus(p);
-  const crossPending = linkApps.filter((a) => a.status === 'pending').length;
-  const memberHours = memberHoursWaiting(linkApps);
-  const appsBadge = pendingApplications(p).length;
-  const hoursBadge = pendingHours(p).length + memberHours.length;
+  // One count of each thing for the whole screen: tab badges, Needs you
+  // today and Team status all read these two totals.
+  const waiting = waitingTotals(p, linkApps);
   const openAttendance = p.attendanceSessions.filter((x) => !x.posted).length;
   // Applications, hours, attendance, plus unread messages from volunteers.
-  const badgeFor = (k) => ({ applications: appsBadge, hours: hoursBadge, attendance: openAttendance, messages: unreadMessages }[k] || '') || '';
+  const badgeFor = (k) => ({ applications: waiting.apps, hours: waiting.hours.count, attendance: openAttendance, messages: unreadMessages }[k] || '') || '';
 
   function switchProject(e) {
     const list = allProjects();
@@ -601,92 +793,122 @@ export default function Lead({ projectId, tab: tabParam }) {
     );
   }
 
+  const verify = p.sponsor.verified
+    ? { label: 'Verified organization', tone: 'ok', icon: 'badge-check' }
+    : p.sponsor.verificationRequestedAt
+      ? { label: 'Verification requested', tone: 'wait', icon: false }
+      : { label: 'Not verified yet', tone: 'mute', icon: false };
+  // An archived project has no more shifts, so its schedule drops out of the line.
+  const meta = [p.orgClass === 'official' ? 'Volunteer program' : 'Student project', p.siteShort || p.site, p.archived ? '' : p.cadence, !p.archived && p.termWeeks ? `${p.termWeeks}-week term` : ''].filter(Boolean);
+
+  function onTabKey(e) {
+    const i = TABS.findIndex(([k]) => k === tab);
+    const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    const next = TABS[(to + TABS.length) % TABS.length][0];
+    goTab(next);
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`lead-tab-${next}`);
+      if (el) el.focus();
+    });
+  }
+
   return (
-    <div className="vu-screen vu-pad-40" style={S('padding:28px 40px 96px')}>
-      <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:24px')}>
-        <div>
-          <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-            <div style={S('font:500 13px/1 Geist;color:#6B635C')}>{p.orgClass === 'official' ? 'Volunteer program' : 'Student project'}</div>
-            <div style={s('padding:4px 8px;border-radius:6px', `background:${chip.bg}`, 'font:500 12px/1 Geist', `color:${chip.color}`)}>{chip.label}</div>
-            {p.sponsor.verified ? (
-              <div style={S('display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 12px/1 Geist;color:#3F6B4E')}>
-                <Icon name="check" size={12} />
-                Verified organization
-              </div>
-            ) : p.sponsor.verificationRequestedAt ? (
-              <div style={S('padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 12px/1 Geist;color:#8A5A20')}>Verification requested</div>
-            ) : (
-              <div style={S('padding:4px 8px;border-radius:6px;background:#F6F2EE;font:500 12px/1 Geist;color:#57504A')}>Not verified yet</div>
-            )}
-          </div>
-          <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap')}>
-            <h1 style={S('margin:0;font:600 32px/1.05 Geist;letter-spacing:-0.04em')}>{p.name}</h1>
-            <Pressable
-              label="Switch project"
-              expanded={false}
+    <div className="vu-page vu-lead">
+      <style dangerouslySetInnerHTML={{ __html: LEAD_CSS }} />
+      <header className="vu-lead-head" style={S('display:flex;align-items:flex-start;flex-wrap:wrap;gap:16px 20px')}>
+        <span className="vu-hide-mobile" style={S('display:contents')}><ProjectTile p={p} size={88} /></span>
+        <span className="vu-show-mobile" style={S('display:contents')}><ProjectTile p={p} size={56} /></span>
+        <div style={S('flex:1 1 260px;min-width:0')}>
+          <div style={S('display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap')}>
+            <h1 className="vu-lead-title" style={S(`margin:0;min-width:0;font:700 clamp(26px, 6.4vw, 34px)/1.08 ${F.display};letter-spacing:-0.03em;color:${C.ink};overflow-wrap:anywhere`)}>{p.name}</h1>
+            <button
+              type="button"
+              aria-label="Switch project"
+              aria-haspopup="menu"
+              aria-expanded="false"
               onClick={switchProject}
-              className={cx(H.secondary, H.press)}
-              style={S('display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:9px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
+              className={cx('vu-btn', 'vu-btn-outline', H.press)}
+              style={S(`flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:${R.pill};border:1px solid ${C.line2};background:#fff;font:600 13px/1 ${F.body};color:${C.ink};cursor:pointer`)}
             >
               Switch project
-              <Icon name="chevron-down" size={13} />
-            </Pressable>
+              <Icon name="chevron-down" size={14} />
+            </button>
           </div>
-          <div style={S('margin-top:9px;display:flex;flex-wrap:wrap;column-gap:16px;row-gap:4px;font:450 14px/1.4 Geist;color:#6B635C')}>
-            {[p.site, p.cadence, p.termWeeks ? `${p.termWeeks}-week term` : '', sentence(p.createdLabel)].filter(Boolean).map((t) => (
-              <span key={t}>{t}</span>
+          <p style={S(`margin:6px 0 0;${META}`)}>
+            {meta.map((m, i) => (
+              <span key={i}>
+                {i ? <span className="vu-sep" aria-hidden="true">{' · '}</span> : null}
+                {m}
+              </span>
             ))}
-          </div>
+          </p>
+          <HeaderMeta chip={chip} verify={verify} created={p.createdLabel ? sentence(p.createdLabel) : ''} />
+          {p.archived ? (
+            <p style={S(`margin:8px 0 0;${META}`)}>
+              Its join link is closed and no shifts run.{' '}
+              <Link href={`/lead/${p.id}/settings`} className={cx('vu-link', H.link)} style={S(`color:${C.ink};font-weight:600;text-decoration:underline;text-underline-offset:3px`)}>Restore it in Settings</Link>
+            </p>
+          ) : null}
         </div>
-        <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-          <Pressable
-            label="Copy join link"
-            onClick={copyRecruit}
-            className={cx(H.primary, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:background .16s ease, transform .16s ease')}
-          >
-            <Icon name="link" size={15} />
-            Copy join link
-          </Pressable>
-          <Pressable
-            label="New project"
-            onClick={() => goCreateProject(router)}
-            className={cx(H.secondaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease')}
-          >
+        <div className="vu-lead-actions" style={S('display:flex;gap:10px;flex:none;flex-wrap:wrap')}>
+          <Button variant="outline" size="sm" icon="plus" onClick={() => goCreateProject(router)} aria-label="New project">
             New project
-          </Pressable>
+          </Button>
+          {p.archived ? null : (
+            <Button variant="dark" size="sm" icon="link" onClick={copyRecruit} aria-label="Copy join link">
+              Copy join link
+            </Button>
+          )}
         </div>
-      </div>
+      </header>
 
-      <div className="vu-scroll-x" role="tablist" aria-label="Project sections" style={S('margin-top:22px;border-bottom:1px solid #E8E1D9;display:flex;gap:2px')}>
+      <div
+        className="vu-scroll-x vu-lead-tabs"
+        role="tablist"
+        aria-label="Project sections"
+        onKeyDown={onTabKey}
+        style={S(`margin-top:28px;border-bottom:1px solid ${C.line};display:flex;gap:24px`)}
+      >
         {TABS.map(([k, label]) => {
           const on = tab === k;
+          const n = badgeFor(k);
+          const unread = k === 'messages' && n;
           return (
-            <Pressable
+            <button
               key={k}
+              id={`lead-tab-${k}`}
+              type="button"
               role="tab"
-              aria-selected={on}
+              aria-selected={on ? 'true' : 'false'}
               tabIndex={on ? 0 : -1}
-              label={k === 'messages' && unreadMessages ? `${label}, ${unreadMessages} unread` : label}
+              aria-label={unread ? `${label}, ${n} unread` : undefined}
               onClick={() => goTab(k)}
-              className={cx(on ? '' : H.nav, H.press)}
+              className={cx('vu-tab', on ? 'is-on' : '')}
               style={s(
-                'display:flex;align-items:center;gap:7px;padding:10px 14px;border-radius:9px 9px 0 0',
-                `background:${on ? '#1F1B18' : 'transparent'}`,
-                `color:${on ? '#FFFFFF' : '#6B635C'}`,
-                'font:500 13px/1 Geist;cursor:pointer;white-space:nowrap;transition:background .16s ease, color .16s ease'
+                'flex:none;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;background:none;border:0;cursor:pointer',
+                'padding:12px 0 13px;margin-bottom:-1px',
+                `border-bottom:2px solid ${on ? C.ink : 'transparent'}`,
+                `font:${on ? 600 : 500} 15px/1 ${F.body}`,
+                `color:${on ? C.ink : C.ink2}`
               )}
             >
               {label}
-              <span style={S(`font:500 10px/1 ${MONO};opacity:.75`)}>{badgeFor(k)}</span>
-            </Pressable>
+              {n ? (
+                unread ? (
+                  <span style={S(`min-width:18px;height:18px;padding:0 5px;border-radius:${R.pill};background:${C.ember};color:#fff;display:inline-grid;place-items:center;font:700 11px/1 ${F.body};${NUM}`)}>{n}</span>
+                ) : (
+                  <span style={S(`font-weight:500;color:${C.ink3};${NUM}`)}>{n}</span>
+                )
+              ) : null}
+            </button>
           );
         })}
       </div>
 
-      <div role="tabpanel" aria-label={tab}>
-        {tab === 'overview' ? (isTeam(p) ? <TeamOverview p={p} goTab={goTab} linkApps={linkApps} /> : <Overview p={p} goTab={goTab} crossPending={crossPending} memberHours={memberHours} apps={linkApps} />) : null}
+      <div role="tabpanel" aria-label={tab} id={`lead-panel-${tab}`}>
+        {tab === 'overview' ? (isTeam(p) ? <TeamOverview p={p} goTab={goTab} linkApps={linkApps} /> : <Overview p={p} goTab={goTab} waiting={waiting} apps={linkApps} />) : null}
         {tab === 'people' ? <People p={p} params={params} setParam={setParam} linkApps={linkApps} /> : null}
         {tab === 'tasks' ? <TasksTab p={p} /> : null}
         {tab === 'pipeline' ? <PipelineTab p={p} /> : null}
@@ -697,7 +919,7 @@ export default function Lead({ projectId, tab: tabParam }) {
         {tab === 'hours' ? <HoursTab p={p} /> : null}
         {tab === 'quality' ? <QualityTab p={p} params={params} setParam={setParam} goTab={goTab} /> : null}
         {tab === 'messages' ? (
-          <div style={S('margin-top:22px;display:flex;flex-direction:column;gap:18px')}>
+          <div style={S('margin-top:32px;display:flex;flex-direction:column;gap:32px')}>
             <AnnouncementBoard listingId={p.listingId} canPost title="Updates for your team" />
             <MessagesTab p={p} params={params} setParam={setParam} embedded />
           </div>
@@ -710,21 +932,29 @@ export default function Lead({ projectId, tab: tabParam }) {
 
 /* ---- overview ----------------------------------------------------------- */
 
-function Overview({ p, goTab, crossPending = 0, memberHours = [], apps = [] }) {
+function Overview({ p, goTab, waiting, apps = [] }) {
   const progress = taskProgress(p);
-  const localPending = pendingApplications(p);
-  const appsCount = localPending.length + crossPending;
-  const localHours = pendingHours(p);
-  const hoursCount = localHours.length + memberHours.length;
-  const hoursTotal = [...localHours.map((q) => q.hrs), ...memberHours.map((r) => r.h.hrs)].reduce((a, n) => a + (Number(n) || 0), 0);
-  const hoursPeople = new Set([...localHours.map((q) => q.personId || q.n || q.id), ...memberHours.map((r) => r.app.id)]).size;
-  const flagged = localHours.filter((q) => !q.ok).length;
-  const shortSession = shortSessions({ ...p, sessions: p.sessions.map((x) => withFill(p, x, apps)) })[0];
+  const localPending = waiting.localApps;
+  const appsCount = waiting.apps;
+  const crossPending = waiting.crossApps;
+  const { count: hoursCount, hrs: hoursTotal, people: hoursPeople, flagged } = waiting.hours;
+  // Say why an entry was flagged in the Hours tab's own words ("Added by you,
+  // arrived late") when there's one; several just get a count.
+  const flaggedOne = flagged === 1 ? pendingHours(p).find((q) => !q.ok) : null;
+  const flaggedSrc = flaggedOne && String(flaggedOne.src || '').trim();
+  const flaggedText = !flagged ? ''
+    : flaggedSrc ? `1 flagged (${flaggedSrc.charAt(0).toLowerCase()}${flaggedSrc.slice(1)})`
+    : `${flagged} flagged for a closer look`;
+  // An archived project runs no more shifts: no short-staffed nudge, no Next shift.
+  const shortSession = p.archived ? null : shortSessions({ ...p, sessions: p.sessions.map((x) => withFill(p, x, apps)) })[0];
   const crew = p.people.filter((x) => x.st === 'Active').sort((a, b) => b.hrs - a.hrs).slice(0, 4);
-  const oldest = localPending.slice().sort((a, b) => b.ts - a.ts)[0];
+  // `ts` (hours since the application came in) only exists on some older
+  // rows. Show an age only when every waiting application has one.
+  const aged = localPending.length > 0 && localPending.every((a) => typeof a.ts === 'number' && Number.isFinite(a.ts));
+  const oldest = aged ? localPending.slice().sort((a, b) => b.ts - a.ts)[0] : null;
   const lh = p.leadHours || { planning: 0, sessions: 0, recruiting: 0 };
   const leadTotal = fmtHrs(lh.planning + lh.sessions + lh.recruiting);
-  const nextRow = nextUpcomingShift(p);
+  const nextRow = p.archived ? null : nextUpcomingShift(p);
   const next = nextRow ? withFill(p, nextRow, apps) : null;
   const ns = p.nextSession || {};
   const matches = openLinkSuggestions(p);
@@ -738,237 +968,240 @@ function Overview({ p, goTab, crossPending = 0, memberHours = [], apps = [] }) {
       ].filter(Boolean)
     : [];
 
+  const needs = [
+    appsCount
+      ? {
+          k: 'apps',
+          title: `${plural(appsCount, 'application')} waiting`,
+          sub: oldest && !crossPending ? `Oldest is ${plural(Math.max(1, Math.round(oldest.ts / 24)), 'day')} old` : 'Accept or decline on the Applications tab',
+          go: 'applications',
+        }
+      : null,
+    hoursCount
+      ? {
+          k: 'hours',
+          title: hoursTotal > 0 ? `${fmtHrs(hoursTotal)} ${hoursTotal === 1 ? 'hour' : 'hours'} to confirm` : `${plural(hoursCount, 'shift')} to confirm`,
+          // The shift count is the Hours tab badge, so the two read as one number.
+          sub: [`${plural(hoursCount, 'shift')} from ${plural(hoursPeople, 'volunteer')}`, flaggedText].filter(Boolean).join(', '),
+          go: 'hours',
+        }
+      : null,
+    shortSession
+      ? { k: 'short', title: `${shortSession.d} needs ${plural(shortSession.cap - shortSession.filledCount, 'more person', 'more people')}`, sub: 'See shifts', go: 'shifts' }
+      : null,
+    matches.length
+      ? { k: 'match', title: `${plural(matches.length, 'possible match', 'possible matches')} on the roster`, sub: 'Same name as someone you added. Check on People', go: 'people' }
+      : null,
+  ].filter(Boolean);
+
+  const needsPanel = (id) => (
+    <NeedsPanel id={id} title="Needs you today" needs={needs} goTab={goTab} empty="Nothing waiting on you. No applications or hours to review." />
+  );
+
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('display:flex;flex-direction:column;gap:16px;min-width:0')}>
-        <CrossApplications listingId={p.listingId} />
-        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-          <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
-            <div style={S('min-width:0')}>
-              <div style={S('font:500 13px/1 Geist;color:#6B635C')}>Next shift</div>
-              <div style={S('margin-top:10px;font:600 22px/1.15 Geist;letter-spacing:-0.03em')}>
-                {next ? `${next.d}, ${fmtTime(next.t)}` : 'Nothing scheduled'}
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0;display:flex;flex-direction:column;gap:48px')}>
+        <CrossApplications listingId={p.listingId} title="From your join link" />
+        <div className="vu-show-mobile">{needsPanel('ov-needs-m')}</div>
+
+        <section aria-labelledby="ov-next">
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <h2 id="ov-next" style={S(H2)}>Next shift</h2>
+            {next ? (
+              <div style={S('display:flex;gap:8px;flex-wrap:wrap')}>
+                <Button variant="outline" size="sm" icon="message" onClick={() => goTab('messages')}>Message team</Button>
+                <Button variant="outline" size="sm" icon="users" onClick={() => goTab('people')}>Open roster</Button>
               </div>
-              <div style={S('margin-top:7px;font:450 13px/1.45 Geist;color:#6B635C')}>
-                {next ? (next.loc || p.siteShort) : 'Add a shift so volunteers can sign up.'}
-              </div>
-            </div>
-            <div style={S('display:flex;gap:9px;flex:none;flex-wrap:wrap')}>
-              {next ? (
-                <>
-                  <Pressable
-                    label="Message team"
-                    onClick={() => goTab('messages')}
-                    className={cx(H.secondary, H.press)}
-                    style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
-                  >
-                    Message team
-                  </Pressable>
-                  <Pressable
-                    label="Open roster"
-                    onClick={() => goTab('people')}
-                    className={cx(H.primary, H.press)}
-                    style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease')}
-                  >
-                    Open roster
-                  </Pressable>
-                </>
-              ) : (
-                <Pressable
-                  label="Add a shift"
-                  onClick={() => goTab('shifts')}
-                  className={cx(H.primary, H.press)}
-                  style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease')}
-                >
-                  Add a shift
-                </Pressable>
-              )}
-            </div>
+            ) : null}
           </div>
-          {facts.length ? (
-            <dl style={S('margin:18px 0 0;padding-top:16px;border-top:1px solid #F1EBE4;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px')}>
-              {facts.map((k) => (
-                <div key={k.l} style={S('min-width:0')}>
-                  <dt style={S('font:450 12px/1.2 Geist;color:#6B635C')}>{k.l}</dt>
-                  <dd style={S('margin:6px 0 0;font:600 16px/1.2 Geist;color:#1A1714')}>{k.v}</dd>
+          {next ? (
+            <>
+              <div style={S('margin-top:18px;display:flex;align-items:center;gap:16px')}>
+                <DateBlock date={next.d} size="lg" month />
+                <div style={S('min-width:0')}>
+                  <div style={S(`font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{fmtTime(next.t) || next.d}</div>
+                  <div style={S(`margin-top:5px;${META}`)}>{next.loc || p.siteShort}</div>
                 </div>
-              ))}
-            </dl>
-          ) : null}
-        </div>
-
-        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-              <h2 style={S(`margin:0;${LABEL}`)}>Setup steps</h2>
-              <div style={S(`font:500 12px/1 ${MONO};color:#A8482A`)}>
-                {progress.done} of {progress.total}
               </div>
-            </div>
-            <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:12px')}>
-              {p.tasks.map((t) => (
-                <label key={t.id} htmlFor={`task-${t.id}`} className={H.link} style={S('display:flex;gap:11px;align-items:flex-start;cursor:pointer')}>
-                  <input
-                    id={`task-${t.id}`}
-                    type="checkbox"
-                    className="vu-sr"
-                    checked={t.done}
-                    onChange={() => {
-                      const updated = toggleTask(p.id, t.id);
-                      if (updated && updated.done) toast({ title: 'Checked off', message: updated.t, tone: 'ok', timeout: 2400 });
-                    }}
-                  />
-                  <span
-                    aria-hidden="true"
-                    style={s(
-                      'width:17px;height:17px;border-radius:5px;flex:none;margin-top:2px;display:grid;place-items:center;color:#fff',
-                      `border:1px solid ${t.done ? '#C2603C' : '#D8CFC5'}`,
-                      `background:${t.done ? '#C2603C' : '#fff'}`,
-                      'transition:border-color .16s ease, background .16s ease'
-                    )}
-                  >
-                    {t.done ? <Icon name="check" size={11} stroke={2.5} /> : null}
-                  </span>
-                  <span style={s('font:450 14px/1.45 Geist', t.done ? 'color:#6B635C' : 'color:#332D28')}>{t.t}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <h2 style={S(`margin:0;${LABEL}`)}>Activity</h2>
-            <div style={S('margin-top:8px;display:flex;flex-direction:column')}>
-              {p.activity.length ? (
-                p.activity.slice(0, 5).map((a, i, arr) => (
-                  <div key={a.id} style={s('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 0', i < arr.length - 1 ? 'border-bottom:1px solid #F1EBE4' : '')}>
-                    <div style={S('font:450 13px/1.45 Geist;color:#332D28')}>{a.t}</div>
-                    <div style={S('font:450 12px/1.45 Geist;color:#6B635C;flex:none')}>{a.w}</div>
-                  </div>
-                ))
+              {facts.length ? (
+                <dl className="vu-lead-facts" style={S(`margin:16px 0 0;display:flex;flex-wrap:wrap;align-items:baseline;row-gap:6px;${META}`)}>
+                  {facts.map((k, i) => (
+                    <div key={k.l} style={S('display:inline-flex;align-items:baseline;min-width:0')}>
+                      {i ? <span className="vu-sep" aria-hidden="true" style={S('white-space:pre')}>{' · '}</span> : null}
+                      <dt style={S('display:inline')}>{k.l}</dt>
+                      <dd style={S(`display:inline;margin:0 0 0 5px;font-weight:600;color:${C.ink};${NUM};overflow-wrap:anywhere`)}>{k.v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </>
+          ) : (
+            <div style={S('margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap')}>
+              {p.archived ? (
+                <p style={S(`margin:0;${META}`)}>No shifts while this project is archived.</p>
               ) : (
-                <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>No activity yet. New applications and posted attendance show up here.</div>
+                <>
+                  <p style={S(`margin:0;${META}`)}>Nothing scheduled. Add a shift so volunteers can sign up.</p>
+                  <Button variant="primary" size="sm" icon="plus" onClick={() => goTab('shifts')}>Add a shift</Button>
+                </>
               )}
             </div>
-          </div>
+          )}
+        </section>
+
+        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:48px 40px')}>
+          <section aria-labelledby="ov-steps">
+            <div className="vu-sec-head">
+              <h2 id="ov-steps" style={S(H2)}>Launch checklist</h2>
+              <span style={S(`${SMALL};${NUM};flex:none`)}>
+                {progress.done} of {progress.total} done
+              </span>
+            </div>
+            <ul style={S(`margin:14px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+              {p.tasks.map((t) => (
+                <li key={t.id} style={S(RULE)}>
+                  <label htmlFor={`task-${t.id}`} className="vu-lead-check" style={S('display:flex;gap:12px;align-items:flex-start;padding:13px 0;cursor:pointer')}>
+                    <input
+                      id={`task-${t.id}`}
+                      type="checkbox"
+                      className="vu-sr"
+                      checked={t.done}
+                      onChange={() => {
+                        const updated = toggleTask(p.id, t.id);
+                        if (updated && updated.done) toast({ title: 'Checked off', message: updated.t, tone: 'ok', timeout: 2400 });
+                      }}
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="vu-lead-box"
+                      style={s(
+                        'width:20px;height:20px;border-radius:6px;flex:none;margin-top:0;display:grid;place-items:center;color:#fff',
+                        `border:1.5px solid ${t.done ? C.ink : C.line2}`,
+                        `background:${t.done ? C.ink : '#fff'}`,
+                        'transition:border-color .16s ease, background .16s ease'
+                      )}
+                    >
+                      {t.done ? <Icon name="check" size={13} stroke={2.5} /> : null}
+                    </span>
+                    <span style={s(`font:500 15px/1.35 ${F.body}`, t.done ? `color:${C.ink2}` : `color:${C.ink}`)}>{t.t}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section aria-labelledby="ov-activity">
+            <h2 id="ov-activity" style={S(H2)}>Activity</h2>
+            {p.activity.length ? (
+              <ul style={S(`margin:14px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+                {p.activity.slice(0, 5).map((a) => (
+                  <li key={a.id} style={S(`display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:14px 0;${RULE}`)}>
+                    <span style={S(`font:400 14px/1.45 ${F.body};color:${C.ink}`)}>{a.t}</span>
+                    <span style={S(`${SMALL};flex:none;${NUM}`)}>{activityWhen(a)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={S(`margin:14px 0 0;${META}`)}>No activity yet. New applications and posted attendance show up here.</p>
+            )}
+          </section>
         </div>
 
-        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <h2 style={S(`margin:0;${LABEL}`)}>Team</h2>
-            <Pressable label="Manage people" onClick={() => goTab('people')} className={H.link} style={S('font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>
+        <section aria-labelledby="ov-team">
+          <div className="vu-sec-head">
+            <h2 id="ov-team" style={S(H2)}>Team</h2>
+            <button type="button" onClick={() => goTab('people')} className={cx('vu-link', H.press)} style={S(TEXT_LINK)}>
               Manage people
-            </Pressable>
+            </button>
           </div>
           {crew.length ? (
-            <div style={S('display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;margin-top:16px')}>
+            <div className="vu-np-grid" style={S('margin-top:8px')}>
               {crew.map((c) => (
                 <Pressable
                   key={c.id}
                   label={`${c.n}, ${c.role}`}
                   onClick={() => goTab('people')}
-                  className={cx(H.cardSoft, H.press)}
-                  style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8;text-align:center;cursor:pointer;transition:border-color .16s ease')}
+                  className={cx(H.row, H.press)}
+                  style={S(`display:flex;align-items:center;gap:14px;padding:14px 0;cursor:pointer;${RULE}`)}
                 >
-                  <div style={S('width:44px;height:44px;margin:0 auto;border-radius:50%;overflow:hidden')}>
-                    <Avatar name={c.n} fs={15} />
+                  <span className="vu-row-avatar">
+                    <Avatar name={c.n} fs={13} />
+                  </span>
+                  <div style={S('min-width:0;flex:1')}>
+                    <div className="vu-trunc" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{c.n || c.short}</div>
+                    <div className="vu-trunc" style={S(`margin-top:3px;${SMALL}`)}>{c.role}</div>
                   </div>
-                  <div style={S('margin-top:10px;font:500 13px/1.2 Geist')}>{c.short || c.n}</div>
-                  <div style={S('margin-top:4px;font:450 12px/1.2 Geist;color:#6B635C')}>{c.role}</div>
-                  <div style={S(`margin-top:8px;font:500 12px/1 ${MONO};color:#A8482A`)}>{fmtHrs(c.hrs)} hrs</div>
+                  <div style={S(`flex:none;font:600 15px/1 ${F.body};color:${C.ink};${NUM}`)}>{hrsText(c.hrs)}</div>
                 </Pressable>
               ))}
             </div>
           ) : (
-            <div style={S('margin-top:8px')}>
-              <EmptyState compact icon="users" title="No one on the team yet" body="Accept an application or add a student on the People tab." cta="Review applications" onCta={() => goTab('applications')} />
-            </div>
+            <EmptyState compact icon="users" title="No one on the team yet" body="Accept an application or add a student on the People tab." cta="Add a student" ctaVariant="outline" onCta={() => goTab('people?add=student')} />
           )}
-        </div>
+        </section>
       </div>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px;min-width:0')}>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Needs you today</h2>
-          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-            {appsCount ? (
-              <NeedCard
-                title={`${plural(appsCount, 'application')} waiting`}
-                sub={oldest && !crossPending ? `Oldest is ${plural(Math.max(1, Math.round(oldest.ts / 24)), 'day')} old` : 'Accept or decline on the Applications tab'}
-                onClick={() => goTab('applications')}
-              />
-            ) : null}
-            {hoursCount ? (
-              <NeedCard
-                title={hoursTotal > 0 ? `${fmtHrs(hoursTotal)} ${hoursTotal === 1 ? 'hour' : 'hours'} to confirm` : `${plural(hoursCount, 'hours entry', 'hours entries')} to confirm`}
-                sub={flagged ? `${flagged} flagged as leaving early` : `From ${plural(hoursPeople, 'volunteer')}, on the Hours tab`}
-                onClick={() => goTab('hours')}
-              />
-            ) : null}
-            {shortSession ? (
-              <NeedCard
-                title={`${shortSession.d} needs ${plural(shortSession.cap - shortSession.filledCount, 'more person', 'more people')}`}
-                sub="See shifts"
-                onClick={() => goTab('shifts')}
-              />
-            ) : null}
-            {matches.length ? (
-              <NeedCard
-                title={`${plural(matches.length, 'possible match', 'possible matches')} on the roster`}
-                sub="Same name as someone you added. Check on People"
-                onClick={() => goTab('people')}
-              />
-            ) : null}
-            {!appsCount && !hoursCount && !shortSession && !matches.length ? (
-              <div style={S('padding:14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#57504A')}>
-                Nothing waiting on you. No applications or hours to review.
-              </div>
-            ) : null}
-          </div>
-        </div>
+      <aside aria-label="Project summary" className="vu-lead-aside" style={S('min-width:0;display:flex;flex-direction:column')}>
+        <div className="vu-hide-mobile vu-rail-sec">{needsPanel('ov-needs')}</div>
 
         <SponsorCard p={p} />
 
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Your lead hours</h2>
-          <div style={S('margin-top:10px;font:600 32px/1 Geist;letter-spacing:-0.04em')}>
-            {leadTotal}
-            <span style={S('font-size:13px;font-weight:450;letter-spacing:0;color:#6B635C')}> hours</span>
-          </div>
-          <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
-            <SideRow l="Planning" v={fmtHrs(lh.planning)} />
-            <SideRow l="Running shifts" v={fmtHrs(lh.sessions)} />
-            <SideRow l="Recruiting" v={fmtHrs(lh.recruiting)} />
-          </div>
-        </div>
+        <section aria-labelledby="ov-lead-hrs" className="vu-rail-sec">
+          <h2 id="ov-lead-hrs" style={S(H3)}>Your lead hours</h2>
+          <LeadHoursLine total={leadTotal} parts={lh} />
+        </section>
 
-        <CrewFunnel p={p} crossPending={crossPending} />
-      </div>
+        <CrewFunnel p={p} />
+      </aside>
     </div>
   );
 }
 
-function NeedCard({ title, sub, onClick }) {
+/** Things waiting on the lead: a plain section of chevron rows. Rendered in
+    the rail on desktop and right under the applications on phones. */
+function NeedsPanel({ id, title, needs, goTab, empty }) {
   return (
-    <Pressable
-      label={title}
+    <section aria-labelledby={id}>
+      <h2 id={id} style={S(H3)}>{title}</h2>
+      {needs.length ? (
+        <ul style={S('margin:8px 0 0;padding:0;list-style:none')}>
+          {needs.map((n, i) => (
+            <li key={n.k}>
+              <NeedCard title={n.title} sub={n.sub} onClick={() => goTab(n.go)} last={i === needs.length - 1} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p style={S(`margin:10px 0 0;${META}`)}>{empty}</p>
+      )}
+    </section>
+  );
+}
+
+/** One thing that needs the lead, as a row that opens the tab where it's done. */
+function NeedCard({ title, sub, onClick, last }) {
+  return (
+    <button
+      type="button"
+      aria-label={title}
       onClick={onClick}
-      className={cx(H.card, H.press)}
-      style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;cursor:pointer;transition:border-color .16s ease')}
+      className={cx('vu-row', 'vu-row--nolead', 'vu-lead-need', H.press)}
+      style={S(`width:100%;grid-template-columns:minmax(0,1fr) auto;background:none;border:0;border-bottom:${last ? '0' : `1px solid ${C.line}`};text-align:left;font:inherit;color:inherit;cursor:pointer`)}
     >
-      <div style={S('min-width:0')}>
-        <div style={S('font:500 13px/1.25 Geist')}>{title}</div>
-        <div style={S('margin-top:5px;font:450 12px/1.3 Geist;color:#6B635C')}>{sub}</div>
-      </div>
-      <span style={S('color:#A8482A;flex:none')}><Icon name="chevron-right" size={15} /></span>
-    </Pressable>
+      <span style={S('min-width:0')}>
+        <span className="vu-row-t" style={S('white-space:normal')}>{title}</span>
+        <span className="vu-row-m" style={S('white-space:normal')}>{sub}</span>
+      </span>
+      <span aria-hidden="true" style={S(`color:${C.ink3};display:inline-flex`)}><Icon name="chevron-right" size={18} /></span>
+    </button>
   );
 }
 
 function SideRow({ l, v }) {
   return (
-    <div style={S('display:flex;justify-content:space-between;gap:10px')}>
+    <div style={S('display:flex;justify-content:space-between;gap:12px')}>
       <span>{l}</span>
-      <span style={S('color:#1A1714;font-weight:500;text-align:right;min-width:0;overflow-wrap:anywhere')}>{v}</span>
+      <span style={S(`color:${C.ink};font-weight:600;text-align:right;min-width:0;overflow-wrap:anywhere;${NUM}`)}>{v}</span>
     </div>
   );
 }
@@ -979,8 +1212,8 @@ function SponsorCard({ p }) {
   const sp = p.sponsor || {};
   const named = sp.name && sp.name.trim();
   const status = sp.verified ? 'Verified organization'
-    : sp.verificationRequestedAt ? 'Verification requested'
-    : named ? 'Not verified yet'
+    : sp.verificationRequestedAt ? 'Requested, waiting on a reviewer'
+    : named ? 'Not checked by a reviewer yet'
     : 'No organization added yet';
 
   const openRequest = () => {
@@ -992,36 +1225,28 @@ function SponsorCard({ p }) {
   };
 
   return (
-    <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-      <h2 style={S(`margin:0;${LABEL}`)}>Organization</h2>
-      <div style={S('margin-top:14px;display:flex;align-items:center;gap:11px')}>
-        <div style={S('width:36px;height:36px;border-radius:10px;overflow:hidden;flex:none;background:#EFE9E2')}>
-          {named ? <Avatar name={named} fs={13} /> : null}
+    <section aria-labelledby="ov-org" className="vu-rail-sec">
+      <h2 id="ov-org" style={S(H3)}>Organization</h2>
+      <div style={S('margin-top:10px;min-width:0')}>
+        <div style={S(`display:flex;align-items:center;gap:6px;font:600 15px/1.3 ${F.body};color:${C.ink}`)}>
+          <span className="vu-trunc">{named || 'No organization added yet'}</span>
+          {sp.verified ? <span style={S(`color:${C.confirmed};flex:none;display:inline-flex`)}><Icon name="badge-check" size={15} label="Verified" /></span> : null}
         </div>
-        <div style={S('min-width:0')}>
-          <div style={S('display:flex;align-items:center;gap:6px;font:500 14px/1.2 Geist')}>
-            <span className="vu-trunc">{named || 'Not set'}</span>
-            {sp.verified ? <span style={S('color:#3F6B4E;flex:none')}><Icon name="check-circle" size={14} label="Verified" /></span> : null}
-          </div>
-          <div className="vu-trunc" style={S('margin-top:3px;font:450 12px/1.2 Geist;color:#6B635C')}>{status}</div>
-        </div>
+        {named || sp.verified || sp.verificationRequestedAt ? <div style={S(`margin-top:2px;${SMALL}`)}>{status}</div> : null}
       </div>
       {sp.contact && sp.contact !== '-' ? (
-        <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
+        <div style={S(`margin-top:14px;display:flex;flex-direction:column;gap:9px;${META}`)}>
           <SideRow l="Contact" v={sp.contact} />
         </div>
       ) : null}
       {!sp.verified ? (
-        <button
-          type="button"
-          onClick={openRequest}
-          className={cx(H.secondary, H.press)}
-          style={S('margin-top:16px;width:100%;padding:10px;border-radius:10px;border:1px solid #E4DDD4;background:#FAF6F3;font:500 13px/1 Geist;color:#8A5A20;cursor:pointer')}
-        >
-          {sp.verificationRequestedAt ? 'Update verification request' : 'Request verification'}
-        </button>
+        <div style={S('margin-top:16px')}>
+          <Button variant="outline" size="sm" full icon="badge-check" onClick={openRequest}>
+            {sp.verificationRequestedAt ? 'Update verification request' : 'Request verification'}
+          </Button>
+        </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -1043,33 +1268,77 @@ function VerifyForm({ p, api }) {
   };
   return (
     <div style={S('display:flex;flex-direction:column;gap:14px')}>
-      <Field label="Organization name" value={name} onChange={setName} placeholder="e.g. Rivertown Public Library" error={err.name} required maxLength={90} />
+      <Field label="Organization name" value={name} onChange={setName} placeholder="e.g. Carmel Clay Public Library" error={err.name} required maxLength={90} />
       <Field label="Staff contact" value={contact} onChange={setContact} placeholder="e.g. Ms. Alvarez, alvarez@school.edu" error={err.contact} required maxLength={120} />
-      <div style={S('display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap')}>
-        <button type="button" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S('padding:10px 16px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:500 13px/1 Geist;cursor:pointer')}>Cancel</button>
-        <button type="button" onClick={submit} disabled={busy} className={cx(H.primary, H.press)} style={S('padding:10px 16px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:500 13px/1 Geist;cursor:pointer')}>{busy ? 'Sending' : 'Send for review'}</button>
-      </div>
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" onClick={submit} busy={busy}>{busy ? 'Sending' : 'Send for review'}</Button>
+      </ModalActions>
     </div>
   );
 }
 
-/* Where people on the team stand, from the roster and the application rows
-   (local plus the ones that came in through the join link). */
-function CrewFunnel({ p, crossPending = 0 }) {
-  const waiting = p.applications.filter((a) => a.status === 'pending').length + crossPending;
+/** Dialog footer: actions on the right, an optional destructive action on the left. */
+function ModalActions({ left = null, children }) {
+  return (
+    <div style={S(`margin-top:20px;display:flex;justify-content:${left ? 'space-between' : 'flex-end'};align-items:center;gap:10px;flex-wrap:wrap`)}>
+      {left}
+      <div style={S('display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto')}>{children}</div>
+    </div>
+  );
+}
+
+/** "a", "a and b", "a, b and c". */
+function joinAnd(items) {
+  if (items.length < 2) return items;
+  return items.flatMap((x, i) => (i === 0 ? [x] : [i === items.length - 1 ? ' and ' : ', ', x]));
+}
+
+/** A number in a sentence: 600 ink, tabular. */
+const Num = ({ children }) => <b style={S(`font-weight:600;color:${C.ink};${NUM}`)}>{children}</b>;
+
+/* The lead's own hours as one sentence: "6 lead hours: 2 planning,
+   3 running shifts and 1 recruiting". Parts at zero are left out. */
+function LeadHoursLine({ total, parts }) {
+  const p = parts || {};
+  const items = [['planning', p.planning], ['running shifts', p.sessions], ['recruiting', p.recruiting]]
+    .filter(([, v]) => Number(v) > 0)
+    .map(([l, v]) => <span key={l}><Num>{fmtHrs(v)}</Num> {l}</span>);
+  if (!(Number(total) > 0)) return <p style={S(`margin:10px 0 0;${META}`)}>No lead hours logged yet.</p>;
+  return (
+    <p style={S(`margin:10px 0 0;${META}`)}>
+      <Num>{total}</Num> {total === '1' ? 'lead hour' : 'lead hours'}
+      {items.length ? ': ' : ''}
+      {joinAnd(items)}.
+    </p>
+  );
+}
+
+/* Where the team stands, as one sentence from the roster ("5 active,
+   2 onboarding."), plus the lead's own count of past events and volunteers.
+   Applications waiting already lead Needs you today, so they aren't repeated. */
+function CrewFunnel({ p }) {
   const onboarding = p.people.filter((x) => x.st === 'Onboarding').length;
   const active = p.people.filter((x) => x.st === 'Active').length;
+  const roster = [
+    active ? <span key="a"><Num>{active}</Num> active</span> : null,
+    onboarding ? <span key="o"><Num>{onboarding}</Num> onboarding</span> : null,
+  ].filter(Boolean);
+  const events = Number(p.eventsHosted) > 0 ? Number(p.eventsHosted) : 0;
+  const reached = Number(p.approxVolunteers) > 0 ? Number(p.approxVolunteers) : 0;
+  let record = null;
+  if (events && reached) record = <>By your count you've run <Num>{events}</Num> {events === 1 ? 'event' : 'events'} with about <Num>{reached}</Num> {reached === 1 ? 'volunteer' : 'volunteers'}.</>;
+  else if (events) record = <>By your count you've run <Num>{events}</Num> {events === 1 ? 'event' : 'events'}.</>;
+  else if (reached) record = <>By your estimate about <Num>{reached}</Num> {reached === 1 ? 'volunteer has' : 'volunteers have'} joined so far.</>;
+  if (!roster.length && !record) return null;
   return (
-    <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-      <h2 style={S(`margin:0;${LABEL}`)}>Team status</h2>
-      <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
-        <SideRow l="Applications waiting" v={waiting} />
-        <SideRow l="Onboarding" v={onboarding} />
-        <SideRow l="Active" v={active} />
-        {p.eventsHosted > 0 ? <SideRow l="Events hosted (your count)" v={p.eventsHosted} /> : null}
-        {p.approxVolunteers > 0 ? <SideRow l="Volunteers so far (your estimate)" v={p.approxVolunteers} /> : null}
-      </div>
-    </div>
+    <section aria-labelledby="ov-status" className="vu-rail-sec">
+      <h2 id="ov-status" style={S(H3)}>Team status</h2>
+      <p style={S(`margin:10px 0 0;${META}`)}>
+        {roster.length ? <>{roster.length === 2 ? [roster[0], ', ', roster[1]] : roster}. </> : null}
+        {record}
+      </p>
+    </section>
   );
 }
 
@@ -1092,6 +1361,24 @@ function teamRoleFor(m, appsById) {
 }
 
 const NO_TEAM_ROLE = 'No role yet';
+
+/* A stored role color drawn as the muted cause tone the Tasks tab uses for
+   it, so a role keeps one color across tabs. The stored "Red" (#C2603C)
+   reads as Ember, so it draws as the civic tone; no role is red. */
+const ROLE_DOT = {
+  '#C2603C': CAUSE.civic.fg,
+  '#3F6B4E': CAUSE.environment.fg,
+  '#5B6BB0': CAUSE.education.fg,
+  '#8A5A20': CAUSE.animals.fg,
+  '#9B4A6B': CAUSE.arts.fg,
+  '#4A7C8A': CAUSE.health.fg,
+};
+function roleDot(color) {
+  const raw = String(color || '').toUpperCase();
+  if (ROLE_DOT[raw]) return ROLE_DOT[raw];
+  if (raw === CAUSE.food.fg.toUpperCase()) return CAUSE.civic.fg;
+  return color || C.ink2;
+}
 
 /* On a team the roster's role column is the team role (Tasks > Role for ...),
    not the position the row was created with. Returns new rows; the stored
@@ -1117,115 +1404,126 @@ function TeamOverview({ p, goTab, linkApps = [] }) {
   const memberRoles = members.map((m) => teamRoleFor(m, appsById));
   const needsBriefing = memberRoles.filter((r) => r.roleId && r.canAck && !r.acked);
   const matches = openLinkSuggestions(p);
+  const needs = [
+    unassigned.length ? { k: 'un', title: `${plural(unassigned.length, 'task')} without an owner`, sub: 'Assign them on the task board', go: 'tasks' } : null,
+    needsBriefing.length ? { k: 'br', title: `${plural(needsBriefing.length, 'member')} not briefed`, sub: "They haven't read their role briefing", go: 'people' } : null,
+    matches.length ? { k: 'mt', title: `${plural(matches.length, 'possible match', 'possible matches')} on the team`, sub: 'Same name as someone you added. Check on the Team tab', go: 'people' } : null,
+  ].filter(Boolean);
+
+  const needsPanel = (id) => (
+    <NeedsPanel id={id} title="Needs you" needs={needs} goTab={goTab} empty="Nothing waiting on you. Every task has an owner and everyone has read their briefing." />
+  );
 
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('display:flex;flex-direction:column;gap:16px;min-width:0')}>
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0;display:flex;flex-direction:column;gap:48px')}>
         <CrossApplications listingId={p.listingId} />
+        <div className="vu-show-mobile">{needsPanel('to-needs-m')}</div>
 
-        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-          <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
-            <div>
-              <div style={S('font:500 13px/1 Geist;color:#6B635C')}>Task board</div>
-              <div style={S('margin-top:10px;font:600 22px/1.15 Geist;letter-spacing:-0.03em')}>{stats.total ? `${stats.done} of ${plural(stats.total, 'task')} done` : 'No tasks yet'}</div>
-              <div style={S('margin-top:7px;font:450 13px/1.45 Geist;color:#6B635C')}>{stats.doing} in progress, {stats.todo} to do, {plural(stats.roles, 'role')}</div>
+        <section aria-labelledby="to-board">
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <h2 id="to-board" style={S(H2)}>Task board</h2>
+            <Button variant="outline" size="sm" icon="list" onClick={() => goTab('tasks')}>Open board</Button>
+          </div>
+          {stats.total ? (
+            <p style={S(`margin:14px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2};${NUM}`)}>
+              <b style={S(`font-weight:600;color:${C.ink}`)}>{stats.done}</b> of <b style={S(`font-weight:600;color:${C.ink}`)}>{stats.total}</b> {stats.total === 1 ? 'task' : 'tasks'} done
+              <span className="vu-sep" aria-hidden="true">{' · '}</span>
+              {stats.doing} in progress
+              <span className="vu-sep" aria-hidden="true">{' · '}</span>
+              {stats.todo} to do
+            </p>
+          ) : (
+            <p style={S(`margin:14px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>No tasks yet. Add the first one on the board.</p>
+          )}
+        </section>
+
+        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:48px 40px')}>
+          <section aria-labelledby="to-doing">
+            <div className="vu-sec-head">
+              <h2 id="to-doing" style={S(H2)}>In progress</h2>
             </div>
-            <Pressable label="Open board" onClick={() => goTab('tasks')} className={cx(H.primary, H.press)} style={S('flex:none;display:inline-flex;align-items:center;gap:8px;padding:0 14px;height:36px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
-              Open board
-            </Pressable>
-          </div>
-          <div style={S('margin-top:16px;height:8px;border-radius:99px;background:#F1EBE4;overflow:hidden')}>
-            <div style={s('height:100%;border-radius:99px;background:#C2603C;transition:width .3s ease', `width:${stats.pct}%`)} />
-          </div>
+            {inProgress.length ? (
+              <ul style={S(`margin:14px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+                {inProgress.map((t) => {
+                  const r = roleOf(p, t.roleId);
+                  const who = p.people.find((x) => x.id === t.assigneeId);
+                  return (
+                    <li key={t.id} style={S(`padding:13px 0;${RULE}`)}>
+                      <div style={S(`font:600 15px/1.35 ${F.body};color:${C.ink}`)}>{t.title || t.t || t.name || 'Untitled task'}</div>
+                      <div style={S(`margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;${SMALL}`)}>
+                        {r ? (
+                          <span style={S('display:inline-flex;align-items:center;gap:6px')}>
+                            <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${roleDot(r.color)}`)} />
+                            {r.name}
+                          </span>
+                        ) : null}
+                        {who ? <span>{who.n || who.short}</span> : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p style={S(`margin:14px 0 0;${META}`)}>Nothing in progress. Move a task to In progress on the board.</p>
+            )}
+          </section>
+
+          <section aria-labelledby="to-activity">
+            <h2 id="to-activity" style={S(H2)}>Activity</h2>
+            {p.activity.length ? (
+              <ul style={S(`margin:14px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+                {p.activity.slice(0, 5).map((a) => (
+                  <li key={a.id} style={S(`display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:14px 0;${RULE}`)}>
+                    <span style={S(`font:400 14px/1.45 ${F.body};color:${C.ink}`)}>{a.t}</span>
+                    <span style={S(`${SMALL};flex:none;${NUM}`)}>{activityWhen(a)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={S(`margin:14px 0 0;${META}`)}>No activity yet. Task changes and new members show up here.</p>
+            )}
+          </section>
         </div>
 
-        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-              <h2 style={S(`margin:0;${LABEL}`)}>In progress</h2>
-              <Pressable label="Open board" onClick={() => goTab('tasks')} className={H.link} style={S('font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>Open board</Pressable>
-            </div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {inProgress.length ? inProgress.map((t) => {
-                const r = roleOf(p, t.roleId);
-                const who = p.people.find((x) => x.id === t.assigneeId);
+        <section aria-labelledby="to-roles">
+          <div className="vu-sec-head">
+            <h2 id="to-roles" style={S(H2)}>Roles</h2>
+            <button type="button" onClick={() => goTab('tasks')} className={cx('vu-link', H.press)} style={S(TEXT_LINK)}>Manage roles</button>
+          </div>
+          {roles.length ? (
+            <div className="vu-np-grid" style={S('margin-top:8px')}>
+              {roles.map((r) => {
+                const count = memberRoles.filter((x) => x.roleId === r.id).length;
                 return (
-                  <div key={t.id} style={S('padding:12px 14px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                    <div style={S('font:500 13px/1.35 Geist;color:#1A1714')}>{t.title || t.t || t.name || 'Untitled task'}</div>
-                    <div style={S('margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                      {r ? <span style={s('padding:3px 7px;border-radius:6px;font:500 11px/1 Geist', `background:${r.color}18`, `color:${r.color}`)}>{r.name}</span> : null}
-                      {who ? <span style={S('font:450 12px/1 Geist;color:#6B635C')}>{who.short || who.n}</span> : null}
+                  <div key={r.id} style={S(`display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;${RULE}`)}>
+                    <div style={S('display:flex;align-items:center;gap:10px;min-width:0')}>
+                      <span aria-hidden="true" style={s('width:10px;height:10px;border-radius:50%;flex:none', `background:${roleDot(r.color)}`)} />
+                      <div className="vu-trunc" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{r.name}</div>
                     </div>
+                    <div style={S(`${SMALL};flex:none;${NUM}`)}>{plural(count, 'member')}</div>
                   </div>
                 );
-              }) : (
-                <div style={S('font:450 13px/1.5 Geist;color:#6B635C')}>Nothing in progress. Move a task to In progress on the board.</div>
-              )}
+              })}
             </div>
-          </div>
-
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <h2 style={S(`margin:0;${LABEL}`)}>Activity</h2>
-            <div style={S('margin-top:8px;display:flex;flex-direction:column')}>
-              {p.activity.length ? p.activity.slice(0, 5).map((a, i, arr) => (
-                <div key={a.id} style={s('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 0', i < arr.length - 1 ? 'border-bottom:1px solid #F1EBE4' : '')}>
-                  <div style={S('font:450 13px/1.45 Geist;color:#332D28')}>{a.t}</div>
-                  <div style={S('font:450 12px/1.45 Geist;color:#6B635C;flex:none')}>{a.w}</div>
-                </div>
-              )) : <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>No activity yet. Task changes and new members show up here.</div>}
-            </div>
-          </div>
-        </div>
-
-        <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-          <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <h2 style={S(`margin:0;${LABEL}`)}>Roles</h2>
-            <Pressable label="Manage roles" onClick={() => goTab('tasks')} className={H.link} style={S('font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>Manage roles</Pressable>
-          </div>
-          <div className="vu-3col" style={S('margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px')}>
-            {roles.length ? roles.map((r) => {
-              const count = memberRoles.filter((x) => x.roleId === r.id).length;
-              return (
-                <div key={r.id} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                  <div style={S('display:flex;align-items:center;gap:8px')}>
-                    <span style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${r.color}`)} />
-                    <div style={S('font:600 13px/1.2 Geist')}>{r.name}</div>
-                  </div>
-                  <div style={S('margin-top:9px;font:450 12px/1 Geist;color:#6B635C')}>{plural(count, 'member')}</div>
-                </div>
-              );
-            }) : (
-              <div style={S('grid-column:1 / -1')}>
-                <EmptyState compact title="No roles yet" body="Add roles with briefings so members know what they own." cta="Set up roles" onCta={() => goTab('tasks')} />
-              </div>
-            )}
-          </div>
-        </div>
+          ) : (
+            <EmptyState compact title="No roles yet" body="Add roles with briefings so members know what they own." cta="Set up roles" onCta={() => goTab('tasks')} />
+          )}
+        </section>
       </div>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px;min-width:0')}>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Needs you</h2>
-          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-            {unassigned.length ? <NeedCard title={`${plural(unassigned.length, 'task')} without an owner`} sub="Assign them on the task board" onClick={() => goTab('tasks')} /> : null}
-            {needsBriefing.length ? <NeedCard title={`${plural(needsBriefing.length, 'member')} not briefed`} sub="They haven't read their role briefing" onClick={() => goTab('people')} /> : null}
-            {matches.length ? <NeedCard title={`${plural(matches.length, 'possible match', 'possible matches')} on the team`} sub="Same name as someone you added. Check on the Team tab" onClick={() => goTab('people')} /> : null}
-            {!unassigned.length && !needsBriefing.length && !matches.length ? (
-              <div style={S('padding:14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#57504A')}>Nothing waiting on you. Every task has an owner and everyone has read their briefing.</div>
-            ) : null}
-          </div>
-        </div>
+      <aside aria-label="Team summary" className="vu-lead-aside" style={S('min-width:0;display:flex;flex-direction:column')}>
+        <div className="vu-hide-mobile vu-rail-sec">{needsPanel('to-needs')}</div>
 
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Mission</h2>
-          {p.mission ? <div style={S('margin-top:10px;font:450 14px/1.55 Geist;color:#332D28')}>{p.mission}</div> : null}
-          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:9px;font:450 13px/1.4 Geist;color:#57504A')}>
-            <SideRow l="Team size" v={members.length} />
-            {p.cadence ? <SideRow l="Cadence" v={p.cadence} /> : null}
-            {p.termWeeks ? <SideRow l="Term" v={plural(p.termWeeks, 'week')} /> : null}
-          </div>
-        </div>
-      </div>
+        <section aria-labelledby="to-mission" className="vu-rail-sec">
+          <h2 id="to-mission" style={S(H3)}>Mission</h2>
+          {p.mission ? (
+            <p style={S(`margin:10px 0 0;font:400 15px/1.55 ${F.body};color:${C.ink}`)}>{p.mission}</p>
+          ) : (
+            <p style={S(`margin:10px 0 0;${META}`)}>No mission written yet. Add one in Settings so members know what the team is for.</p>
+          )}
+        </section>
+      </aside>
     </div>
   );
 }
@@ -1252,12 +1550,15 @@ function useNarrow(max = 720) {
   return narrow;
 }
 
-const SMALL_BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;height:30px;border-radius:8px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease';
-const FILTER_BTN = 'display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:38px;border-radius:9px;border:1px solid #E8E1D9;background:#fff;font:500 13px/1 Geist;color:#57504A;cursor:pointer;white-space:nowrap;transition:background .16s ease, border-color .16s ease';
-const BTN_PRIMARY = 'display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:38px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease';
-const BTN_SECONDARY = 'display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 14px;height:38px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease';
-const MODAL_PRIMARY = 'display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer';
-const MODAL_SECONDARY = 'display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer';
+/** Small outline button inside table rows (Note, more actions, Edit). */
+const ROW_BTN = `display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;height:36px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:600 13px/1 ${F.body};color:${C.ink};cursor:pointer;white-space:nowrap;transition:background .16s ease`;
+/** Filter dropdown trigger: a pill, like the chips. */
+const FILTER_BTN = `display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:40px;border-radius:${R.pill};border:1px solid ${C.line2};background:#fff;font:500 14px/1 ${F.body};color:${C.ink};cursor:pointer;white-space:nowrap;transition:background .16s ease, border-color .16s ease`;
+/** Table header cell text. */
+const TH = `font:600 13px/1.2 ${F.body};color:${C.ink2}`;
+
+/** Roster status word to a pill tone. */
+const PERSON_PILL = { Active: 'ok', Onboarding: 'wait', Invited: 'mute', Waitlist: 'mute', Inactive: 'mute', Removed: 'bad' };
 
 function People({ p: stored, params, setParam, linkApps = [] }) {
   const p = { ...stored, people: rosterWithTeamRoles(stored, linkApps) };
@@ -1283,6 +1584,20 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   const matches = openLinkSuggestions(stored);
   const team = isTeam(stored);
   const appsById = new Map(linkApps.map((a) => [a.id, a]));
+  // The accepted application behind a roster row, so the lead can message
+  // that member in the same thread the Applications tab opens.
+  const memberApp = (person) => {
+    const app = person.appId ? appsById.get(person.appId) : null;
+    return app && app.status === 'accepted' && app.applicant_id ? app : null;
+  };
+
+  function messageMember(app) {
+    openModal({
+      title: app.applicant_name,
+      subtitle: stored.name ? `About ${stored.name}` : 'Member',
+      Body: () => <MessageThread applicationId={app.id} recipientId={app.applicant_id} recipientName={app.applicant_name} />,
+    });
+  }
 
   function linkMatch(m) {
     if (confirmLinkSuggestion(stored.id, m.appId, m.row.id)) {
@@ -1318,6 +1633,17 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
     });
   }
 
+  // Overview's empty Team section links here with ?add=student; open the
+  // form once and drop the param so a reload doesn't reopen it.
+  const addParam = params.get('add');
+  const addOpened = useRef(false);
+  useEffect(() => {
+    if (addParam !== 'student' || addOpened.current) return;
+    addOpened.current = true;
+    setParam({ add: null });
+    addStudent();
+  }, [addParam]);
+
   function importList() {
     openModal({
       title: 'Import from a list',
@@ -1341,14 +1667,13 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   function personProfile(person) {
     openModal({
       title: person.n,
-      subtitle: schoolLine(person),
       Body: function ProfileBody({ api }) {
         return (
           <PersonProfile
-            api={api}
             project={p}
             person={person}
             onNote={() => { api.close(); noteFor(person); }}
+            onMessage={memberApp(person) ? () => { api.close(); messageMember(memberApp(person)); } : null}
             onRole={team ? () => { api.close(); teamRolePicker(person); } : null}
           />
         );
@@ -1360,12 +1685,13 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
     menuFromEvent(
       e,
       [
+        ...(memberApp(person) ? [{ key: 'message', label: 'Message', icon: 'message' }, { sep: true }] : []),
         ...(team ? [{ key: 'role', label: person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role', icon: 'flag' }, { sep: true }] : []),
         { key: 'active', label: 'Mark active', icon: 'check', disabled: person.st === 'Active' },
         { key: 'waitlist', label: 'Move to waitlist', icon: 'clock', disabled: person.st === 'Waitlist' },
         { key: 'inactive', label: 'Mark inactive', icon: 'minus', disabled: person.st === 'Inactive' },
         { sep: true },
-        { key: 'consent', label: person.consent ? 'Mark consent form missing' : 'Mark consent form received', icon: 'file' },
+        { key: 'consent', label: person.consent ? 'Mark guardian consent form missing' : 'Mark guardian consent form received', icon: 'file' },
         { key: 'trained', label: person.trained ? 'Mark training not done' : 'Mark training done', icon: 'award' },
         { sep: true },
         { key: 'remove', label: 'Remove from roster', icon: 'trash', tone: 'danger' },
@@ -1375,11 +1701,16 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
           active: ['Marked active', () => updatePerson(p.id, person.id, { st: 'Active' })],
           waitlist: ['Moved to waitlist', () => updatePerson(p.id, person.id, { st: 'Waitlist' })],
           inactive: ['Marked inactive', () => updatePerson(p.id, person.id, { st: 'Inactive' })],
-          consent: [person.consent ? 'Consent form marked missing' : 'Consent form marked received', () => updatePerson(p.id, person.id, { consent: !person.consent })],
+          consent: [person.consent ? 'Guardian consent form marked missing' : 'Guardian consent form marked received', () => updatePerson(p.id, person.id, { consent: !person.consent })],
           trained: [person.trained ? 'Training marked not done' : 'Training marked done', () => updatePerson(p.id, person.id, { trained: !person.trained })],
         }[key];
         if (key === 'role') {
           teamRolePicker(person);
+          return;
+        }
+        if (key === 'message') {
+          const app = memberApp(person);
+          if (app) messageMember(app);
           return;
         }
         if (key === 'remove') {
@@ -1428,48 +1759,45 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   }
 
   const toggleRow = (id) => setSelected((sel) => (sel.includes(id) ? sel.filter((i) => i !== id) : [...sel, id]));
-  const COLS = 'grid-template-columns:26px 2fr 1.2fr 1fr .7fr .8fr 1.2fr 92px';
+  // Last seen and Tags only get a column when someone on the roster has one.
+  const showLast = p.people.some((x) => lastSeen(stored, x));
+  const showTags = p.people.some((x) => x.tags && x.tags.length);
+  const COLS = `grid-template-columns:20px minmax(0,2.2fr) minmax(0,1.2fr) 112px 56px${showLast ? ' 80px' : ''}${showTags ? ' minmax(0,1fr)' : ''} 98px`;
 
   const rowActions = (x) => (
-    <div style={S('display:flex;gap:6px;justify-content:flex-end;flex:none')}>
-      <Pressable label={`Add a note on ${x.n}`} onClick={() => noteFor(x)} className={cx(H.secondary, H.press)} style={S(SMALL_BTN)}>
+    <div style={S('display:flex;gap:4px;align-items:center;justify-content:flex-end;flex:none')}>
+      <Pressable label={`Add a note on ${x.n}`} onClick={() => noteFor(x)} className={cx(H.secondary, H.press)} style={S(ROW_BTN)}>
         Note
       </Pressable>
-      <Pressable label={`More actions for ${x.n}`} expanded={false} onClick={(e) => personMenu(e, x)} className={cx(H.secondary, H.press)} style={S(`${SMALL_BTN};padding:0 8px`)}>
-        <Icon name="more" size={15} />
+      <Pressable label={`More actions for ${x.n}`} expanded={false} onClick={(e) => personMenu(e, x)} className={cx('vu-iconbtn-sm', H.press)} style={S('width:36px;height:36px;cursor:pointer')}>
+        <Icon name="more" size={18} />
       </Pressable>
     </div>
   );
 
-  const statusChip = (x) => {
-    const t = tone(PERSON_TONE, x.st);
-    return <span style={S(`display:inline-block;padding:5px 9px;border-radius:7px;background:${t.stBg};font:500 12px/1 Geist;color:${t.stColor}`)}>{statusLabel(x.st)}</span>;
-  };
+  const statusChip = (x) => <StatusText tone={PERSON_PILL[x.st] || 'mute'}>{statusLabel(x.st)}</StatusText>;
 
   return (
-    <div style={S('margin-top:22px')}>
-      <p style={S('margin:0;padding:2px 2px 0;font:450 14px/1.4 Geist;color:#57504A')}>{summary}</p>
-
+    <div style={S('margin-top:32px')}>
       {matches.length ? (
-        <section aria-label="Possible matches on your roster" style={S('margin-top:16px;padding:16px 20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3;display:flex;flex-direction:column;gap:14px')}>
+        <section aria-label="Possible matches on your roster" style={S(`margin:-8px 0 40px;display:flex;flex-direction:column;border-bottom:1px solid ${C.line}`)}>
           {matches.map((m, i) => {
             const where = schoolLine(m.row);
             return (
-              <div key={m.appId} className="vu-stack vu-stack-gap" style={s('display:flex;align-items:center;justify-content:space-between;gap:16px', i ? 'padding-top:14px;border-top:1px solid #EFE3DC' : '')}>
-                <div style={S('min-width:0')}>
-                  <h2 style={S(`margin:0;${LABEL}`)}>Same person?</h2>
-                  <p style={S('margin:6px 0 0;font:450 13px/1.5 Geist;color:#57504A')}>
+              <div key={m.appId} className="vu-stack vu-stack-gap" style={s('display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 0', i ? `border-top:1px solid ${C.line}` : '')}>
+                <div style={S('min-width:0;max-width:640px')}>
+                  <h2 style={S(`${H3};display:flex;align-items:center;gap:8px`)}>
+                    <span aria-hidden="true" style={S(`color:${C.waiting};display:inline-flex`)}><Icon name="alert" size={16} /></span>
+                    Same person?
+                  </h2>
+                  <p style={S(`margin:6px 0 0;${META}`)}>
                     {m.added.n} joined through your join link. Your roster already has someone you added with that name{where ? ` (${where})` : ''}.
                     Link them only if it's the same student. Their account gets that row's hours, notes and attendance.
                   </p>
                 </div>
-                <div style={S('display:flex;gap:9px;flex:none;flex-wrap:wrap')}>
-                  <Pressable label={`Link to ${m.row.n}`} onClick={() => linkMatch(m)} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-                    Link to {m.row.n}
-                  </Pressable>
-                  <Pressable label={`Keep ${m.row.n} separate`} onClick={() => keepSeparate(m)} className={cx(H.secondary, H.press)} style={S(BTN_SECONDARY)}>
-                    Keep separate
-                  </Pressable>
+                <div style={S('display:flex;gap:10px;flex:none;flex-wrap:wrap')}>
+                  <Button variant="outline" size="sm" onClick={() => keepSeparate(m)} aria-label={`Keep ${m.row.n} separate`}>Keep separate</Button>
+                  <Button variant="dark" size="sm" onClick={() => linkMatch(m)} aria-label={`Link to ${m.row.n}`}>Link to {m.row.n}</Button>
                 </div>
               </div>
             );
@@ -1477,89 +1805,91 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         </section>
       ) : null}
 
-      <div style={S('margin-top:16px;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-        <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-          <div style={S('display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap;min-width:0')}>
-            <input
-              type="search"
-              value={draftQuery}
-              placeholder="Search name, school or tag"
-              aria-label="Search people"
-              onChange={(e) => {
-                setDraftQuery(e.target.value);
-                setParam({ pq: e.target.value, ppage: null });
-              }}
-              className={H.input}
-              style={S('flex:1 1 220px;max-width:340px;min-width:0;width:100%;height:38px;padding:0 13px;border-radius:10px;border:1px solid #E8E1D9;background:#FCFAF8;font:450 14px/1.15 Geist;color:#1A1714;transition:border-color .16s ease')}
-            />
-            <Pressable
-              label={`Filter by status, now ${status === 'all' ? 'all statuses' : statusLabel(status)}`}
-              expanded={false}
-              onClick={(e) => menuFromEvent(e, STATUSES.map((v) => ({ key: v, label: v === 'all' ? 'All statuses' : statusLabel(v), checked: v === status })), (v) => setParam({ pstatus: v === 'all' ? null : v, ppage: null }))}
-              className={cx(H.secondary, H.press)}
-              style={S(FILTER_BTN)}
-            >
-              {status === 'all' ? 'All statuses' : statusLabel(status)}
-              <Icon name="chevron-down" size={13} />
-            </Pressable>
-            <Pressable
-              label={`Filter by role, now ${role === 'all' ? 'all roles' : role}`}
-              expanded={false}
-              onClick={(e) => menuFromEvent(e, roles.map((v) => ({ key: v, label: v === 'all' ? 'All roles' : v, checked: v === role })), (v) => setParam({ prole: v === 'all' ? null : v, ppage: null }))}
-              className={cx(H.secondary, H.press)}
-              style={S(FILTER_BTN)}
-            >
-              {role === 'all' ? 'All roles' : role}
-              <Icon name="chevron-down" size={13} />
-            </Pressable>
-          </div>
-          <div style={S('display:flex;gap:9px;flex:none;flex-wrap:wrap')}>
-            {selected.length ? (
-              <Pressable label={`Actions for ${selected.length} selected`} expanded={false} onClick={bulkMenu} className={cx(H.secondary, H.press)} style={S(BTN_SECONDARY)}>
-                {selected.length} selected
-                <Icon name="chevron-down" size={13} />
-              </Pressable>
-            ) : (
-              <Pressable label="Import from a list" onClick={importList} className={cx(H.secondary, H.press)} style={S(BTN_SECONDARY)}>
-                <Icon name="upload" size={14} />
-                Import from a list
-              </Pressable>
-            )}
-            <Pressable label="Add student" onClick={addStudent} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-              <Icon name="plus" size={14} />
-              Add student
-            </Pressable>
-          </div>
+      <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+        <div style={S('min-width:0')}>
+          <h2 style={S(H2)}>Roster</h2>
+          <p style={S(`margin:6px 0 0;${META}`)}>{summary}</p>
         </div>
+        <div style={S('display:flex;gap:10px;flex:none;flex-wrap:wrap')}>
+          {selected.length ? (
+            <Button variant="outline" size="sm" onClick={bulkMenu} aria-label={`Actions for ${selected.length} selected`} aria-haspopup="menu" aria-expanded="false">
+              {selected.length} selected
+              <Icon name="chevron-down" size={14} />
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" icon="upload" onClick={importList}>Import from a list</Button>
+          )}
+          <Button variant="primary" size="sm" icon="plus" onClick={addStudent}>Add student</Button>
+        </div>
+      </div>
 
+      <div style={S('margin-top:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap')}>
+        <div style={S('position:relative;flex:1 1 240px;max-width:360px;min-width:0')}>
+          <span aria-hidden="true" style={S(`position:absolute;left:14px;top:50%;transform:translateY(-50%);color:${C.ink3};display:grid`)}><Icon name="search" size={17} /></span>
+          <input
+            type="search"
+            value={draftQuery}
+            placeholder="Search name, school or tag"
+            aria-label="Search people"
+            onChange={(e) => {
+              setDraftQuery(e.target.value);
+              setParam({ pq: e.target.value, ppage: null });
+            }}
+            className={H.input}
+            style={S(`width:100%;height:40px;padding:0 14px 0 40px;border-radius:${R.pill};border:1px solid ${C.line2};background:#fff;font:400 14px/1.2 ${F.body};color:${C.ink};transition:border-color .16s ease`)}
+          />
+        </div>
+        <Pressable
+          label={`Filter by status, now ${status === 'all' ? 'all statuses' : statusLabel(status)}`}
+          expanded={false}
+          onClick={(e) => menuFromEvent(e, STATUSES.map((v) => ({ key: v, label: v === 'all' ? 'All statuses' : statusLabel(v), checked: v === status })), (v) => setParam({ pstatus: v === 'all' ? null : v, ppage: null }))}
+          className={cx(H.secondary, H.press)}
+          style={S(`${FILTER_BTN}${status !== 'all' ? `;background:${C.ink};border:1px solid ${C.ink};color:#fff` : ''}`)}
+        >
+          {status === 'all' ? 'All statuses' : statusLabel(status)}
+          <Icon name="chevron-down" size={14} />
+        </Pressable>
+        <Pressable
+          label={`Filter by role, now ${role === 'all' ? 'all roles' : role}`}
+          expanded={false}
+          onClick={(e) => menuFromEvent(e, roles.map((v) => ({ key: v, label: v === 'all' ? 'All roles' : v, checked: v === role })), (v) => setParam({ prole: v === 'all' ? null : v, ppage: null }))}
+          className={cx(H.secondary, H.press)}
+          style={S(`${FILTER_BTN}${role !== 'all' ? `;background:${C.ink};border:1px solid ${C.ink};color:#fff` : ''}`)}
+        >
+          {role === 'all' ? 'All roles' : role}
+          <Icon name="chevron-down" size={14} />
+        </Pressable>
+      </div>
+
+      <div style={S('margin-top:16px')}>
         {rows.length && narrow ? (
-          <div>
-            <label style={S('display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:450 13px/1 Geist;color:#57504A;cursor:pointer')}>
-              <input type="checkbox" checked={allOnPage} onChange={() => setSelected(allOnPage ? [] : rows.map((r) => r.id))} style={S('appearance:auto;-webkit-appearance:checkbox;width:16px;height:16px;accent-color:#C2603C;cursor:pointer')} />
+          <div style={S(`border-top:1px solid ${C.line}`)}>
+            <label style={S(`display:flex;align-items:center;gap:12px;padding:12px 0;${RULE};${SMALL};cursor:pointer`)}>
+              <input type="checkbox" checked={allOnPage} onChange={() => setSelected(allOnPage ? [] : rows.map((r) => r.id))} style={S(CHECK)} />
               Select all on this page
             </label>
             {rows.map((x) => {
               const on = selected.includes(x.id);
               return (
-                <div key={x.id} style={s('padding:14px 20px;border-bottom:1px solid #F1EBE4', on ? 'background:#FAF6F3' : '')}>
+                <div key={x.id} style={s(`padding:14px 0;${RULE}`, on ? `background:${C.mist};margin:0 -16px;padding:14px 16px` : '')}>
                   <div style={S('display:flex;align-items:center;gap:12px')}>
-                    <input type="checkbox" aria-label={`Select ${x.n}`} checked={on} onChange={() => toggleRow(x.id)} style={S('appearance:auto;-webkit-appearance:checkbox;width:16px;height:16px;flex:none;accent-color:#C2603C;cursor:pointer')} />
-                    <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} style={S('display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0;flex:1')}>
-                      <div style={S('width:34px;height:34px;border-radius:50%;overflow:hidden;flex:none')}>
+                    <input type="checkbox" aria-label={`Select ${x.n}`} checked={on} onChange={() => toggleRow(x.id)} style={S(CHECK)} />
+                    <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} style={S('display:flex;align-items:center;gap:12px;cursor:pointer;min-width:0;flex:1')}>
+                      <span className="vu-row-avatar">
                         <Avatar name={x.n} fs={13} />
-                      </div>
+                      </span>
                       <div style={S('min-width:0')}>
-                        <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{x.n}</div>
-                        <div className="vu-trunc" style={S('margin-top:3px;font:450 12px/1.2 Geist;color:#6B635C')}>{schoolLine(x)}</div>
+                        <div className="vu-trunc" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{x.n}</div>
+                        <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{schoolLine(x)}</div>
                       </div>
                     </Pressable>
                     {rowActions(x)}
                   </div>
-                  <div style={S('margin-top:10px;padding-left:28px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font:450 12px/1.3 Geist;color:#57504A')}>
+                  <div style={S(`margin-top:10px;padding-left:28px;display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;${SMALL}`)}>
                     {statusChip(x)}
-                    <span>{x.role}</span>
-                    <span style={S(`font-family:${MONO}`)}>{fmtHrs(x.hrs)} hrs</span>
-                    {x.last ? <span style={S('color:#6B635C')}>Last seen {x.last}</span> : null}
+                    <span style={S(`color:${C.ink}`)}>{x.role}</span>
+                    <span style={S(`color:${C.ink};font-weight:600;${NUM}`)}>{hrsText(x.hrs)}</span>
+                    {lastSeen(stored, x) ? <span>Last seen {lastSeen(stored, x)}</span> : null}
                   </div>
                 </div>
               );
@@ -1568,17 +1898,20 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         ) : rows.length ? (
           <div className="vu-table-wrap" style={S('position:relative')}>
             <div role="table" aria-label="Roster">
-              <div role="row" style={S(`display:grid;${COLS};gap:12px;padding:12px 20px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:500 12px/1.2 Geist;color:#6B635C`)}>
+              <div role="row" style={S(`display:grid;${COLS};gap:16px;align-items:center;padding:0 0 10px;border-bottom:1px solid ${C.line};${TH}`)}>
                 <div role="columnheader">
                   <input
                     type="checkbox"
                     aria-label="Select all people on this page"
                     checked={allOnPage}
                     onChange={() => setSelected(allOnPage ? [] : rows.map((r) => r.id))}
-                    style={S('appearance:auto;-webkit-appearance:checkbox;width:15px;height:15px;accent-color:#C2603C;cursor:pointer')}
+                    style={S(CHECK)}
                   />
                 </div>
-                <div role="columnheader">Student</div><div role="columnheader">Role</div><div role="columnheader">Status</div><div role="columnheader">Hours</div><div role="columnheader">Last seen</div><div role="columnheader">Tags</div><div role="columnheader"><span className="vu-sr">Actions</span></div>
+                <div role="columnheader">Student</div><div role="columnheader">Role</div><div role="columnheader">Status</div><div role="columnheader" style={S('text-align:right')}>Hours</div>
+                {showLast ? <div role="columnheader">Last seen</div> : null}
+                {showTags ? <div role="columnheader">Tags</div> : null}
+                <div role="columnheader"><span className="vu-sr">Actions</span></div>
               </div>
               {rows.map((x) => {
                 const on = selected.includes(x.id);
@@ -1587,31 +1920,31 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
                     key={x.id}
                     role="row"
                     className={H.row}
-                    style={s(`display:grid;${COLS};gap:12px;padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease`, on ? 'background:#FAF6F3' : '')}
+                    style={s(`display:grid;${COLS};gap:16px;padding:12px 0;${RULE};align-items:center;transition:background .16s ease`, on ? `background:${C.mist}` : '')}
                   >
                     <div role="cell">
-                      <input type="checkbox" aria-label={`Select ${x.n}`} checked={on} onChange={() => toggleRow(x.id)} style={S('appearance:auto;-webkit-appearance:checkbox;width:15px;height:15px;border-radius:4px;accent-color:#C2603C;cursor:pointer')} />
+                      <input type="checkbox" aria-label={`Select ${x.n}`} checked={on} onChange={() => toggleRow(x.id)} style={S(CHECK)} />
                     </div>
                     <div role="cell" style={S('min-width:0')}>
-                    <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} style={S('display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0')}>
-                      <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <Avatar name={x.n} fs={12} />
-                      </div>
-                      <div style={S('min-width:0')}>
-                        <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{x.n}</div>
-                        <div className="vu-trunc" style={S('margin-top:3px;font:450 12px/1.2 Geist;color:#6B635C')}>{schoolLine(x)}</div>
-                      </div>
-                    </Pressable>
+                      <Pressable label={`Open ${x.n}'s profile`} onClick={() => personProfile(x)} className="vu-lead-person" style={S('display:flex;align-items:center;gap:12px;cursor:pointer;min-width:0')}>
+                        <span className="vu-row-avatar">
+                          <Avatar name={x.n} fs={13} />
+                        </span>
+                        <div style={S('min-width:0')}>
+                          <div className="vu-trunc" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{x.n}</div>
+                          <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{schoolLine(x)}</div>
+                        </div>
+                      </Pressable>
                     </div>
-                    <div role="cell" className="vu-trunc" style={S('font:450 13px/1.2 Geist;color:#332D28')}>{x.role}</div>
+                    <div role="cell" className="vu-trunc" style={S(`font:400 14px/1.3 ${F.body};color:${C.ink}`)}>{x.role}</div>
                     <div role="cell">{statusChip(x)}</div>
-                    <div role="cell" style={S(`font:500 13px/1 ${MONO};color:#332D28`)}>{fmtHrs(x.hrs)}</div>
-                    <div role="cell" style={S('font:450 12px/1.2 Geist;color:#6B635C')}>{x.last}</div>
-                    <div role="cell" style={S('display:flex;gap:5px;flex-wrap:wrap')}>
-                      {x.tags.map((t2) => (
-                        <span key={t2} style={S('padding:4px 7px;border-radius:6px;background:#F6F2EE;font:500 11px/1 Geist;color:#57504A')}>{t2}</span>
-                      ))}
-                    </div>
+                    <div role="cell" style={S(`text-align:right;font:600 15px/1 ${F.body};color:${C.ink};${NUM}`)}>{fmtHrs(x.hrs)}</div>
+                    {showLast ? <div role="cell" style={S(`${SMALL};${NUM}`)}>{lastSeen(stored, x) || 'Not yet'}</div> : null}
+                    {showTags ? (
+                      <div role="cell" className="vu-trunc" style={S(`min-width:0;${SMALL}`)} title={(x.tags || []).join(', ')}>
+                        {(x.tags || []).join(', ')}
+                      </div>
+                    ) : null}
                     <div role="cell">{rowActions(x)}</div>
                   </div>
                 );
@@ -1619,7 +1952,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
             </div>
           </div>
         ) : (
-          <div style={S('padding:8px 20px')}>
+          <div style={S(`border-top:1px solid ${C.line}`)}>
             <EmptyState
               compact
               icon={filtering ? 'search' : 'users'}
@@ -1636,7 +1969,7 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
           </div>
         )}
 
-        <div style={S('padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font:450 13px/1.2 Geist;color:#6B635C')}>
+        <div style={S(`padding:16px 0 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${SMALL};${NUM}`)}>
           <div>
             {rows.length ? `${(safePage - 1) * PAGE + 1}-${(safePage - 1) * PAGE + rows.length}` : '0'} of {plural(filtered.length, 'person', 'people')}
             {filtered.length !== p.people.length ? ` (filtered from ${p.people.length})` : ''}
@@ -1648,8 +1981,9 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
                 disabled={safePage <= 1}
                 onClick={() => setParam({ ppage: safePage - 1 })}
                 className={cx(safePage > 1 ? H.secondary : '', H.press)}
-                style={s(SMALL_BTN, `cursor:${safePage > 1 ? 'pointer' : 'default'}`, safePage <= 1 ? 'opacity:.45' : '')}
+                style={s(ROW_BTN, `cursor:${safePage > 1 ? 'pointer' : 'default'}`, safePage <= 1 ? 'opacity:.45' : '')}
               >
+                <Icon name="chevron-left" size={14} />
                 Previous
               </Pressable>
               <Pressable
@@ -1657,9 +1991,10 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
                 disabled={safePage >= pages}
                 onClick={() => setParam({ ppage: safePage + 1 })}
                 className={cx(safePage < pages ? H.secondary : '', H.press)}
-                style={s(SMALL_BTN, `cursor:${safePage < pages ? 'pointer' : 'default'}`, safePage >= pages ? 'opacity:.45' : '')}
+                style={s(ROW_BTN, `cursor:${safePage < pages ? 'pointer' : 'default'}`, safePage >= pages ? 'opacity:.45' : '')}
               >
                 Next
+                <Icon name="chevron-right" size={14} />
               </Pressable>
             </div>
           ) : null}
@@ -1707,12 +2042,10 @@ function TeamRoleForm({ api, project, person, app }) {
   if (!roles.length) {
     return (
       <div>
-        <div style={S('font:450 14px/1.5 Geist;color:#57504A')}>This team has no roles yet. Add one on the Tasks tab first.</div>
-        <div style={S('margin-top:18px;display:flex;justify-content:flex-end')}>
-          <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-            Close
-          </Pressable>
-        </div>
+        <p style={S(`margin:0;${META}`)}>This team has no roles yet. Add one on the Tasks tab first.</p>
+        <ModalActions>
+          <Button variant="outline" onClick={() => api.close()}>Close</Button>
+        </ModalActions>
       </div>
     );
   }
@@ -1720,97 +2053,78 @@ function TeamRoleForm({ api, project, person, app }) {
   return (
     <div>
       <Select label="Team role" value={roleId} options={[{ v: '', l: NO_TEAM_ROLE }, ...roles.map((r) => ({ v: r.id, l: r.name }))]} onChange={setRoleId} />
-      {err ? <div role="alert" style={S('margin-top:10px;font:450 13px/1.4 Geist;color:#A8482A')}>{err}</div> : null}
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-          Cancel
-        </Pressable>
-        <Pressable label="Save role" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={s(MODAL_PRIMARY, busy ? 'opacity:.6;cursor:default' : '')}>
-          {busy ? 'Saving role' : 'Save role'}
-        </Pressable>
-      </div>
+      {err ? <div role="alert" style={S(`margin-top:10px;font:500 13px/1.4 ${F.body};color:${C.emberDeep}`)}>{err}</div> : null}
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" busy={busy} onClick={save} aria-label="Save role">{busy ? 'Saving role' : 'Save role'}</Button>
+      </ModalActions>
     </div>
   );
 }
 
-function PersonProfile({ api, project, person, onNote, onRole }) {
-  const st = tone(PERSON_TONE, person.st);
+function PersonProfile({ project, person, onNote, onRole, onMessage }) {
   const facts = [
     { l: isTeam(project) ? 'Role' : 'Position', v: person.role },
     { l: 'Hours', v: `${fmtHrs(person.hrs)} hrs` },
-    { l: 'Last seen', v: person.last },
+    { l: 'Last seen', v: lastSeen(project, person) },
   ].filter((f) => f.v);
-  const flag = (ok, yes, no) => (
-    <span style={S(`display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:${ok ? '#EAF3EC' : '#FDF3E7'};font:500 12px/1 Geist;color:${ok ? '#3F6B4E' : '#8A5A20'}`)}>
-      <Icon name={ok ? 'check' : 'alert'} size={13} />
-      {ok ? yes : no}
-    </span>
-  );
+  const flag = (ok, yes, no) => <StatusText tone={ok ? 'ok' : 'wait'}>{ok ? yes : no}</StatusText>;
   return (
-    <div style={S('display:flex;flex-direction:column;gap:16px')}>
+    <div style={S('display:flex;flex-direction:column;gap:18px')}>
       <div style={S('display:flex;align-items:center;gap:14px')}>
-        <div style={S('width:52px;height:52px;border-radius:50%;overflow:hidden;flex:none')}>
-          <Avatar name={person.n} fs={18} />
+        <div style={S('width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none')}>
+          <Avatar name={person.n} fs={16} />
         </div>
-        <div style={S('min-width:0;flex:1')}>
-          <div style={S('font:600 18px/1.2 Geist;letter-spacing:-0.02em')}>{person.n}</div>
-          <div style={S('margin-top:4px;font:450 13px/1.3 Geist;color:#6B635C')}>{schoolLine(person)}</div>
-        </div>
-        <span style={S(`flex:none;padding:5px 9px;border-radius:7px;background:${st.stBg};font:500 12px/1 Geist;color:${st.stColor}`)}>{statusLabel(person.st)}</span>
+        <div style={S(`min-width:0;flex:1;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>{schoolLine(person)}</div>
+        <StatusPill tone={PERSON_PILL[person.st] || 'mute'} size="sm">{statusLabel(person.st)}</StatusPill>
       </div>
 
-      <dl style={S('margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;padding:12px 0;border-top:1px solid #F1EBE4;border-bottom:1px solid #F1EBE4')}>
+      <dl style={S(`margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;padding:14px 0;border-top:1px solid ${C.line};border-bottom:1px solid ${C.line}`)}>
         {facts.map((f) => (
           <div key={f.l}>
-            <dt style={S('font:450 12px/1.2 Geist;color:#6B635C')}>{f.l}</dt>
-            <dd style={S('margin:5px 0 0;font:600 15px/1.25 Geist;color:#1A1714')}>{f.v}</dd>
+            <dt style={S(SMALL)}>{f.l}</dt>
+            <dd style={S(`margin:4px 0 0;font:600 15px/1.25 ${F.body};color:${C.ink};${NUM}`)}>{f.v}</dd>
           </div>
         ))}
       </dl>
 
-      <div style={S('display:flex;gap:8px;flex-wrap:wrap')}>
-        {flag(person.consent, 'Parent consent form received', 'Parent consent form not received')}
+      <div style={S('display:flex;gap:10px 20px;flex-wrap:wrap')}>
+        {flag(person.consent, 'Guardian consent form received', 'Guardian consent form missing')}
         {flag(person.trained, 'Training done', 'Training not done')}
       </div>
 
       {person.tags.length ? (
         <div>
-          <div style={S('font:500 13px/1.2 Geist;color:#57504A')}>Tags</div>
-          <div style={S('margin-top:8px;display:flex;gap:6px;flex-wrap:wrap')}>
-            {person.tags.map((tg) => (
-              <span key={tg} style={S('padding:5px 9px;border-radius:7px;background:#F6F2EE;font:500 12px/1 Geist;color:#57504A')}>{tg}</span>
-            ))}
-          </div>
+          <div style={S(LABEL)}>Tags</div>
+          <p style={S(`margin:6px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink}`)}>{person.tags.join(', ')}</p>
         </div>
       ) : null}
 
       <div>
-        <div style={S('font:500 13px/1.2 Geist;color:#57504A')}>Notes</div>
+        <div style={S(LABEL)}>Notes</div>
         {person.notes.length ? (
-          <div style={S('margin-top:8px;display:flex;flex-direction:column;gap:8px')}>
+          <ul style={S(`margin:8px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
             {person.notes.map((nn, i) => (
-              <div key={nn.id || i} className="vu-break" style={S('padding:10px 12px;border-radius:10px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 13px/1.5 Geist;color:#332D28')}>
+              <li key={nn.id || i} className="vu-break" style={S(`padding:10px 0;${RULE};font:400 14px/1.5 ${F.body};color:${C.ink}`)}>
                 {typeof nn === 'string' ? nn : nn.t || nn.text}
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <div style={S('margin-top:8px;font:450 13px/1.4 Geist;color:#6B635C')}>No notes yet.</div>
+          <div style={S(`margin-top:6px;${SMALL}`)}>No notes yet.</div>
         )}
       </div>
 
-      <div style={S('display:flex;gap:10px;margin-top:4px;flex-wrap:wrap')}>
-        <Pressable label="Add a note" onClick={onNote} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
-          Add a note
-        </Pressable>
-        {onRole ? (
-          <Pressable label={person.role === NO_TEAM_ROLE ? `Give ${person.n} a role` : `Change ${person.n}'s role`} onClick={onRole} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-            {person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role'}
-          </Pressable>
+      <div style={S('display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end')}>
+        {onMessage ? (
+          <Button variant="outline" icon="message" onClick={onMessage} aria-label={`Message ${person.n}`}>Message</Button>
         ) : null}
-        <Pressable label="Close" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-          Close
-        </Pressable>
+        {onRole ? (
+          <Button variant="outline" onClick={onRole} aria-label={person.role === NO_TEAM_ROLE ? `Give ${person.n} a role` : `Change ${person.n}'s role`}>
+            {person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role'}
+          </Button>
+        ) : null}
+        <Button variant="primary" icon="edit" onClick={onNote}>Add a note</Button>
       </div>
     </div>
   );
@@ -1818,11 +2132,11 @@ function PersonProfile({ api, project, person, onNote, onRole }) {
 
 function ConsentCheck({ checked, onChange }) {
   return (
-    <label style={S('margin-top:14px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;font:450 13px/1.45 Geist;color:#332D28')}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={S('appearance:auto;-webkit-appearance:checkbox;margin-top:2px;width:16px;height:16px;flex:none;accent-color:#C2603C;cursor:pointer')} />
+    <label style={S(`margin-top:16px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;font:500 14px/1.45 ${F.body};color:${C.ink}`)}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={S(`${CHECK};margin-top:2px`)} />
       <span>
-        I already have their parent consent form
-        <span style={S('display:block;margin-top:2px;font-size:12px;color:#6B635C')}>Leave this off if you haven't collected it yet.</span>
+        I already have their guardian consent form
+        <span style={S(`display:block;margin-top:2px;${SMALL}`)}>Leave this off if you haven't collected it yet.</span>
       </span>
     </label>
   );
@@ -1848,7 +2162,7 @@ function AddPersonForm({ api, project }) {
     <div>
       <Field label="Full name" value={f.n} onChange={(v) => setF((x) => ({ ...x, n: v }))} placeholder="e.g. Ana Castillo" required error={err.n} maxLength={60} onEnter={submit} />
       <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-        <Field label="School" value={f.school} onChange={(v) => setF((x) => ({ ...x, school: v }))} placeholder="e.g. Riverside High" required error={err.school} maxLength={60} />
+        <Field label="School" value={f.school} onChange={(v) => setF((x) => ({ ...x, school: v }))} placeholder="e.g. Carmel High School" required error={err.school} maxLength={60} />
         <Select label="Grade" value={f.grade} options={GRADES} onChange={(v) => setF((x) => ({ ...x, grade: v }))} />
       </div>
       {project.positions.length ? (
@@ -1861,18 +2175,22 @@ function AddPersonForm({ api, project }) {
           />
         </div>
       ) : null}
+      {Number(f.grade) < 10 && !f.consent ? (
+        <div role="note" style={S(`margin-top:14px;display:flex;align-items:flex-start;gap:8px;padding:12px 14px;border-radius:${R.thumb};background:${C.waitingTint};font:500 13px/1.45 ${F.body};color:${C.waiting}`)}>
+          <span style={S('flex:none;margin-top:1px')}><Icon name="alert" size={15} /></span>
+          Students under 16 need a guardian consent form before their first shift. Tick the box below once you have it.
+        </div>
+      ) : null}
       <ConsentCheck checked={f.consent} onChange={(v) => setF((x) => ({ ...x, consent: v }))} />
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-          Cancel
-        </Pressable>
-        <Pressable label="Add student" onClick={submit} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
-          Add student
-        </Pressable>
-      </div>
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" onClick={submit}>Add student</Button>
+      </ModalActions>
     </div>
   );
 }
+
+const TEXTAREA = `display:block;width:100%;padding:12px 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.55 ${F.body};color:${C.ink}`;
 
 function ImportForm({ api, project }) {
   const [text, setText] = useState('');
@@ -1893,36 +2211,28 @@ function ImportForm({ api, project }) {
   };
   return (
     <div>
-      <label htmlFor="imp" style={S('font:500 13px/1 Geist;color:#57504A')}>Your list</label>
+      <label htmlFor="imp" style={S(`display:block;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Your list</label>
       <textarea
         id="imp"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={'Ana Castillo, Riverside High, 11\nMarcus Bell, Riverside High, 12'}
+        placeholder={'Ana Castillo, Carmel High School, 11\nMarcus Bell, Carmel High School, 12'}
         className={H.input}
-        style={S('margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:140px;font:450 14px/1.6 Geist;color:#332D28')}
+        style={S(`margin-top:8px;min-height:140px;${TEXTAREA}`)}
       />
       {parsed.length ? (
-        <div className="vu-hint" aria-live="polite" style={S(`margin-top:8px;font:450 13px/1.4 Geist;color:${bad ? '#8A5A20' : '#3F6B4E'}`)}>
+        <div className="vu-hint" aria-live="polite" style={S(`margin-top:8px;font:500 13px/1.4 ${F.body};color:${bad ? C.waiting : C.confirmed}`)}>
           {bad
             ? `${valid.length} of ${plural(parsed.length, 'row')} ready. Each row needs a full name, a school and a grade from 6 to 12.`
             : `${plural(valid.length, 'row')} ready to import.`}
         </div>
       ) : null}
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-          Cancel
-        </Pressable>
-        <Pressable
-          label={valid.length ? `Import ${plural(valid.length, 'student')}` : 'Import students'}
-          disabled={!valid.length}
-          onClick={submit}
-          className={cx(H.primary, H.press)}
-          style={s(MODAL_PRIMARY, !valid.length ? 'opacity:.5;cursor:default' : '')}
-        >
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" disabled={!valid.length} aria-disabled={valid.length ? undefined : 'true'} onClick={submit}>
           {valid.length ? `Import ${plural(valid.length, 'student')}` : 'Import students'}
-        </Pressable>
-      </div>
+        </Button>
+      </ModalActions>
     </div>
   );
 }
@@ -1938,14 +2248,14 @@ function NoteForm({ api, project, person }) {
   return (
     <div>
       {person.notes.length ? (
-        <div style={S('margin-bottom:16px;display:flex;flex-direction:column;gap:8px;max-height:180px;overflow:auto')}>
+        <ul style={S(`margin:0 0 16px;padding:0;list-style:none;max-height:180px;overflow:auto;border-top:1px solid ${C.line}`)}>
           {person.notes.map((n, i) => (
-            <div key={n.id || i} style={S('padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4')}>
-              <div className="vu-break" style={S('font:450 13px/1.5 Geist;color:#332D28')}>{typeof n === 'string' ? n : n.t || n.text}</div>
-              {n.w ? <div style={S('margin-top:6px;font:450 12px/1 Geist;color:#6B635C')}>{sentence(n.w)}</div> : null}
-            </div>
+            <li key={n.id || i} style={S(`padding:10px 0;${RULE}`)}>
+              <div className="vu-break" style={S(`font:400 14px/1.5 ${F.body};color:${C.ink}`)}>{typeof n === 'string' ? n : n.t || n.text}</div>
+              {n.w ? <div style={S(`margin-top:4px;${SMALL};color:${C.ink3}`)}>{sentence(n.w)}</div> : null}
+            </li>
           ))}
-        </div>
+        </ul>
       ) : null}
       <label htmlFor={`note-${person.id}`} className="vu-sr">Note</label>
       <textarea
@@ -1955,16 +2265,12 @@ function NoteForm({ api, project, person }) {
         maxLength={400}
         placeholder="e.g. Prefers the early shift. Great with the younger kids."
         className={H.input}
-        style={S('display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:100px;font:450 14px/1.55 Geist;color:#332D28')}
+        style={S(`min-height:100px;${TEXTAREA}`)}
       />
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-          Cancel
-        </Pressable>
-        <Pressable label="Save note" disabled={!text.trim()} onClick={save} className={cx(H.primary, H.press)} style={s(MODAL_PRIMARY, !text.trim() ? 'opacity:.5;cursor:default' : '')}>
-          Save note
-        </Pressable>
-      </div>
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" disabled={!text.trim()} aria-disabled={text.trim() ? undefined : 'true'} onClick={save}>Save note</Button>
+      </ModalActions>
     </div>
   );
 }
@@ -1972,6 +2278,53 @@ function NoteForm({ api, project, person }) {
 /* ---- positions ---------------------------------------------------------- */
 
 const REQUIREMENTS = ['Guardian consent', 'Media release', 'Food handling', 'Reading training', 'Transport form'];
+
+/** How to spot each requirement in a setup step or a project rule. */
+const REQ_MATCH = {
+  'Guardian consent': /consent/i,
+  'Media release': /media release|photo release/i,
+  'Food handling': /food (handling|safety)/i,
+  'Reading training': /reading training/i,
+  'Transport form': /transport/i,
+};
+
+/* Where a requirement applies on this project: positions that ask for it,
+   setup steps every volunteer finishes, and the project's own rules (the
+   consent rule for under-16s). Quality and Setup steps read the same data,
+   so the three tabs agree. */
+function requirementUse(p, r) {
+  const re = REQ_MATCH[r];
+  const positions = p.positions.filter((x) => (x.requirements || []).includes(r));
+  const steps = re ? pipelineFor(p).filter((st) => re.test(`${st.label || ''} ${st.note || ''}`)) : [];
+  const rules = re ? (p.rules || []).filter((t) => re.test(String(t))) : [];
+  const under16 = [...steps.map((st) => `${st.label} ${st.note || ''}`), ...rules].some((t) => /under[ -]?16/i.test(t));
+  let value = 'Not used';
+  if (positions.length) value = plural(positions.length, 'position');
+  else if (under16) value = 'Under 16';
+  else if (steps.length) value = 'Setup step';
+  else if (rules.length) value = 'Project rule';
+  const where = [
+    positions.length ? `Needed for ${positions.map((u) => u.t).join(', ')}.` : '',
+    steps.length ? `Setup step for every volunteer: ${steps.map((st) => st.label).join(', ')}.` : '',
+    rules.length ? `Project rule: ${rules.join('; ')}.` : '',
+  ].filter(Boolean).join(' ');
+  return { value, used: positions.length + steps.length + rules.length > 0, message: where || 'No position needs this yet. Add it when you edit a position.' };
+}
+
+/** "No training", "Required, 30 min training", "Food handling training". */
+function trainingText(v) {
+  const t = plainLabel(v).trim();
+  if (!t || /^none$/i.test(t)) return 'No training';
+  return /training$/i.test(t) ? t : `${t} training`;
+}
+
+/** "Applications open", "Applications open, 2 waiting", "Applications closed". */
+function appsText(p, pos) {
+  const label = positionAppsLabel(p, pos);
+  if (label === 'Closed') return 'Applications closed';
+  if (label === 'Open') return 'Applications open';
+  return `Applications open, ${label}`;
+}
 
 function Positions({ p }) {
   function editPosition(pos) {
@@ -1984,123 +2337,133 @@ function Positions({ p }) {
     });
   }
 
+  const sep = <span className="vu-sep" aria-hidden="true">{' · '}</span>;
+  // The rail lists only requirements this project uses; the rest get one line.
+  const reqs = REQUIREMENTS.map((r) => ({ r, use: requirementUse(p, r) }));
+  const used = reqs.filter((x) => x.use.used);
+  const unused = reqs.filter((x) => !x.use.used).map((x) => x.r);
+
   return (
-    <div className="vu-split" style={S('margin-top:22px;display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start')}>
-      <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;min-width:0')}>
-        <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Positions</h2>
-          <Pressable label="Add position" onClick={() => editPosition(null)} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-            <Icon name="plus" size={14} />
-            Add position
-          </Pressable>
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <section aria-labelledby="pos-h" style={S('min-width:0')}>
+        <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+          <h2 id="pos-h" style={S(H2)}>Positions</h2>
+          <Button variant="primary" size="sm" icon="plus" onClick={() => editPosition(null)}>Add position</Button>
         </div>
         {p.positions.length ? (
-          p.positions.map((x) => (
-            <div key={x.id} style={S('padding:18px 20px;border-bottom:1px solid #F1EBE4')}>
-              <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:16px')}>
-                <div style={S('min-width:0')}>
-                  <div style={S('display:flex;align-items:center;gap:9px;flex-wrap:wrap')}>
-                    <div style={S('font:600 16px/1.2 Geist;letter-spacing:-0.02em')}>{x.t}</div>
-                    <div style={S('padding:4px 8px;border-radius:6px;background:#F6F2EE;font:500 12px/1 Geist;color:#57504A')}>{positionLabel(x)} filled</div>
-                    {x.open ? null : <div style={S('padding:4px 8px;border-radius:6px;background:#F6F2EE;font:500 12px/1 Geist;color:#57504A')}>Closed</div>}
-                  </div>
-                  {x.note ? <div style={S('margin-top:7px;font:450 13px/1.4 Geist;color:#6B635C')}>{x.note}</div> : null}
-                </div>
-                <div style={S('display:flex;gap:8px;flex:none')}>
-                  <Pressable label={`Edit ${x.t}`} onClick={() => editPosition(x)} className={cx(H.secondary, H.press)} style={S(SMALL_BTN)}>
-                    Edit
-                  </Pressable>
-                  <Pressable
-                    label={`Duplicate ${x.t}`}
-                    onClick={() => {
-                      const copy = duplicatePosition(p.id, x.id);
-                      if (copy) toast({ title: 'Position duplicated', message: `${copy.t} is right below the original.`, tone: 'ok' });
-                    }}
-                    className={cx(H.secondary, H.press)}
-                    style={S(SMALL_BTN)}
-                  >
-                    Duplicate
-                  </Pressable>
-                </div>
-              </div>
-              <dl style={S('margin:14px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px')}>
-                {[
-                  { l: 'Minimum age', v: x.age },
-                  { l: 'Training', v: plainLabel(x.train) },
-                  { l: 'Commitment', v: x.commit },
-                  { l: 'Applications', v: positionAppsLabel(p, x) },
-                ].map((k) => (
-                  <div key={k.l}>
-                    <dt style={S('font:450 12px/1.2 Geist;color:#6B635C')}>{k.l}</dt>
-                    <dd style={S('margin:6px 0 0;font:500 13px/1.3 Geist;color:#1A1714')}>{k.v}</dd>
-                  </div>
-                ))}
-              </dl>
-              {(x.requirements || []).length ? (
-                <div style={S('margin-top:12px;font:450 12px/1.4 Geist;color:#57504A')}>Needs: {x.requirements.join(', ')}</div>
-              ) : null}
-            </div>
-          ))
-        ) : (
-          <div style={S('padding:8px 20px 20px')}>
-            <EmptyState compact icon="list" title="No positions yet" body="A position is what students apply for, like Reading tutor." cta="Add position" onCta={() => editPosition(null)} />
-          </div>
-        )}
-      </div>
-
-      <div style={S('display:flex;flex-direction:column;gap:14px;min-width:0')}>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Spots filled</h2>
-          {p.positions.length ? (
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
-              {p.positions.map((x) => {
-                const pct = x.slots ? Math.min(100, Math.round((x.filledCount / x.slots) * 100)) : 0;
-                return (
-                  <div key={x.id}>
-                    <div style={S('display:flex;justify-content:space-between;gap:10px;font:450 13px/1.2 Geist;color:#332D28')}>
-                      <span className="vu-trunc">{x.t}</span>
-                      <span style={S('flex:none;color:#57504A')}>{x.filledCount} of {x.slots}</span>
-                    </div>
-                    <div role="progressbar" aria-label={`${x.t} spots filled`} aria-valuemin={0} aria-valuemax={x.slots} aria-valuenow={x.filledCount} style={S('margin-top:7px;height:6px;border-radius:4px;background:#F1EBE4;overflow:hidden')}>
-                      <div style={s(`width:${pct}%`, 'height:100%;border-radius:4px;background:#C2603C;transition:width .36s cubic-bezier(.16,1,.3,1)')} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={S('margin-top:10px;font:450 13px/1.5 Geist;color:#6B635C')}>Add a position to track how many spots are filled.</div>
-          )}
-        </div>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Requirements</h2>
-          <div style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:7px')}>
-            {REQUIREMENTS.map((r) => {
-              const used = p.positions.filter((x) => (x.requirements || []).includes(r));
+          <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+            {p.positions.map((x) => {
+              const full = !!x.slots && x.filledCount >= x.slots;
               return (
-                <Pressable
-                  key={r}
-                  label={`Where ${r} is required`}
-                  onClick={() =>
-                    toast({
-                      title: r,
-                      message: used.length ? `Needed for ${used.map((u) => u.t).join(', ')}.` : 'No position needs this yet. Add it when you edit a position.',
-                      tone: used.length ? 'brand' : 'warn',
-                    })
-                  }
-                  className={cx(H.secondary, H.press)}
-                  style={S(`${SMALL_BTN};height:32px`)}
-                >
-                  {r}
-                  {used.length ? <span style={S(`font:500 11px/1 ${MONO};color:#A8482A`)}>{used.length}</span> : null}
-                </Pressable>
+                <li key={x.id} style={S(`padding:18px 0;${RULE}`)}>
+                  <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:16px')}>
+                    <div style={S('min-width:0;flex:1')}>
+                      <div style={S('display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap')}>
+                        <h3 style={S(`margin:0;font:600 17px/1.3 ${F.body};color:${C.ink}`)}>{x.t}</h3>
+                        {x.open ? null : <StatusText tone="mute">Closed</StatusText>}
+                      </div>
+                      {x.note ? <p style={S(`margin:4px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink}`)}>{x.note}</p> : null}
+                      <p style={S(`margin:6px 0 0;${META}`)}>
+                        <span
+                          role="progressbar"
+                          aria-label={`${x.t} spots filled`}
+                          aria-valuemin={0}
+                          aria-valuemax={x.slots}
+                          aria-valuenow={x.filledCount}
+                          aria-valuetext={`${x.filledCount} of ${x.slots} filled`}
+                          style={S(`font-weight:600;color:${full ? C.confirmed : C.ink};${NUM}`)}
+                        >
+                          {positionLabel(x)} filled
+                        </span>
+                        {sep}
+                        <span>Ages {x.age}</span>
+                        {sep}
+                        <span>{trainingText(x.train)}</span>
+                        {sep}
+                        <span>{x.commit}</span>
+                        {sep}
+                        <span>{appsText(p, x)}</span>
+                      </p>
+                      {(x.requirements || []).length ? (
+                        <p style={S(`margin:4px 0 0;${SMALL}`)}>Needs {x.requirements.join(', ')}</p>
+                      ) : null}
+                    </div>
+                    <div style={S('display:flex;gap:4px;align-items:center;flex:none')}>
+                      <Pressable label={`Edit ${x.t}`} onClick={() => editPosition(x)} className={cx(H.secondary, H.press)} style={S(ROW_BTN)}>
+                        Edit
+                      </Pressable>
+                      <Pressable
+                        label={`Duplicate ${x.t}`}
+                        title={`Duplicate ${x.t}`}
+                        onClick={() => {
+                          const copy = duplicatePosition(p.id, x.id);
+                          if (copy) toast({ title: 'Position duplicated', message: `${copy.t} is right below the original.`, tone: 'ok' });
+                        }}
+                        className={cx('vu-iconbtn-sm', H.press)}
+                        style={S('width:36px;height:36px;cursor:pointer')}
+                      >
+                        <Icon name="copy" size={18} />
+                      </Pressable>
+                    </div>
+                  </div>
+                </li>
               );
             })}
-          </div>
-        </div>
-      </div>
+          </ul>
+        ) : (
+          <EmptyState compact icon="list" title="No positions yet" body="A position is what students apply for, like Reading tutor." cta="Add position" onCta={() => editPosition(null)} />
+        )}
+      </section>
+
+      <aside aria-label="Positions summary" style={S('min-width:0;display:flex;flex-direction:column')}>
+        <section aria-labelledby="pos-req">
+          <h2 id="pos-req" style={S(H3)}>Requirements</h2>
+          <p style={S(`margin:6px 0 0;${SMALL}`)}>Forms and training a position or setup step asks for.</p>
+          {used.length ? (
+          <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+            {used.map(({ r, use }) => {
+              return (
+                <li key={r}>
+                  <button
+                    type="button"
+                    aria-label={`Where ${r} is required`}
+                    onClick={() =>
+                      toast({ title: r, message: use.message, tone: use.used ? 'brand' : 'warn' })
+                    }
+                    className={cx('vu-row', 'vu-row--nolead', H.press)}
+                    style={S(`width:100%;grid-template-columns:minmax(0,1fr) auto;padding:12px 0;background:none;border:0;border-bottom:1px solid ${C.line};text-align:left;font:inherit;cursor:pointer`)}
+                  >
+                    <span className="vu-row-t" style={S('font-weight:500')}>{r}</span>
+                    <span style={S(`${SMALL};${NUM};white-space:nowrap`)}>
+                      {use.value}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          ) : null}
+          {unused.length ? (
+            <p style={S(`margin:12px 0 0;${SMALL}`)}>
+              {unusedLine(unused)} Turn one on when you edit a position.
+            </p>
+          ) : null}
+        </section>
+      </aside>
     </div>
   );
+}
+
+/** "a, b and c". */
+function listJoin(items) {
+  if (items.length < 2) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/** "Media release, food handling and transport form aren't used." */
+function unusedLine(names) {
+  const list = listJoin(names.map((r, i) => (i ? r.toLowerCase() : r)));
+  return `${list} ${names.length === 1 ? "isn't" : "aren't"} used.`;
 }
 
 const TRAINING_OPTS = ['None', 'Required · 15 min', 'Required · 30 min', 'Required · 45 min', 'Food handling'];
@@ -2147,7 +2510,7 @@ function PositionForm({ api, project, pos }) {
         <Field label="What they do" value={f.note} onChange={(v) => setF((x) => ({ ...x, note: v }))} maxLength={90} placeholder="e.g. Read picture books with 1st graders" />
       </div>
       <div style={S('margin-top:16px')}>
-        <div style={S('font:500 13px/1 Geist;color:#57504A')}>Requirements</div>
+        <div style={S(`font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Requirements</div>
         <div style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
           {REQUIREMENTS.map((r) => (
             <Chip
@@ -2163,44 +2526,38 @@ function PositionForm({ api, project, pos }) {
           ))}
         </div>
       </div>
-      <label style={S('margin-top:16px;display:flex;align-items:center;gap:10px;cursor:pointer;font:450 13px/1.3 Geist;color:#332D28')}>
-        <input type="checkbox" checked={f.open} onChange={(e) => setF((x) => ({ ...x, open: e.target.checked }))} style={S('appearance:auto;-webkit-appearance:checkbox;width:16px;height:16px;accent-color:#C2603C;cursor:pointer')} />
+      <label style={S(`margin-top:16px;display:flex;align-items:center;gap:10px;cursor:pointer;font:500 14px/1.3 ${F.body};color:${C.ink}`)}>
+        <input type="checkbox" checked={f.open} onChange={(e) => setF((x) => ({ ...x, open: e.target.checked }))} style={S(CHECK)} />
         Open for applications
       </label>
-      <div style={S('margin-top:18px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap')}>
-        {pos ? (
-          <Pressable
-            label={`Delete ${pos.t}`}
-            onClick={async () => {
-              api.close();
-              const ok = await confirmDialog({
-                title: `Delete ${pos.t}?`,
-                body: 'The position comes off this project. Students already in it stay on the roster.',
-                confirmLabel: 'Delete position',
-              });
-              if (ok) {
-                deletePosition(project.id, pos.id);
-                toast({ title: 'Position deleted', message: pos.t, tone: 'ok' });
-              }
-            }}
-            className={cx(H.danger, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:40px;border-radius:11px;border:1px solid #EBD3C8;background:#fff;font:600 13px/1 Geist;color:#A8482A;cursor:pointer')}
-          >
-            <Icon name="trash" size={14} />
-            Delete position
-          </Pressable>
-        ) : (
-          <span />
-        )}
-        <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-          <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-            Cancel
-          </Pressable>
-          <Pressable label={pos ? 'Save position' : 'Add position'} onClick={save} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
-            {pos ? 'Save position' : 'Add position'}
-          </Pressable>
-        </div>
-      </div>
+      <ModalActions
+        left={
+          pos ? (
+            <Button
+              variant="danger"
+              icon="trash"
+              onClick={async () => {
+                api.close();
+                const ok = await confirmDialog({
+                  title: `Delete ${pos.t}?`,
+                  body: 'The position comes off this project. Students already in it stay on the roster.',
+                  confirmLabel: 'Delete position',
+                });
+                if (ok) {
+                  deletePosition(project.id, pos.id);
+                  toast({ title: 'Position deleted', message: pos.t, tone: 'ok' });
+                }
+              }}
+              aria-label={`Delete ${pos.t}`}
+            >
+              Delete position
+            </Button>
+          ) : null
+        }
+      >
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" onClick={save}>{pos ? 'Save position' : 'Add position'}</Button>
+      </ModalActions>
     </div>
   );
 }
@@ -2216,12 +2573,79 @@ function shiftLabel(x) {
   return sessionStatus(x);
 }
 
-function reminderOptions(label) {
-  const l = String(label || '').toLowerCase();
-  if (/text/.test(l)) return ['1 day before', '2 days before', '3 days before', 'Off'];
-  if (/email|guardian|parent/.test(l)) return ['3 days before', '1 week before', '2 weeks before', 'Off'];
-  if (/digest/.test(l)) return ['Mondays', 'Fridays', 'Monthly', 'Off'];
-  return ['1 day before', '2 days before', '1 week before', 'Off'];
+/* A reminder for the next shift, posted as a team update. It's the same
+   update the Messages tab posts, so it shows on the join page and on each
+   member's home. Nothing is texted or emailed, and the copy says so. */
+function ShiftReminder({ p, goTab }) {
+  const next = p.archived ? null : nextUpcomingShift(p);
+  const when = next ? `${next.d}, ${fmtTime(next.t)}` : '';
+  function open() {
+    openModal({
+      title: `Remind your team about ${next.d}`,
+      subtitle: "It posts as an update on your join page and on members' home. Nothing is texted or emailed.",
+      Body: function ReminderBody({ api }) {
+        return <ReminderForm api={api} p={p} ses={next} />;
+      },
+    });
+  }
+  return (
+    <section aria-labelledby="sh-rem" className="vu-rail-sec">
+      <h2 id="sh-rem" style={S(H3)}>Shift reminder</h2>
+      {!p.listingId ? (
+        <p style={S(`margin:8px 0 0;${SMALL}`)}>You can post reminders once your project is published.</p>
+      ) : p.archived ? (
+        <p style={S(`margin:8px 0 0;${SMALL}`)}>This project is archived, so there's no shift to remind people about.</p>
+      ) : !next ? (
+        <p style={S(`margin:8px 0 0;${SMALL}`)}>Add a shift and you can remind your team about it here.</p>
+      ) : (
+        <>
+          <p style={S(`margin:8px 0 0;${SMALL}`)}>
+            Next up is <span style={S(`color:${C.ink};font-weight:600`)}>{when}</span>. Post a reminder and your team sees it on their home.
+          </p>
+          <div style={S('margin-top:14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap')}>
+            <Button variant="outline" size="sm" icon="bell" onClick={open}>Post a reminder</Button>
+            <button type="button" onClick={() => goTab && goTab('messages')} className={cx('vu-link', H.press)} style={S(TEXT_LINK)}>
+              See updates
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ReminderForm({ api, p, ses }) {
+  const where = ses.loc || p.siteShort || p.site || '';
+  const [body, setBody] = useState(`Reminder: we're on for ${ses.d}, ${fmtTime(ses.t)}${where ? ` at ${where}` : ''}. Message me if you can't make it.`);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function post() {
+    if (busy) return;
+    if (!body.trim()) {
+      setErr('Enter the reminder.');
+      return;
+    }
+    setErr('');
+    setBusy(true);
+    const res = await postAnnouncement(p.listingId, body).catch((error) => ({ ok: false, error }));
+    setBusy(false);
+    if (!res.ok) {
+      console.error('[lead] could not post reminder', res.error);
+      toast({ title: "Couldn't post the reminder", message: 'Check your connection and try again.', tone: 'danger' });
+      return;
+    }
+    api.close();
+    toast({ title: 'Reminder posted', message: "It's on your join page and on members' home.", tone: 'ok' });
+  }
+  return (
+    <div style={S('display:flex;flex-direction:column;gap:14px')}>
+      <TextArea label="Reminder" value={body} onChange={setBody} maxLength={1000} error={err} required />
+      <ModalActions>
+        <Button variant="outline" onClick={() => api.close()}>Go back</Button>
+        <Button variant="primary" icon="send" onClick={post} busy={busy}>{busy ? 'Posting' : 'Post reminder'}</Button>
+      </ModalActions>
+    </div>
+  );
 }
 
 /** "Rosa Quintero, Lee Park and 3 more": at most `max` names on a row. */
@@ -2236,16 +2660,16 @@ function nameList(apps, max = 4) {
 function SignUpNames({ su, style = '' }) {
   if (!su || (!su.going.length && !su.waiting.length)) return null;
   return (
-    <div style={S(`display:flex;flex-direction:column;gap:3px;font:450 12px/1.4 Geist;color:#57504A;min-width:0;${style}`)}>
+    <div style={S(`display:flex;flex-direction:column;gap:3px;${SMALL};min-width:0;${style}`)}>
       {su.going.length ? (
         <div className="vu-trunc">
-          <span style={S('color:#1A1714;font-weight:500')}>Signed up: </span>
+          <span style={S(`color:${C.ink};font-weight:600`)}>Signed up: </span>
           {nameList(su.going)}
         </div>
       ) : null}
       {su.waiting.length ? (
         <div className="vu-trunc">
-          <span style={S('color:#8A5A20;font-weight:500')}>Waiting on you: </span>
+          <span style={S(`color:${C.waiting};font-weight:600`)}>Waiting on you: </span>
           {nameList(su.waiting)}
         </div>
       ) : null}
@@ -2286,6 +2710,11 @@ function Shifts({ p, goTab, apps = [] }) {
     toast({ title: 'Check-in code changed', message: `The new code is ${code}. Share it before the next shift.`, tone: 'ok' });
   }
 
+  async function copyCode() {
+    const ok = await copyText(String(p.checkinCode || ''));
+    toast(ok ? { title: 'Check-in code copied', message: `${p.checkinCode}. Share it with your team before the shift.`, tone: 'ok', timeout: 2200 } : { title: 'Copy this code', message: String(p.checkinCode || ''), tone: 'warn' });
+  }
+
   async function repeat() {
     if (!p.sessions.length) {
       toast({ title: 'Add a shift first', message: 'Repeat weekly copies your last shift.', tone: 'warn' });
@@ -2303,195 +2732,140 @@ function Shifts({ p, goTab, apps = [] }) {
     toast({ title: `Added ${plural(n, 'shift')}`, message: 'They’re drafts. Edit one to open it.', tone: 'ok' });
   }
 
-  function reminder(r) {
-    const options = Array.from(new Set([...reminderOptions(r.l), r.v].filter(Boolean)));
-    openModal({
-      title: r.l,
-      subtitle: 'Pick when you plan to send it. VolunteerU doesn’t send these for you yet.',
-      Body: function RemBody({ api }) {
-        return (
-          <div role="radiogroup" aria-label={r.l} style={S('display:flex;flex-direction:column;gap:10px')}>
-            {options.map((o) => (
-              <Pressable
-                key={o}
-                role="radio"
-                aria-checked={r.v === o}
-                label={o}
-                onClick={() => {
-                  setReminder(p.id, r.l, o);
-                  api.close();
-                  toast({ title: 'Reminder plan saved', message: `${r.l}, ${o.toLowerCase()}.`, tone: 'ok' });
-                }}
-                className={cx(H.chip, H.press)}
-                style={s('padding:14px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between', `border:1px solid ${r.v === o ? '#C2603C' : '#E8E1D9'}`, `background:${r.v === o ? '#FAF6F3' : '#FCFAF8'}`)}
-              >
-                <span style={S('font:500 14px/1 Geist')}>{o}</span>
-                {r.v === o ? <span style={S('color:#C2603C')}><Icon name="check" size={15} /></span> : null}
-              </Pressable>
-            ))}
-          </div>
-        );
-      },
-    });
-  }
-
-  const COLS = 'grid-template-columns:1.1fr 1.2fr 1.7fr .8fr .9fr 70px';
+  /* Shifts at the project site don't repeat its name. Location shows only
+     on shifts held somewhere else, and its column only when one exists. */
+  const siteNames = new Set([p.site, p.siteShort].map((v) => String(v || '').trim().toLowerCase()).filter(Boolean));
+  const offSite = (loc) => {
+    const v = String(loc || '').trim();
+    return v && !siteNames.has(v.toLowerCase()) ? v : '';
+  };
+  const showLoc = p.sessions.some((x) => offSite(x.loc));
+  const COLS = `grid-template-columns:44px minmax(0,1fr)${showLoc ? ' minmax(0,1.5fr)' : ''} 72px 112px 76px`;
   const narrow = useNarrow();
-  const toneOf = (label) => (label === 'Done' ? { stBg: '#F6F2EE', stColor: '#57504A' } : sessionTone(label));
+  const pillOf = (label) => (label === 'Staffed' ? 'ok' : label === 'Cancelled' ? 'bad' : /^Needs/.test(label) ? 'wait' : 'mute');
+  const editBtn = (x, raw) => (
+    <Pressable label={`Edit shift ${x.d}`} onClick={() => editSession(raw)} className={cx(H.secondary, H.press)} style={S(ROW_BTN)}>
+      Edit
+    </Pressable>
+  );
 
   return (
-    <div className="vu-split" style={S('margin-top:22px;display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start')}>
-      <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;min-width:0')}>
-        <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Shifts</h2>
-          <div style={S('display:flex;gap:9px;flex-wrap:wrap')}>
-            <Pressable label="Repeat weekly" onClick={repeat} className={cx(H.secondary, H.press)} style={S(`${BTN_SECONDARY};border-color:#E7C0AC;color:#A8482A`)}>
-              <Icon name="refresh" size={14} />
-              Repeat weekly
-            </Pressable>
-            <Pressable label="Add shift" onClick={() => editSession(null)} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-              <Icon name="plus" size={14} />
-              Add shift
-            </Pressable>
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <section aria-labelledby="sh-h" style={S('min-width:0')}>
+        <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+          <h2 id="sh-h" style={S(H2)}>Shifts</h2>
+          <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
+            <Button variant="outline" size="sm" icon="refresh" onClick={repeat}>Repeat weekly</Button>
+            <Button variant="primary" size="sm" icon="plus" onClick={() => editSession(null)}>Add shift</Button>
           </div>
         </div>
         {narrow && p.sessions.length ? (
-          <ul aria-label="Shifts" style={S('margin:0;padding:0;list-style:none')}>
+          <ul aria-label="Shifts" style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
             {p.sessions.map((raw) => {
               const x = withFill(p, raw, apps);
               const label = shiftLabel(x);
-              const t = toneOf(label);
               return (
-                <li key={x.id} style={S('padding:14px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;gap:12px')}>
+                <li key={x.id} style={S(`padding:14px 0;${RULE};display:flex;align-items:flex-start;gap:14px`)}>
+                  <DateBlock date={x.d} size="sm" month />
                   <div style={S('min-width:0;flex:1')}>
-                    <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                      <span style={S('font:600 14px/1.2 Geist')}>{x.d}</span>
-                      <span style={S('font:450 13px/1.2 Geist;color:#57504A')}>{fmtTime(x.t)}</span>
-                    </div>
-                    <div className="vu-trunc" style={S('margin-top:4px;font:450 12px/1.3 Geist;color:#6B635C')}>{x.loc}</div>
-                    <div style={S('margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap')}>
-                      <span style={S(`display:inline-block;padding:5px 9px;border-radius:7px;background:${t.stBg || t.bg};font:500 12px/1 Geist;color:${t.stColor || t.color}`)}>{label}</span>
-                      <span style={S(`font:500 12px/1 ${MONO};color:#332D28`)}>{x.filledCount} of {x.cap} filled</span>
+                    <div style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{fmtTime(x.t)}</div>
+                    {offSite(x.loc) ? <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{offSite(x.loc)}</div> : null}
+                    <div style={S('margin-top:8px;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap')}>
+                      <StatusText tone={pillOf(label)}>{label}</StatusText>
+                      <span style={S(`font:600 13px/1 ${F.body};color:${C.ink};${NUM}`)}>{x.filledCount} of {x.cap} filled</span>
                     </div>
                     {p.listingId ? <SignUpNames su={shiftSignUps(apps, raw.id)} style="margin-top:8px" /> : null}
                   </div>
-                  <Pressable label={`Edit shift ${x.d}`} onClick={() => editSession(raw)} className={cx(H.secondary, H.press)} style={S(SMALL_BTN)}>
-                    Edit
-                  </Pressable>
+                  {editBtn(x, raw)}
                 </li>
               );
             })}
           </ul>
         ) : (
-        <div className="vu-table-wrap" style={S('position:relative')}>
-          <div role="table" aria-label="Shifts">
-            <div role="row" style={S(`display:grid;${COLS};gap:12px;padding:12px 20px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;font:500 12px/1.2 Geist;color:#6B635C`)}>
-              <div role="columnheader">Date</div><div role="columnheader">Time</div><div role="columnheader">Location</div><div role="columnheader">Filled</div><div role="columnheader">Status</div><div role="columnheader"><span className="vu-sr">Actions</span></div>
-            </div>
-            {p.sessions.length ? (
-              p.sessions.map((raw) => {
-                const x = withFill(p, raw, apps);
-                const label = shiftLabel(x);
-                const t = toneOf(label);
-                const su = p.listingId ? shiftSignUps(apps, raw.id) : null;
-                return (
-                  <div key={x.id} role="row" className={H.row} style={S(`display:grid;${COLS};gap:12px;padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease`)}>
-                    <div role="cell" style={S('font:500 13px/1.2 Geist')}>{x.d}</div>
-                    <div role="cell" style={S('font:450 13px/1.2 Geist;color:#57504A')}>{fmtTime(x.t)}</div>
-                    <div role="cell" className="vu-trunc" style={S('font:450 13px/1.2 Geist;color:#57504A')}>{x.loc}</div>
-                    <div role="cell" style={S(`font:500 13px/1 ${MONO}`)}>{x.filledCount} of {x.cap}</div>
-                    <div role="cell">
-                      <span style={S(`display:inline-block;padding:5px 9px;border-radius:7px;background:${t.stBg || t.bg};font:500 12px/1 Geist;color:${t.stColor || t.color}`)}>{label}</span>
-                    </div>
-                    <div role="cell" style={S('display:flex;justify-content:flex-end')}>
-                      <Pressable label={`Edit shift ${x.d}`} onClick={() => editSession(raw)} className={cx(H.secondary, H.press)} style={S(SMALL_BTN)}>
-                        Edit
-                      </Pressable>
-                    </div>
-                    {su && (su.going.length || su.waiting.length) ? (
-                      <div role="cell" style={S('grid-column:1 / -1;margin-top:-4px')}>
-                        <SignUpNames su={su} />
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            ) : (
-              <div style={S('padding:8px 20px 20px')}>
-                <EmptyState compact icon="calendar" title="No shifts yet" body="Add 1 shift, then repeat it weekly to fill out the term." cta="Add shift" onCta={() => editSession(null)} />
+          <div className="vu-table-wrap" style={S('position:relative;margin-top:16px')}>
+            <div role="table" aria-label="Shifts">
+              <div role="row" style={S(`display:grid;${COLS};gap:16px;align-items:center;padding:0 0 10px;border-bottom:1px solid ${C.line};${TH}`)}>
+                <div role="columnheader">Date</div><div role="columnheader">Time</div>{showLoc ? <div role="columnheader">Location</div> : null}<div role="columnheader">Filled</div><div role="columnheader">Status</div><div role="columnheader"><span className="vu-sr">Actions</span></div>
               </div>
-            )}
+              {p.sessions.length ? (
+                p.sessions.map((raw) => {
+                  const x = withFill(p, raw, apps);
+                  const label = shiftLabel(x);
+                  const su = p.listingId ? shiftSignUps(apps, raw.id) : null;
+                  return (
+                    <div key={x.id} role="row" className={H.row} style={S(`display:grid;${COLS};gap:6px 16px;padding:12px 0;${RULE};align-items:center;transition:background .16s ease`)}>
+                      <div role="cell"><DateBlock date={x.d} size="sm" month /><span className="vu-sr">{x.d}</span></div>
+                      <div role="cell" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{fmtTime(x.t)}</div>
+                      {showLoc ? <div role="cell" className="vu-trunc" style={S(`font:400 14px/1.3 ${F.body};color:${C.ink2}`)}>{offSite(x.loc)}</div> : null}
+                      <div role="cell" style={S(`font:600 15px/1 ${F.body};color:${C.ink};${NUM}`)}>{x.filledCount} of {x.cap}</div>
+                      <div role="cell"><StatusText tone={pillOf(label)}>{label}</StatusText></div>
+                      <div role="cell" style={S('display:flex;justify-content:flex-end')}>{editBtn(x, raw)}</div>
+                      {su && (su.going.length || su.waiting.length) ? (
+                        <div role="cell" style={S('grid-column:2 / -1')}>
+                          <SignUpNames su={su} />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              ) : (
+                <EmptyState compact icon="calendar" title="No shifts yet" body="Add 1 shift, then repeat it weekly to fill out the term." cta="Add shift" onCta={() => editSession(null)} />
+              )}
+            </div>
           </div>
-        </div>
         )}
-      </div>
+      </section>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px;min-width:0')}>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Check-in code</h2>
-          <div style={S(`margin-top:12px;font:600 30px/1 ${MONO};letter-spacing:.04em;font-variant-numeric:tabular-nums`)}>{p.checkinCode}</div>
-          <div style={S('margin-top:9px;font:450 13px/1.5 Geist;color:#57504A')}>Volunteers enter this code when they arrive.</div>
-          <Pressable label="Change the check-in code" onClick={regenerate} className={cx(H.secondary, H.press)} style={S(`margin-top:14px;${BTN_SECONDARY};height:36px;border-color:#E7C0AC;color:#A8482A`)}>
-            Change code
-          </Pressable>
-        </div>
-        <div style={S('padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Reminder plan</h2>
-          <div style={S('margin-top:6px;font:450 13px/1.45 Geist;color:#6B635C')}>Not sent automatically. Post reminders on the Messages tab.</div>
-          <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:10px;font:450 13px/1.4 Geist;color:#57504A')}>
-            {(p.reminders || []).map((r) => (
-              <Pressable
-                key={r.l}
-                label={`Change ${r.l} plan, now ${r.v}`}
-                onClick={() => reminder(r)}
-                className={cx(H.toInk, H.press)}
-                style={S('display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;transition:color .16s ease')}
-              >
-                <span>{r.l}</span>
-                <span style={S('display:inline-flex;align-items:center;gap:4px;color:#1A1714;font-weight:500')}>
-                  {r.v}
-                  <Icon name="chevron-right" size={13} />
-                </span>
-              </Pressable>
-            ))}
+      <aside aria-label="Shift tools" style={S('min-width:0;display:flex;flex-direction:column')}>
+        <section aria-labelledby="sh-code" className="vu-rail-sec">
+          <h2 id="sh-code" style={S(H3)}>Check-in code</h2>
+          <p style={S(`margin:6px 0 0;${SMALL}`)}>Volunteers enter this code when they arrive.</p>
+          <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap')}>
+            <span style={S(`font:600 28px/1 ${F.display};letter-spacing:0.04em;color:${C.ink};${NUM}`)}>{p.checkinCode}</span>
+            <Button variant="outline" size="sm" icon="copy" onClick={copyCode} aria-label="Copy the check-in code">Copy</Button>
           </div>
-          <Pressable label="Post a reminder" onClick={() => goTab && goTab('messages')} className={H.link} style={S('margin-top:14px;display:inline-flex;font:500 13px/1 Geist;color:#A8482A;cursor:pointer')}>
-            Post a reminder
-          </Pressable>
-        </div>
-      </div>
+          <div style={S('margin-top:12px')}>
+            <button type="button" onClick={regenerate} aria-label="Change the check-in code" className={cx('vu-link', H.press)} style={S(TEXT_LINK)}>Change code</button>
+          </div>
+        </section>
+        <ShiftReminder p={p} goTab={goTab} />
+      </aside>
     </div>
   );
 }
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** "sat oct 24", "Oct 24" or "Sat, October 24" -> "Sat, Oct 24" with the right weekday; null when unreadable. */
-function normalizeShiftDate(raw) {
-  const m = /^(?:[A-Za-z]{3,9}\.?,?\s+)?([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2})$/.exec(String(raw || '').trim());
+/* The Add shift form uses native date and time inputs ("2026-10-24",
+   "13:00") and stores the app's labels ("Sat, Oct 24", "1:00 PM-4:00 PM").
+   Labels carry no year and are read as the nearest one, so shifts go at
+   most 6 months out. */
+const MAX_SHIFT_AHEAD_DAYS = 183;
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoDay = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+const hhmm = (min) => `${pad2(Math.floor(min / 60) % 24)}:${pad2(min % 60)}`;
+const startOfDay = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+function fromIsoDay(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
   if (!m) return null;
-  const mon = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
-  const day = Number(m[2]);
-  const mi = MONTH_ABBR.indexOf(mon);
-  if (mi < 0 || day < 1 || day > 31) return null;
-  const at = parseSessionDate(`${mon} ${day}`);
-  if (at.getMonth() !== mi || at.getDate() !== day) return null;
-  return formatSessionDate(at);
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return dt.getMonth() === Number(m[2]) - 1 ? dt : null;
 }
+function minutesOf(v) {
+  const m = /^(\d{2}):(\d{2})/.exec(String(v || ''));
+  return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+const clock12 = (min) => `${Math.floor(min / 60) % 12 || 12}:${pad2(min % 60)} ${min < 720 ? 'AM' : 'PM'}`;
 
 /** Everyone who picked this shift on the join page, in the Edit dialog. */
 function ShiftSignUpList({ su, onReview }) {
   const row = (a, waiting) => (
-    <li key={a.id} style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid #F1EBE4')}>
+    <li key={a.id} style={S(`display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid ${C.line}`)}>
       <div style={S('min-width:0')}>
-        <div className="vu-trunc" style={S('font:500 14px/1.3 Geist;color:#1A1714')}>{String(a.applicant_name || '').trim() || 'Volunteer'}</div>
-        {a.position ? <div className="vu-trunc" style={S('margin-top:2px;font:450 12px/1.3 Geist;color:#6B635C')}>{a.position}</div> : null}
+        <div className="vu-trunc" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{String(a.applicant_name || '').trim() || 'Volunteer'}</div>
+        {a.position ? <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{a.position}</div> : null}
       </div>
-      {waiting ? (
-        <span style={S('flex:none;padding:4px 8px;border-radius:6px;background:#FDF3E7;font:500 12px/1 Geist;color:#8A5A20')}>Waiting on you</span>
-      ) : (
-        <span style={S('flex:none;padding:4px 8px;border-radius:6px;background:#EAF3EC;font:500 12px/1 Geist;color:#3F6B4E')}>Member</span>
-      )}
+      {waiting ? <StatusText tone="wait">Waiting on you</StatusText> : <StatusText tone="ok">Member</StatusText>}
     </li>
   );
   const total = su.going.length + su.waiting.length;
@@ -2504,15 +2878,13 @@ function ShiftSignUpList({ su, onReview }) {
           {su.waiting.map((a) => row(a, true))}
         </ul>
       ) : (
-        <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>Nobody has picked this shift on the join page yet.</div>
+        <div style={S(`margin-top:6px;${SMALL}`)}>Nobody has picked this shift on the join page yet.</div>
       )}
       {su.waiting.length ? (
-        <div style={S('margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font:450 13px/1.45 Geist;color:#6B635C')}>
+        <div style={S(`margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;${SMALL}`)}>
           <span>Accept an applicant and they fill a spot.</span>
           {onReview ? (
-            <Pressable label="Review applications" onClick={onReview} className={cx(H.secondary, H.press)} style={S(SMALL_BTN)}>
-              Review applications
-            </Pressable>
+            <Button variant="outline" size="sm" onClick={onReview}>Review applications</Button>
           ) : null}
         </div>
       ) : null}
@@ -2520,12 +2892,42 @@ function ShiftSignUpList({ su, onReview }) {
   );
 }
 
+/** Spots for a new shift: what most of the project's shifts already hold,
+    else the positions total, else 9 (the wizard's default). */
+function defaultSpots(project) {
+  const counts = new Map();
+  for (const x of project.sessions || []) {
+    const c = Number(x.cap);
+    if (c > 0 && x.st !== 'Cancelled') counts.set(c, (counts.get(c) || 0) + 1);
+  }
+  if (counts.size) return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+  const total = (project.positions || []).reduce((a, x) => a + (Number(x.slots) || 0), 0);
+  return total > 0 ? Math.min(total, 500) : 9;
+}
+
+/** Start and end of the project's latest dated shift, so a new shift copies
+    the hours the team already keeps. 10 AM to 12 PM when there is none. */
+function latestShiftRange(project) {
+  let best = null;
+  for (const x of (project && project.sessions) || []) {
+    const r = parseTimeRange(x.t);
+    const at = parseSessionDate(x.d);
+    const t = at instanceof Date ? at.getTime() : NaN;
+    if (!r || !(r.end > r.start) || !Number.isFinite(t)) continue;
+    if (!best || t >= best.t) best = { t, r };
+  }
+  return best ? best.r : { start: 600, end: 720 };
+}
+
 function SessionForm({ api, project, ses, signUps = null, onReview }) {
+  const range = ses ? parseTimeRange(ses.t) : null;
+  const seed = range || latestShiftRange(project);
   const [f, setF] = useState({
-    d: ses ? ses.d : '',
-    t: ses ? ses.t : '10:00 AM-12:00 PM',
+    date: ses ? isoDay(parseSessionDate(ses.d)) : '',
+    start: hhmm(seed.start),
+    end: hhmm(seed.end),
     loc: ses ? ses.loc : project.siteShort,
-    cap: ses ? String(ses.cap) : '9',
+    cap: ses ? String(ses.cap) : String(defaultSpots(project)),
     st: ses ? ses.st : 'Draft',
   });
   const [err, setErr] = useState({});
@@ -2533,24 +2935,38 @@ function SessionForm({ api, project, ses, signUps = null, onReview }) {
 
   const save = () => {
     const e = {};
-    const d = normalizeShiftDate(f.d);
-    if (!d) e.d = 'Enter a date like Sat, Oct 24.';
-    const tErr = shiftTimeError(f.t);
-    if (tErr) e.t = tErr;
+    const day = fromIsoDay(f.date);
+    const start = minutesOf(f.start);
+    const end = minutesOf(f.end);
+    // An unchanged date or time keeps the label it was saved with.
+    const sameTime = !!ses && !!range && start === range.start && end === range.end;
+    const d = day ? (ses && isoDay(parseSessionDate(ses.d)) === f.date ? ses.d : formatSessionDate(day)) : '';
+    const t = sameTime ? ses.t : start != null && end != null ? `${clock12(start)}-${clock12(end)}` : '';
+    // A shift that already happened keeps its date and time (its attendance
+    // still works); a new or moved shift has to be ahead.
+    const moved = !ses || d !== ses.d || !range || start !== range.start || end !== range.end;
+    const now = new Date();
+    if (!day) e.d = 'Choose a date.';
+    else if (moved && day < startOfDay(now)) e.d = "That date already passed. Choose a date that's coming up.";
+    else if (moved && (day - startOfDay(now)) / 864e5 > MAX_SHIFT_AHEAD_DAYS) e.d = 'Choose a date in the next 6 months.';
+    if (start == null || end == null) e.t = 'Enter a start and end time.';
+    else if (end <= start) e.t = 'The end time has to be after the start time.';
+    else if (!e.d && moved && day && new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, end) <= now) e.t = 'That time already passed today. Choose a later time.';
     const cap = Number(f.cap);
     if (!cap || cap < 1 || cap > 500) e.cap = 'Enter a number from 1 to 500.';
     setErr(e);
     if (Object.keys(e).length) return;
-    upsertSession(project.id, { ...(ses ? { id: ses.id } : {}), ...f, d, t: f.t.trim(), cap });
+    upsertSession(project.id, { ...(ses ? { id: ses.id } : {}), loc: f.loc, cap, st: f.st, d, t });
     api.close();
-    toast({ title: ses ? 'Shift saved' : 'Shift added', message: `${d} at ${f.t.trim()}`, tone: 'ok' });
+    toast({ title: ses ? 'Shift saved' : 'Shift added', message: `${d} at ${fmtTime(t)}`, tone: 'ok' });
   };
 
   return (
     <div>
-      <div className="vu-2col-keep" style={S('display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-        <Field label="Date" value={f.d} onChange={(v) => setF((x) => ({ ...x, d: v }))} placeholder="e.g. Sat, Oct 24" required error={err.d} />
-        <Field label="Time" value={f.t} onChange={(v) => setF((x) => ({ ...x, t: v }))} placeholder="e.g. 10:00 AM-12:00 PM" required error={err.t} />
+      <Field label="Date" type="date" value={f.date} onChange={(v) => setF((x) => ({ ...x, date: v }))} required error={err.d} />
+      <div className="vu-2col-keep" style={S('margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+        <Field label="Starts" type="time" value={f.start} onChange={(v) => setF((x) => ({ ...x, start: v }))} required error={err.t} />
+        <Field label="Ends" type="time" value={f.end} onChange={(v) => setF((x) => ({ ...x, end: v }))} required />
       </div>
       <div style={S('margin-top:14px')}>
         <Field label="Location" value={f.loc} onChange={(v) => setF((x) => ({ ...x, loc: v }))} maxLength={80} />
@@ -2560,40 +2976,34 @@ function SessionForm({ api, project, ses, signUps = null, onReview }) {
         {ses ? <Select label="Status" value={f.st} options={statusOpts} onChange={(v) => setF((x) => ({ ...x, st: v }))} /> : <span />}
       </div>
       {signUps ? <ShiftSignUpList su={signUps} onReview={onReview} /> : null}
-      <div style={S('margin-top:18px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap')}>
-        {ses ? (
-          <Pressable
-            label={`Delete shift ${ses.d}`}
-            onClick={async () => {
-              api.close();
-              const ok = await confirmDialog({
-                title: `Delete ${ses.d}?`,
-                body: 'It comes off the schedule. Nobody is notified, so tell your team on the Messages tab. To keep it listed as cancelled, set its status to Cancelled instead.',
-                confirmLabel: 'Delete shift',
-              });
-              if (ok) {
-                deleteSession(project.id, ses.id);
-                toast({ title: 'Shift deleted', message: `${ses.d} is off the schedule.`, tone: 'ok' });
-              }
-            }}
-            className={cx(H.danger, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:40px;border-radius:11px;border:1px solid #EBD3C8;background:#fff;font:600 13px/1 Geist;color:#A8482A;cursor:pointer')}
-          >
-            <Icon name="trash" size={14} />
-            Delete shift
-          </Pressable>
-        ) : (
-          <span />
-        )}
-        <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-          <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>
-            Cancel
-          </Pressable>
-          <Pressable label={ses ? 'Save shift' : 'Add shift'} onClick={save} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
-            {ses ? 'Save shift' : 'Add shift'}
-          </Pressable>
-        </div>
-      </div>
+      <ModalActions
+        left={
+          ses ? (
+            <Button
+              variant="danger"
+              icon="trash"
+              aria-label={`Delete shift ${ses.d}`}
+              onClick={async () => {
+                api.close();
+                const ok = await confirmDialog({
+                  title: `Delete ${ses.d}?`,
+                  body: 'It comes off the schedule. Nobody is notified, so tell your team on the Messages tab. To keep it listed as cancelled, set its status to Cancelled instead.',
+                  confirmLabel: 'Delete shift',
+                });
+                if (ok) {
+                  deleteSession(project.id, ses.id);
+                  toast({ title: 'Shift deleted', message: `${ses.d} is off the schedule.`, tone: 'ok' });
+                }
+              }}
+            >
+              Delete shift
+            </Button>
+          ) : null
+        }
+      >
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" onClick={save}>{ses ? 'Save shift' : 'Add shift'}</Button>
+      </ModalActions>
     </div>
   );
 }

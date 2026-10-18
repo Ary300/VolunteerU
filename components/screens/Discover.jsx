@@ -4,44 +4,121 @@
    Discover.jsx, design screen: `isDiscover`
    Search opportunities posted on VolunteerU and nonprofits from IRS records
    in one place. Every filter lives in the URL, so a search can be shared and
-   the back button works. ?ein= opens a nonprofit's detail.
+   the back button works. ?ein= opens a nonprofit's detail, ?view=nonprofits
+   switches to the nonprofit list.
+
+   Layout (photo-first system): the What / Where / When pill, the category
+   row, Opportunities N / Nonprofits N, filter chips with the sort at their
+   end, then the results. From 1320px the results share the row with a
+   sticky sketch map (components/MapPanel.jsx): day/time pins for the
+   listings on screen and a popup for the picked one. Below that the map
+   opens in a sheet from a floating Map button, which sits above the tab bar
+   on phones. On phones the pill collapses to the query with a filter
+   button.
    ========================================================================== */
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, Chip, Select, Checkbox, PrimaryButton, SecondaryButton, Icon } from '../ui.jsx';
+import { S, s } from '../../lib/style.js';
+import { C, F, R, SH, CATEGORIES, causeOf, causeKey } from '../../lib/tokens.js';
+import { Chip, Select, Checkbox, Button, Icon, Segmented } from '../ui.jsx';
+import CategoryRow from '../vu/CategoryRow.jsx';
+import { WHEN_OPTIONS } from '../vu/SearchBar.jsx';
 import DiscoverListings from '../DiscoverListings.jsx';
+import { DiscoverMap } from '../MapPanel.jsx';
 import WebNonprofits, { NonprofitDetail, stateName, formatCount } from '../WebNonprofits.jsx';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, closeModal } from '../../lib/overlays.js';
 import { rememberSearch, clearSearches } from '../../lib/db.js';
-import { searchListings } from '../../lib/listings.js';
-import { CAUSES } from '../../lib/seed.js';
-
-const MONO = "'Geist Mono',monospace";
-
-const QUICK_CAUSES = ['Food & hunger', 'Education', 'Homelessness', 'Environment', 'Animals'];
+import { searchListings, parseState } from '../../lib/listings.js';
+import { CAUSES, WINDOWS } from '../../lib/seed.js';
 
 const SORTS = [
   { v: 'recent', l: 'Newest' },
-  { v: 'established', l: "Most events (lead's count)" },
+  { v: 'established', l: 'Most events' },
 ];
 
 const KINDS = [
-  { k: 'all', t: 'All' },
+  { k: 'all', t: 'Everyone' },
+  { k: 'official', t: 'Organizations' },
   { k: 'student', t: 'Student projects' },
-  { k: 'official', t: 'Nonprofits' },
 ];
 
-const PLACES = [
-  { k: 'all', t: 'Anywhere' },
-  { k: 'person', t: 'In person' },
-  { k: 'online', t: 'Online' },
-];
+const WHENS = WHEN_OPTIONS.map((o) => o.v).filter(Boolean);
+const WHEN_PHRASE = { today: 'today', week: 'this week', weekend: 'this weekend', month: 'this month' };
+// Free-time windows from onboarding and Settings, as the results line says them.
+const FREE_PHRASE = {
+  'Weekday after school': 'weekdays after school',
+  'Weekday evenings': 'weekday evenings',
+  'Saturday morning': 'Saturday mornings',
+  'Saturday afternoon': 'Saturday afternoons',
+  Sunday: 'Sundays',
+  'School breaks': 'weekday daytimes',
+};
 
 function plural(n, one, many) {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
+}
+
+function useMedia(query) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia(query);
+    const sync = () => setOn(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [query]);
+  return on;
+}
+
+/* How a cause reads in a sentence. Most labels work as a modifier ("food and
+   hunger opportunities"); plural nouns do not ("animals opportunities"), so
+   they get an adjective form or a trailing phrase instead. */
+const WHERE_TEXT_MIN = 760;
+
+/* With "Near you" picked and no location of their own, a visitor sees
+   Carmel's nonprofits, as on Landing, where VolunteerU is built. */
+const DEFAULT_AREA = { city: 'Carmel', state: 'IN' };
+
+/** The What hint, shortened as the bar narrows so it is never cut off. */
+function whatPlaceholder(barW) {
+  if (!barW || barW >= 900) return 'Food bank, tutoring, animal shelter';
+  return barW >= 640 ? 'Food bank, tutoring' : 'Food bank';
+}
+
+const CAUSE_WORDING = {
+  animals: { pre: 'animal', np: 'Animal nonprofits' },
+  seniors: { post: 'with seniors', np: 'Nonprofits serving seniors' },
+};
+
+function causeWording(cause) {
+  const key = causeKey(cause);
+  const label = key === 'other' ? String(cause || '').trim() : causeOf(cause).label;
+  const w = CAUSE_WORDING[key] || {};
+  return {
+    pre: w.post ? '' : w.pre || label.toLowerCase(),
+    post: w.post || '',
+    np: w.np || `${label.charAt(0).toUpperCase()}${label.slice(1)} nonprofits`,
+  };
+}
+
+/** "6 food and hunger opportunities near Cedarbrook this weekend". Every part comes from the filters. */
+function resultsLine({ count, causes, kind, place, near, when, windows = [], q, savedOnly }) {
+  if (count === null || count === undefined) return '';
+  const cause = causes.length === 1 ? causeWording(causes[0]) : { pre: '', post: '' };
+  const noun = kind === 'student' ? (count === 1 ? 'student project' : 'student projects') : count === 1 ? 'opportunity' : 'opportunities';
+  const parts = [`${formatCount(count)}${savedOnly ? ' saved' : ''}${cause.pre ? ` ${cause.pre}` : ''} ${noun}`];
+  if (cause.post) parts.push(cause.post);
+  if (kind === 'official') parts.push('from organizations');
+  if (place === 'online') parts.push('online');
+  if (place === 'person') parts.push('in person');
+  if (q) parts.push(`for “${q}”`);
+  if (near) parts.push(`near ${near}`);
+  if (when && WHEN_PHRASE[when]) parts.push(WHEN_PHRASE[when]);
+  if (windows.length) parts.push(`on ${windows.map((w) => FREE_PHRASE[w] || w).join(' or ')}`);
+  return parts.join(' ');
 }
 
 export default function Discover() {
@@ -51,10 +128,14 @@ export default function Discover() {
 
   const q = params.get('q') || '';
   const causes = useMemo(() => (params.get('causes') || '').split('|').filter(Boolean), [params]);
+  // When the volunteer is free (the onboarding answer), as ?windows=Saturday morning|Sunday.
+  const windows = useMemo(() => (params.get('windows') || '').split('|').filter((w) => WINDOWS.includes(w)), [params]);
   const sort = params.get('sort') === 'established' ? 'established' : 'recent';
   const savedOnly = params.get('saved') === '1';
   const place = ['person', 'online'].includes(params.get('place')) ? params.get('place') : 'all';
   const kind = ['student', 'official'].includes(params.get('kind')) ? params.get('kind') : 'all';
+  const when = WHENS.includes(params.get('when')) ? params.get('when') : '';
+  const view = params.get('view') === 'nonprofits' ? 'np' : 'opp';
   const ein = (params.get('ein') || '').replace(/\D/g, '');
 
   const { state } = useSnapshot();
@@ -62,7 +143,10 @@ export default function Discover() {
   // at all we fall back to it synchronously, so there is no blank-then-jump.
   const homeRegion = ((state.prefs && state.prefs.location) || (state.account.city ? String(state.account.city).split(',')[0] : '')).trim();
   const nearParam = params.get('near');
-  const near = nearParam !== null ? nearParam : homeRegion;
+  // Online listings are open to anyone wherever they're based, so a bare
+  // ?place=online (Home's Online link, the Online category) searches anywhere.
+  // A Where typed alongside it still narrows them to that town.
+  const near = nearParam !== null ? nearParam : place === 'online' ? '' : homeRegion;
   // Nonprofit search needs a state. Fold in the saved ZIP so a city name no
   // lookup knows ("Rivertown") still resolves to one. An explicitly empty
   // Where field means anywhere, so the ZIP is left out then.
@@ -80,20 +164,52 @@ export default function Discover() {
   const [showSuggest, setShowSuggest] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const [listingCount, setListingCount] = useState(null);
+  const [matchCount, setMatchCount] = useState(null);
   const [nonprofitCount, setNonprofitCount] = useState(null);
+  // Cards shown in "Based on your causes and interests"; the main list
+  // leaves them out so no listing shows twice. Its count still includes them.
+  const [pickIds, setPickIds] = useState([]);
+  // What the map draws: the main list's rows and photos, and the nonprofits
+  // listed under them. Hovering a card turns its pin ink; picking a pin
+  // underlines its cards.
+  const [rows, setRows] = useState({ list: [], photos: null });
+  const [orgs, setOrgs] = useState([]);
+  const [hoverId, setHoverId] = useState(null);
+  const [pickedId, setPickedId] = useState(null);
+  // Set once the visitor changes the URL themselves; saved causes are never
+  // carried in after that (see the seeding effect below). `seeding` marks
+  // the seeding's own URL write.
+  const userTouched = useRef(false);
+  const seeding = useRef(false);
+  // A seeding write can be dropped when the sign-in redirect lands at the
+  // same moment, so the seeding looks again shortly after (a few times).
+  const [seedCheck, setSeedCheck] = useState(0);
+  const seedTimer = useRef(null);
+  const [moreOpen, setMoreOpen] = useState(false); // phones: Where / When / Search under the pill
   const searchWrap = useRef(null);
-  const [narrow, setNarrow] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
-    const mq = window.matchMedia('(max-width: 1179px)');
-    const sync = () => setNarrow(mq.matches);
-    sync();
-    mq.addEventListener('change', sync);
-    return () => mq.removeEventListener('change', sync);
-  }, []);
+  const sumRef = useRef(null);
+  const formRef = useRef(null);
+  // The search bar's width. Below WHERE_TEXT_MIN the "Use Rivertown" link
+  // turns into an icon so the Where field keeps room for its placeholder.
+  const [barW, setBarW] = useState(0);
+  const phone = useMedia('(max-width: 719px)');
+  const wide = useMedia('(min-width: 1180px)');
+  // The map gets its own column from 1320px, where the list beside it still
+  // has room for two cards a row. Narrower screens open it from a button.
+  const mapSide = useMedia('(min-width: 1320px)');
+  // Tablets: the Filters button beside the bar drops its word so the bar's
+  // fields keep room for their placeholders.
+  const tablet = useMedia('(min-width: 720px) and (max-width: 899px)');
 
   useEffect(() => setDraftQuery(q), [q]);
+
+  useEffect(() => {
+    const el = formRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([entry]) => setBarW(Math.round(entry.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (near === committedNear.current) return;
@@ -116,6 +232,9 @@ export default function Discover() {
   }, [showSuggest]);
 
   const pushQuery = (next, opts = {}) => {
+    // Any URL write other than the seeding is the visitor's own choice, so
+    // saved causes never override it afterwards.
+    if (!seeding.current) userTouched.current = true;
     const qs = next.toString();
     router[opts.replace ? 'replace' : 'push'](qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
@@ -128,7 +247,10 @@ export default function Discover() {
     const carryNear = !('near' in patch) && draftNear !== near;
     const full = carryNear ? { ...patch, near: draftNear } : patch;
     const keepEmpty = carryNear ? [...(opts.keepEmpty || []), 'near'] : opts.keepEmpty || [];
-    const next = new URLSearchParams(params.toString());
+    // Merge into the address bar's query, which is ahead of `params` while a
+    // navigation is still rendering, so a quick second change (Clear search
+    // right after Search) never brings back a value the first one replaced.
+    const next = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : params.toString());
     Object.entries(full).forEach(([k, v]) => {
       if (v === null || v === undefined || v === false || (v === '' && !keepEmpty.includes(k))) next.delete(k);
       else next.set(k, String(v));
@@ -152,17 +274,35 @@ export default function Discover() {
     }, 400);
   }
 
-  // Carry the volunteer's saved causes (from onboarding) into the visible
-  // filters the first time they land here. One-shot, so clearing sticks.
-  const prefsSeeded = useRef(false);
+  // Carry the volunteer's saved causes and free time (from onboarding) into
+  // the visible filters when they land here with no filters in the URL. The
+  // saved workspace can arrive after this screen mounts (a cold sign-in loads
+  // it from the cloud, and the sign-in redirect can land after that), so this
+  // runs whenever the saved values or the URL change, until the visitor picks
+  // or clears a filter themselves. That keeps clearing sticky.
+  const prefCauses = ((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c));
+  const prefWindows = ((state.prefs && state.prefs.windows) || []).filter((w) => WINDOWS.includes(w));
+  const prefsKey = `${prefCauses.join('|')}#${prefWindows.join('|')}`;
+  const paramsKey = params.toString();
   useEffect(() => {
-    if (prefsSeeded.current) return;
-    prefsSeeded.current = true;
-    const untouched = !['q', 'causes', 'near', 'kind', 'place', 'sort', 'saved', 'ein'].some((k) => params.get(k) !== null);
-    const pc = ((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c));
-    if (untouched && pc.length) setParams({ causes: pc.join('|') }, { replace: true });
+    if (userTouched.current) return;
+    if (!prefCauses.length && !prefWindows.length) return; // nothing saved yet; wait for the workspace
+    const live = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : paramsKey);
+    const untouched = !['q', 'causes', 'windows', 'near', 'kind', 'place', 'sort', 'saved', 'ein', 'when', 'view'].some((k) => live.get(k) !== null);
+    if (!untouched) return;
+    seeding.current = true;
+    try {
+      // near: null keeps the default (the volunteer's own area) rather than
+      // carrying a Where draft that hasn't caught up with the workspace yet.
+      setParams({ causes: prefCauses.join('|') || null, windows: prefWindows.join('|') || null, near: null }, { replace: true });
+    } finally {
+      seeding.current = false;
+    }
+    clearTimeout(seedTimer.current);
+    if (seedCheck < 5) seedTimer.current = setTimeout(() => setSeedCheck((n) => n + 1), 800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [prefsKey, paramsKey, seedCheck]);
+  useEffect(() => () => clearTimeout(seedTimer.current), []);
 
   /* ---- nonprofit detail, driven by ?ein= ---------------------------------- */
   const einModal = useRef(null); // { ein, id }
@@ -202,10 +342,12 @@ export default function Discover() {
 
   /* ---- search -------------------------------------------------------------- */
   const term = draftQuery.trim().toLowerCase();
-  const causeSuggestions = showSuggest && term.length >= 2 ? CAUSES.filter((c) => c.toLowerCase().includes(term) && !causes.includes(c)).slice(0, 4) : [];
+  const causeSuggestions = showSuggest && term.length >= 2 ? CAUSES.filter((c) => (c.toLowerCase().includes(term) || causeOf(c).label.toLowerCase().includes(term)) && !causes.includes(c)).slice(0, 4) : [];
   // An empty field lists every recent search; typing narrows them to the ones that contain the text.
   const recent = (state.recentSearches || []).filter((r) => !term || r.toLowerCase().includes(term));
-  const suggestOpen = showSuggest && (causeSuggestions.length > 0 || recent.length > 0);
+  // Focus always opens the list; with nothing to suggest it shows a one-line hint.
+  const suggestOpen = showSuggest;
+  const suggestHint = suggestOpen && !causeSuggestions.length && !recent.length;
   // One flat list for the keyboard: cause suggestions first, then recent searches.
   const options = suggestOpen ? [...causeSuggestions.map((v) => ({ kind: 'cause', v })), ...recent.map((v) => ({ kind: 'recent', v }))] : [];
   const active = activeIdx >= 0 && activeIdx < options.length ? activeIdx : -1;
@@ -243,9 +385,12 @@ export default function Discover() {
       else setActiveIdx(active <= 0 ? n - 1 : active - 1);
       return;
     }
-    if (e.key === 'Enter' && active >= 0) {
+    if (e.key === 'Enter') {
+      // Enter runs the search on every layout, including phones where the
+      // Search button sits folded under the pill.
       e.preventDefault();
-      chooseOption(options[active]);
+      if (active >= 0) chooseOption(options[active]);
+      else runSearch();
     }
   }
 
@@ -254,17 +399,18 @@ export default function Discover() {
     setShowSuggest(false);
     rememberSearch(v);
     setParams({ q: v });
+    // Phones: fold Where / When back into the one-line summary so the results
+    // are on screen, and park focus on that summary so the keyboard closes.
+    if (moreOpen) {
+      setMoreOpen(false);
+      if (sumRef.current) sumRef.current.focus();
+    }
   }
 
   function addCause(c) {
     setShowSuggest(false);
     setDraftQuery('');
     setParams({ q: null, causes: [...causes, c].join('|') });
-  }
-
-  function toggleCause(c) {
-    const nextC = causes.includes(c) ? causes.filter((x) => x !== c) : [...causes, c];
-    setParams({ causes: nextC.join('|') });
   }
 
   function clearFilters() {
@@ -277,7 +423,50 @@ export default function Discover() {
     pushQuery(next);
   }
 
-  const nFilters = causes.length + (savedOnly ? 1 : 0) + (sort !== 'recent' ? 1 : 0);
+  /* ---- category row ---------------------------------------------------------- */
+  const catValue = (() => {
+    if (causes.length === 1) {
+      const it = CATEGORIES.find((c) => c.cause === causes[0]);
+      return it ? it.key : null;
+    }
+    if (causes.length > 1) return null;
+    if (place === 'online' && !near) return 'online';
+    return near === homeRegion && !savedOnly ? 'near' : null;
+  })();
+
+  function pickCategory(key, item) {
+    if (key === 'near') {
+      setParams({ causes: null, windows: null, saved: null, place: place === 'person' ? 'person' : null, near: null });
+      return;
+    }
+    if (key === 'online') {
+      // Online means anywhere; tapping it again goes back to the home area.
+      if (catValue === 'online') setParams({ causes: null, place: null, near: null });
+      else setParams({ causes: null, place: 'online', near: null });
+      return;
+    }
+    // A second tap on the active cause clears it.
+    const same = causes.length === 1 && causes[0] === item.cause;
+    setParams({ causes: same ? null : item.cause });
+  }
+
+  // Causes the row doesn't carry (Disaster relief) stay reachable in Filters.
+  const nFilters = causes.length + windows.length + (savedOnly ? 1 : 0) + (sort !== 'recent' ? 1 : 0);
+
+  /* The In person / Online chips narrow the current Where, so they write it
+     into the URL: an Online chip next to "Rivertown" means online listings
+     based in Rivertown. The Online category above searches anywhere. */
+  function togglePlace(k) {
+    if (place === k) {
+      setParams({ place: null });
+      return;
+    }
+    setParams({ place: k, near }, { keepEmpty: ['near'] });
+  }
+
+  function toggleWindow(w) {
+    setParams({ windows: windows.includes(w) ? windows.filter((x) => x !== w).join('|') : [...windows, w].join('|') });
+  }
 
   function openFilters() {
     openModal({
@@ -285,18 +474,19 @@ export default function Discover() {
       subtitle: 'Causes also narrow the nonprofit search.',
       size: 'wide',
       Body: function FilterBody({ api }) {
-        const [local, setLocal] = useState({ causes: causes.slice(), sort, savedOnly });
+        const [local, setLocal] = useState({ causes: causes.slice(), windows: windows.slice(), sort, savedOnly });
         const [preview, setPreview] = useState({ n: null, failed: false });
-        const localKey = `${local.causes.join('|')}#${local.sort}#${local.savedOnly}`;
+        const localKey = `${local.causes.join('|')}#${local.windows.join('|')}#${local.sort}#${local.savedOnly}`;
+        // Saved-only, a When window and free time can't be counted from one page of results, so they get no number.
+        const uncountable = local.savedOnly || Boolean(when) || local.windows.length > 0;
         useEffect(() => {
           let alive = true;
           setPreview({ n: null, failed: false });
-          // Saved-only can't be counted from one page of results, so it gets no number.
-          if (local.savedOnly) return undefined;
+          if (uncountable) return undefined;
           const t = setTimeout(async () => {
             try {
-              const rows = await searchListings({ q, causes: local.causes, kind, place, near, sort: local.sort });
-              const n = rows.total ?? rows.length;
+              const found = await searchListings({ q, causes: local.causes, kind, place, near, sort: local.sort });
+              const n = found.total ?? found.length;
               if (alive) setPreview({ n, failed: false });
             } catch (err) {
               console.error('[discover] filter preview failed', err);
@@ -310,37 +500,44 @@ export default function Discover() {
           // eslint-disable-next-line react-hooks/exhaustive-deps
         }, [localKey]);
         const toggle = (c) => setLocal((f) => ({ ...f, causes: f.causes.includes(c) ? f.causes.filter((x) => x !== c) : [...f.causes, c] }));
-        const label = local.savedOnly ? 'Show saved opportunities' : preview.n === null ? 'Show opportunities' : preview.n === 0 ? 'Show 0 opportunities' : `Show ${plural(preview.n, 'opportunity', 'opportunities')}`;
+        const toggleFree = (w) => setLocal((f) => ({ ...f, windows: f.windows.includes(w) ? f.windows.filter((x) => x !== w) : [...f.windows, w] }));
+        const label = uncountable ? 'Show opportunities' : preview.n === null ? 'Show opportunities' : preview.n === 0 ? 'Show 0 opportunities' : `Show ${plural(preview.n, 'opportunity', 'opportunities')}`;
         return (
           <div>
-            <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>Causes</div>
+            <div style={S(`font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Causes</div>
             <div role="group" aria-label="Causes" style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
               {CAUSES.map((c) => (
-                <Chip key={c} label={c} role="checkbox" on={local.causes.includes(c)} py={9} px={13} fs={13} onClick={() => toggle(c)} />
+                <Chip key={c} label={causeOf(c).label === 'Other' ? c : causeOf(c).label} role="checkbox" on={local.causes.includes(c)} py={8} px={14} fs={14} onClick={() => toggle(c)} />
               ))}
             </div>
-            <div style={S('margin-top:22px')}>
+            <div style={S(`margin-top:24px;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>When you&apos;re free</div>
+            <div role="group" aria-label="When you're free" style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
+              {WINDOWS.map((w) => (
+                <Chip key={w} label={w} on={local.windows.includes(w)} py={8} px={14} fs={14} onClick={() => toggleFree(w)} />
+              ))}
+            </div>
+            <div style={S('margin-top:24px')}>
               <Select label="Sort by" value={local.sort} options={SORTS} onChange={(v) => setLocal((f) => ({ ...f, sort: v }))} />
             </div>
             <div style={S('margin-top:18px')}>
-              <Checkbox checked={local.savedOnly} size={16} label="Only show opportunities I saved" onChange={(v) => setLocal((f) => ({ ...f, savedOnly: v }))} />
+              <Checkbox checked={local.savedOnly} label="Only show opportunities I saved" onChange={(v) => setLocal((f) => ({ ...f, savedOnly: v }))} />
             </div>
-            <div style={S('margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-              <div aria-live="polite" style={S('font:450 13px/1.4 Geist;color:#8A8179')}>
-                {local.savedOnly ? '' : preview.failed ? "Couldn't count matches right now." : preview.n === null ? 'Counting matches' : `${plural(preview.n, 'opportunity matches', 'opportunities match')}`}
+            <div style={S(`margin-top:24px;padding-top:18px;border-top:1px solid ${C.line};display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap`)}>
+              {/* The count is printed once, on the Show button. A changed
+                  button label isn't announced, so screen readers hear it here. */}
+              <div aria-live="polite" style={S(`font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>
+                {uncountable ? null : preview.failed ? "Couldn't count matches right now." : (
+                  <span className="vu-sr">{preview.n === null ? 'Counting matches' : plural(preview.n, 'opportunity matches', 'opportunities match')}</span>
+                )}
               </div>
               <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-                <SecondaryButton h={40} px={16} r={11} fs={14} onClick={() => setLocal({ causes: [], sort: 'recent', savedOnly: false })}>
-                  Reset
-                </SecondaryButton>
-                <PrimaryButton
-                  h={40}
-                  px={18}
-                  r={11}
-                  fs={14}
+                <Button onClick={() => setLocal({ causes: [], windows: [], sort: 'recent', savedOnly: false })}>Reset</Button>
+                <Button
+                  variant="dark"
                   onClick={() => {
                     setParams({
                       causes: local.causes.join('|'),
+                      windows: local.windows.join('|'),
                       sort: local.sort === 'recent' ? null : local.sort,
                       saved: local.savedOnly ? '1' : null,
                     });
@@ -348,7 +545,7 @@ export default function Discover() {
                   }}
                 >
                   {label}
-                </PrimaryButton>
+                </Button>
               </div>
             </div>
           </div>
@@ -361,7 +558,7 @@ export default function Discover() {
     openModal({
       title: 'How verification works',
       body: (
-        <div style={S('display:flex;flex-direction:column;gap:14px')}>
+        <div style={S('display:flex;flex-direction:column;gap:16px')}>
           {[
             ['An organization asks for it', 'It sends a request from its project page with the name of a staff contact.'],
             ['A person reviews it', 'Someone at VolunteerU checks the request by hand.'],
@@ -369,8 +566,8 @@ export default function Discover() {
             ['Nonprofits from IRS records', "They're registered with the IRS. VolunteerU hasn't reviewed them."],
           ].map(([t, b]) => (
             <div key={t}>
-              <div style={S('font:600 14px/1.3 Geist')}>{t}</div>
-              <div style={S('margin-top:5px;font:450 13px/1.55 Geist;color:#6B635C')}>{b}</div>
+              <div style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{t}</div>
+              <div style={S(`margin-top:4px;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>{b}</div>
             </div>
           ))}
         </div>
@@ -378,67 +575,104 @@ export default function Discover() {
     });
   }
 
-  // On narrow screens the fields stack, so the list sits in the flow under
-  // What instead of covering Where and the Search button.
+  /* ---- map ------------------------------------------------------------------- */
+  const mapProps = {
+    listings: view === 'opp' ? rows.list : [],
+    photos: rows.photos,
+    nonprofits: view === 'opp' && kind === 'student' ? [] : orgs,
+    town: near,
+  };
+
+  function openMapSheet() {
+    const n = mapProps.listings.length;
+    openModal({
+      title: view === 'opp' ? `Map of ${plural(n, 'opportunity', 'opportunities')}` : 'Map of nonprofits',
+      size: 'wide',
+      Body: function MapBody({ api }) {
+        return (
+          <div
+            onClickCapture={(e) => {
+              // Following a listing link from the popup leaves the sheet behind.
+              if (e.target.closest && e.target.closest('a')) api.close();
+            }}
+          >
+            <DiscoverMap
+              {...mapProps}
+              onOpenNonprofit={(o) => {
+                api.close();
+                openNonprofit(o);
+              }}
+              style={{ height: 'min(68vh, 620px)' }}
+            />
+          </div>
+        );
+      },
+    });
+  }
+
+  /* ---- render -------------------------------------------------------------- */
   const suggestBox = suggestOpen ? (
     <div
       id="vu-suggest"
       role="listbox"
       aria-label="Suggestions"
+      className="dz-suggest"
       onMouseDown={(e) => e.preventDefault()}
-      style={s(
-        narrow ? 'position:relative' : 'position:absolute;left:0;right:0;top:56px;z-index:70;max-width:640px',
-        'border-radius:12px;border:1px solid #E8E1D9;background:#fff;box-shadow:0 18px 40px -22px rgba(60,40,25,.35), 0 1px 2px rgba(30,20,10,.06);overflow:hidden'
-      )}
+      style={S(`border-radius:${R.photo};background:#fff;box-shadow:${SH.menu};overflow:hidden;padding:6px 0`)}
     >
+      {suggestHint ? (
+        <div style={S(`padding:10px 18px;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
+          {term.length >= 2 ? 'Press Enter to search opportunities and nonprofits.' : 'Try a cause, like food bank or tutoring, or an organization’s name.'}
+        </div>
+      ) : null}
       {causeSuggestions.length ? (
         <>
-          <div style={S('padding:12px 14px 6px;font:600 12px/1 Geist;color:#8A8179')}>Causes</div>
+          <div style={S(`padding:10px 18px 6px;font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Causes</div>
           {causeSuggestions.map((c, i) => (
-            <Pressable
+            <div
               key={c}
               id={optionId(i)}
               role="option"
               tabIndex={-1}
               aria-selected={active === i ? 'true' : 'false'}
-              label={`Filter by ${c}`}
+              aria-label={`Filter by ${causeOf(c).label}`}
               onClick={() => addCause(c)}
               onMouseEnter={() => setActiveIdx(i)}
-              className={cx(H.row, H.press)}
-              style={s('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease', active === i ? 'background:#F6F2EE' : '')}
+              className="dz-opt"
+              style={s('padding:10px 18px;display:flex;align-items:center;gap:12px;cursor:pointer', active === i ? `background:${C.mist}` : '')}
             >
-              <Icon name="filter" size={13} color="#C2603C" />
-              <span style={S('font:500 13px/1.3 Geist;color:#1A1714')}>{c}</span>
-            </Pressable>
+              <Icon name={causeOf(c).icon} size={18} color={C.ink2} />
+              <span style={S(`font:400 15px/1.3 ${F.body};color:${C.ink}`)}>{causeOf(c).label}</span>
+            </div>
           ))}
         </>
       ) : null}
       {recent.length ? (
         <>
-          <div style={s('padding:12px 14px 6px;display:flex;align-items:center;justify-content:space-between', causeSuggestions.length ? 'border-top:1px solid #F1EBE4' : '')}>
-            <div style={S('font:600 12px/1 Geist;color:#8A8179')}>Recent searches</div>
-            <Pressable label="Clear recent searches" onClick={() => clearSearches()} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
+          <div style={s('padding:10px 18px 6px;display:flex;align-items:center;justify-content:space-between', causeSuggestions.length ? `border-top:1px solid ${C.line};margin-top:6px` : '')}>
+            <div style={S(`font:600 13px/1.2 ${F.body};color:${C.ink}`)}>Recent searches</div>
+            <button type="button" aria-label="Clear recent searches" onClick={() => clearSearches()} className="vu-link-ul" style={S(`font:500 13px/1.2 ${F.body};color:${C.ink}`)}>
               Clear
-            </Pressable>
+            </button>
           </div>
           {recent.map((r, j) => {
             const i = causeSuggestions.length + j;
             return (
-            <Pressable
-              key={r}
-              id={optionId(i)}
-              role="option"
-              tabIndex={-1}
-              aria-selected={active === i ? 'true' : 'false'}
-              label={`Search ${r}`}
-              onClick={() => chooseOption({ kind: 'recent', v: r })}
-              onMouseEnter={() => setActiveIdx(i)}
-              className={cx(H.row, H.press)}
-              style={s('padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .16s ease', active === i ? 'background:#F6F2EE' : '')}
-            >
-              <Icon name="clock" size={13} color="#A9A097" />
-              <span style={S('font:450 13px/1.3 Geist;color:#332D28')}>{r}</span>
-            </Pressable>
+              <div
+                key={r}
+                id={optionId(i)}
+                role="option"
+                tabIndex={-1}
+                aria-selected={active === i ? 'true' : 'false'}
+                aria-label={`Search ${r}`}
+                onClick={() => chooseOption({ kind: 'recent', v: r })}
+                onMouseEnter={() => setActiveIdx(i)}
+                className="dz-opt"
+                style={s('padding:10px 18px;display:flex;align-items:center;gap:12px;cursor:pointer', active === i ? `background:${C.mist}` : '')}
+              >
+                <Icon name="clock" size={18} color={C.ink3} />
+                <span style={S(`font:400 15px/1.3 ${F.body};color:${C.ink}`)}>{r}</span>
+              </div>
             );
           })}
         </>
@@ -446,302 +680,381 @@ export default function Discover() {
     </div>
   ) : null;
 
-  const showNonprofits = kind !== 'student' && !savedOnly;
-  const nonprofitWhere = nonprofitCount && nonprofitCount.state ? ` in ${stateName(nonprofitCount.state)}` : '';
+  const showUseHome = Boolean(homeRegion) && draftNear !== homeRegion;
+  const whereCompact = !phone && barW > 0 && barW < WHERE_TEXT_MIN;
+  const whenText = (WHEN_OPTIONS.find((o) => o.v === when) || {}).l || 'Any day';
+  const summary = [draftNear || 'Anywhere', when ? whenText.toLowerCase() : 'any day'].join(', ');
+  const showPreviewNp = view === 'opp' && kind !== 'student' && !savedOnly;
+  const npTotal = nonprofitCount ? formatCount(nonprofitCount.total) : null;
+  // Near you is on but the viewer has no location, and there are no words or cause to search by.
+  const npArea = catValue === 'near' && !webNear.trim() && !q && !causes.length ? DEFAULT_AREA : null;
+  // The preview is left out when there is nothing to list.
+  const npHasQuery = Boolean(q.trim() || causes.length || parseState(webNear) || npArea);
+  const npWhere = nonprofitCount && nonprofitCount.state ? `in ${stateName(nonprofitCount.state)}` : 'in IRS records';
+  const npHeading = npArea ? `Nonprofits in ${npArea.city}` : q ? `Nonprofits for “${q}”` : causes.length === 1 ? `${causeWording(causes[0]).np} ${npWhere}` : `Nonprofits ${npWhere}`;
+  const line = resultsLine({ count: listingCount, causes, kind, place, near, when, windows, q, savedOnly });
+  // What they told us at sign-up, matched against listings by keyword. Shown
+  // while nothing narrower (a search, a cause, a type or place) is picked.
+  const interest = ((state.prefs && state.prefs.interest) || '').trim();
+  const showMatch = view === 'opp' && Boolean(interest) && !q && !causes.length && kind === 'all' && place === 'all' && !savedOnly;
 
   return (
-    <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
-      <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:24px')}>
-        <h1 style={S('margin:0;font:600 30px/1.1 Geist;letter-spacing:-0.035em')}>Discover</h1>
-        <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-          <Pressable
-            label={`Filters${nFilters ? `, ${nFilters} active` : ''}`}
-            onClick={openFilters}
-            className={cx(H.secondaryLift, H.press)}
-            style={s(
-              'display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px',
-              `border:1px solid ${nFilters ? '#D8CEC3' : '#E4DDD4'}`,
-              'background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer;transition:background .16s ease, border-color .16s ease, transform .16s ease'
-            )}
-          >
-            <Icon name="filter" size={15} />
-            Filters
-            {nFilters ? (
-              <span style={S(`min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#F5E7E0;color:#A8482A;font:600 10px/18px ${MONO};text-align:center`)}>{nFilters}</span>
-            ) : null}
-          </Pressable>
-          <Pressable
-            label="Start a student project"
-            onClick={() => router.push('/create')}
-            className={cx(H.primaryLift, H.press)}
-            style={S('display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer;transition:transform .16s ease, background .16s ease')}
-          >
-            <Icon name="plus" size={15} />
-            Start a student project
-          </Pressable>
-        </div>
-      </div>
+    <div className="vu-page dz-page">
 
-      <div style={S('margin-top:18px;display:flex;gap:6px;flex-wrap:wrap')}>
-        <span aria-current="page" style={s('padding:8px 14px;border-radius:9px;font:600 13px/1 Geist', 'border:1px solid #C2603C;background:#FAF6F3;color:#A8482A')}>Find opportunities</span>
-        <Pressable label="Find volunteers" onClick={() => router.push('/volunteers')} className={cx(H.press)} style={s('padding:8px 14px;border-radius:9px;cursor:pointer;font:600 13px/1 Geist', 'border:1px solid #E8E1D9;background:#fff;color:#57504A')}>Find volunteers</Pressable>
-      </div>
-
-      <form
-        ref={searchWrap}
-        role="search"
-        aria-label="Search opportunities and nonprofits"
-        onSubmit={(e) => {
-          e.preventDefault();
-          runSearch();
-        }}
-        style={S('position:relative;margin-top:22px')}
-      >
-        <div className="vu-stack vu-stack-gap" style={S('display:flex;gap:10px;align-items:stretch')}>
-          <label
-            className={H.input}
-            style={s(
-              // min-height keeps the field 50px tall when phones stack the row
-              // into a column, where flex:1.4 would set its height basis to 0.
-              'flex:1.4;min-width:0;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:50px;min-height:50px;border-radius:12px;cursor:text',
-              `border:1px solid ${showSuggest ? '#D8CEC3' : '#E8E1D9'}`,
-              'background:#fff;transition:border-color .16s ease'
-            )}
-          >
-            <span style={S('flex:none;font:600 12px/1 Geist;color:#57504A')}>What</span>
-            <Icon name="search" size={15} color="#A9A097" />
-            <input
-              id="vu-discover-search"
-              type="search"
-              role="combobox"
-              aria-expanded={suggestOpen}
-              aria-controls={suggestOpen ? 'vu-suggest' : undefined}
-              aria-activedescendant={active >= 0 ? optionId(active) : undefined}
-              aria-autocomplete="list"
-              aria-label="What: cause, organization or nonprofit name"
-              autoComplete="off"
-              enterKeyHint="search"
-              value={draftQuery}
-              placeholder="Food bank, tutoring, animal shelter"
-              onChange={(e) => {
-                setDraftQuery(e.target.value);
-                setShowSuggest(true);
-                setActiveIdx(-1);
-              }}
-              onFocus={() => setShowSuggest(true)}
-              onClick={() => setShowSuggest(true)}
-              onBlur={(e) => {
-                // Moving within the search form (to the Search button, say) keeps
-                // the list put, so the layout doesn't jump under the pointer.
-                const to = e.relatedTarget;
-                if (!to || !(searchWrap.current && searchWrap.current.contains(to))) setShowSuggest(false);
-              }}
-              onKeyDown={onQueryKeyDown}
-              style={S('flex:1;min-width:0;font:450 15px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
-            />
-            {draftQuery ? (
-              <button
-                type="button"
-                aria-label="Clear search"
-                className={cx(H.icon, H.press)}
-                onClick={() => {
-                  setDraftQuery('');
-                  runSearch('');
-                }}
-                style={S('flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#8A8179;cursor:pointer;transition:background .16s ease')}
-              >
-                <Icon name="x" size={13} />
-              </button>
-            ) : null}
-          </label>
-          {narrow ? suggestBox : null}
-
-          <label
-            className={H.input}
-            style={S('flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:50px;min-height:50px;border-radius:12px;border:1px solid #E8E1D9;background:#fff;cursor:text;transition:border-color .16s ease')}
-          >
-            <span style={S('flex:none;font:600 12px/1 Geist;color:#57504A')}>Where</span>
-            <Icon name="pin" size={15} color="#A9A097" />
-            <input
-              type="text"
-              aria-label="Where: city or ZIP. Leave empty to search anywhere."
-              autoComplete="off"
-              value={draftNear}
-              placeholder="City or ZIP, or anywhere"
-              onChange={(e) => typeNear(e.target.value)}
-              onFocus={() => setShowSuggest(false)}
-              style={S('flex:1;min-width:0;font:450 15px/1 Geist;color:#1A1714;background:none;border:none;padding:0')}
-            />
-            {homeRegion && draftNear !== homeRegion ? (
-              <button
-                type="button"
-                className={cx(H.link, H.press)}
-                onClick={() => setParams({ near: null }, { replace: true })}
-                style={S('flex:none;font:500 12px/1 Geist;color:#C2603C;cursor:pointer;white-space:nowrap;background:none;border:0;padding:4px')}
-              >
-                Use {homeRegion}
-              </button>
-            ) : null}
-          </label>
-
-          <button
-            type="submit"
-            className={cx(H.primary, H.press)}
-            style={S('flex:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 20px;height:50px;border-radius:12px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer')}
-          >
-            <Icon name="search" size={15} />
-            Search
+      <div className="dz-head">
+        <h1 className="dz-h1">Discover</h1>
+        <div className="dz-head-act">
+          <button type="button" className="vu-link-ul" onClick={() => router.push('/volunteers')} style={S(`font:500 14px/1.3 ${F.body};color:${C.ink}`)}>
+            Find volunteers
           </button>
-        </div>
-
-        {!narrow ? suggestBox : null}
-      </form>
-
-      <div className="vu-stack vu-stack-gap" style={S('margin-top:16px;display:flex;gap:18px;flex-wrap:wrap;align-items:center')}>
-        <div role="radiogroup" aria-label="Who posted it" style={S('display:flex;gap:6px;flex-wrap:wrap')}>
-          {KINDS.map((o) => {
-            const on = kind === o.k;
-            return (
-              <Pressable
-                key={o.k}
-                role="radio"
-                aria-checked={on}
-                label={o.t}
-                onClick={() => setParams({ kind: o.k === 'all' ? null : o.k })}
-                className={cx(H.press)}
-                style={s(
-                  'padding:8px 14px;border-radius:9px',
-                  `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
-                  `background:${on ? '#1F1B18' : '#FFFFFF'}`,
-                  `color:${on ? '#FFFFFF' : '#57504A'}`,
-                  'font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
-                )}
-              >
-                {o.t}
-              </Pressable>
-            );
-          })}
-        </div>
-        <div role="radiogroup" aria-label="Where it happens" style={S('display:flex;gap:6px;flex-wrap:wrap')}>
-          {PLACES.map((o) => {
-            const on = place === o.k;
-            return (
-              <Pressable
-                key={o.k}
-                role="radio"
-                aria-checked={on}
-                label={o.t}
-                onClick={() => setParams({ place: o.k === 'all' ? null : o.k })}
-                className={cx(H.press)}
-                style={s(
-                  'padding:8px 14px;border-radius:9px',
-                  `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
-                  `background:${on ? '#1F1B18' : '#FFFFFF'}`,
-                  `color:${on ? '#FFFFFF' : '#57504A'}`,
-                  'font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
-                )}
-              >
-                {o.t}
-              </Pressable>
-            );
-          })}
+          <Button size="sm" icon="plus" onClick={() => router.push('/create')}>
+            Start a student project
+          </Button>
         </div>
       </div>
 
-      <div role="group" aria-label="Causes" style={S('margin-top:12px;display:flex;flex-wrap:wrap;gap:8px')}>
-        {[{ k: 'all', t: 'All causes' }, ...Array.from(new Set([...QUICK_CAUSES, ...causes])).map((c) => ({ k: c, t: c }))].map((c) => {
-          const on = c.k === 'all' ? !causes.length : causes.includes(c.k);
-          return (
-            <Pressable
-              key={c.k}
-              label={c.t}
-              pressed={on}
-              onClick={() => (c.k === 'all' ? setParams({ causes: null }) : toggleCause(c.k))}
-              className={cx(on ? H.link : H.chip, H.press)}
-              style={s(
-                'padding:8px 13px;border-radius:9px',
-                `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
-                `background:${on ? '#1F1B18' : '#FFFFFF'}`,
-                `color:${on ? '#FFFFFF' : '#57504A'}`,
-                'font:500 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease, color .16s ease'
-              )}
-            >
-              {c.t}
-            </Pressable>
-          );
-        })}
-      </div>
-
-      {listingCount !== null || (showNonprofits && nonprofitCount) ? (
-        <div aria-live="polite" style={S('margin-top:20px;display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;font:450 14px/1.4 Geist;color:#57504A')}>
-          <span>
-            {listingCount !== null ? plural(listingCount, 'opportunity', 'opportunities') + ' on VolunteerU' : ''}
-            {listingCount !== null && showNonprofits && nonprofitCount ? ', ' : ''}
-            {showNonprofits && nonprofitCount ? `${plural(nonprofitCount.total, 'nonprofit', 'nonprofits')}${nonprofitWhere}` : ''}
+      <div className="dz-searchrow" ref={searchWrap}>
+        <form
+          role="search"
+          aria-label="Search opportunities and nonprofits"
+          ref={formRef}
+          className="vu-sb vu-sb--bar-only dz-sb"
+          data-open={moreOpen ? 'true' : 'false'}
+          onSubmit={(e) => {
+            e.preventDefault();
+            runSearch();
+          }}
+        >
+          <span className="dz-ic" aria-hidden="true">
+            <Icon name="search" size={20} />
           </span>
-          {showNonprofits && nonprofitCount && nonprofitCount.total ? (
-            <a href="#nonprofits" className={H.link} style={S('font:500 13px/1 Geist;color:#C2603C;text-decoration:none')}>
-              Jump to nonprofits
-            </a>
-          ) : null}
-        </div>
-      ) : null}
+          <label className="vu-sb-seg vu-sb-seg--what" htmlFor="vu-discover-search">
+            <span className="vu-sb-body">
+              <span className="vu-sb-label">What</span>
+              <span style={S('display:flex;align-items:center;gap:6px')}>
+                <input
+                  id="vu-discover-search"
+                  type="search"
+                  role="combobox"
+                  className="vu-sb-input"
+                  aria-expanded={suggestOpen}
+                  aria-controls={suggestOpen ? 'vu-suggest' : undefined}
+                  aria-activedescendant={active >= 0 ? optionId(active) : undefined}
+                  aria-autocomplete="list"
+                  aria-label="What: cause, organization or nonprofit name"
+                  autoComplete="off"
+                  enterKeyHint="search"
+                  value={draftQuery}
+                  placeholder={phone ? 'Search opportunities' : whatPlaceholder(barW)}
+                  onChange={(e) => {
+                    setDraftQuery(e.target.value);
+                    setShowSuggest(true);
+                    setActiveIdx(-1);
+                  }}
+                  onFocus={() => setShowSuggest(true)}
+                  onClick={() => setShowSuggest(true)}
+                  onBlur={(e) => {
+                    // Moving within the search form (to the Search button, say) keeps
+                    // the list put, so the layout doesn't jump under the pointer.
+                    const to = e.relatedTarget;
+                    if (!to || !(searchWrap.current && searchWrap.current.contains(to))) setShowSuggest(false);
+                  }}
+                  onKeyDown={onQueryKeyDown}
+                />
+                {draftQuery ? (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    className="dz-x"
+                    onClick={() => {
+                      setDraftQuery('');
+                      runSearch('');
+                    }}
+                  >
+                    <Icon name="x" size={16} />
+                  </button>
+                ) : null}
+              </span>
+            </span>
+          </label>
+          <button type="button" ref={sumRef} className="dz-sum" aria-expanded={moreOpen} aria-controls="dz-where" onClick={() => setMoreOpen((v) => !v)}>
+            <span className="vu-trunc">{summary}</span>
+            <Icon name={moreOpen ? 'chevron-up' : 'chevron-down'} size={16} />
+          </button>
+          <button type="button" className="vu-sb-filter dz-filt-m" onClick={openFilters} aria-label={`Filters${nFilters ? `, ${nFilters} active` : ''}`}>
+            <Icon name="sliders" size={18} />
+            {nFilters ? <i aria-hidden="true">{nFilters}</i> : null}
+          </button>
+          {phone ? suggestBox : null}
 
-      <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 312px;gap:24px;margin-top:18px;align-items:start')}>
-        <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <DiscoverListings
-            q={q}
-            causes={causes}
-            kind={kind}
-            place={place}
-            near={near}
-            sort={sort}
-            savedOnly={savedOnly}
-            onClearFilters={clearFilters}
-            onCount={setListingCount}
-          />
-          <WebNonprofits
-            id="nonprofits"
-            q={q}
-            near={webNear}
-            causes={causes}
-            kind={showNonprofits ? kind : 'student'}
-            onOpen={openNonprofit}
-            onClear={() => runSearch('')}
-            onCount={setNonprofitCount}
-          />
-        </div>
-
-        <div style={S('display:flex;flex-direction:column;gap:14px')}>
-          <Pressable
-            label="Find volunteers"
-            onClick={() => router.push('/volunteers')}
-            className={cx(H.card, H.press)}
-            style={S('text-align:left;padding:18px;border-radius:14px;border:1px solid #E8E1D9;background:#fff;cursor:pointer;transition:border-color .16s ease')}
+          <label
+            className="vu-sb-seg vu-sb-seg--where"
+            id="dz-where"
+            htmlFor="dz-where-input"
+            // With "Use Rivertown" beside it, Where takes a bigger share of the
+            // bar so the placeholder still fits on laptops and tablets.
+            style={showUseHome && !phone ? { flex: whereCompact ? '1.1 1 0' : '1.05 1 0' } : undefined}
           >
-            <div style={S('font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>Looking for people to help with your project?</div>
-            <div style={S('margin-top:6px;display:flex;align-items:center;gap:6px;font:450 13px/1.5 Geist;color:#6B635C')}>
-              Search volunteers by cause and city
-              <Icon name="arrow-right" size={13} />
-            </div>
-          </Pressable>
+            <span className="vu-sb-ic" aria-hidden="true"><Icon name="pin" size={20} /></span>
+            <span className="vu-sb-body">
+              <span className="vu-sb-label">Where</span>
+              <span style={S('display:flex;align-items:center;gap:8px')}>
+                <input
+                  id="dz-where-input"
+                  type="text"
+                  className="vu-sb-input"
+                  aria-label="Where: city or ZIP. Leave empty to search anywhere."
+                  autoComplete="off"
+                  value={draftNear}
+                  placeholder="City or ZIP"
+                  onChange={(e) => typeNear(e.target.value)}
+                  onFocus={() => setShowSuggest(false)}
+                />
+                {showUseHome && whereCompact ? (
+                  <button
+                    type="button"
+                    aria-label={`Use ${homeRegion}`}
+                    title={`Use ${homeRegion}`}
+                    onClick={() => setParams({ near: null }, { replace: true })}
+                    style={S(`flex:none;display:inline-grid;place-items:center;width:28px;height:20px;margin:0 -6px 0 0;border:0;border-radius:999px;background:none;color:${C.ink};cursor:pointer`)}
+                  >
+                    <Icon name="navigation" size={16} />
+                  </button>
+                ) : showUseHome ? (
+                  <button type="button" className="vu-link-ul" onClick={() => setParams({ near: null }, { replace: true })} style={S(`flex:none;margin-top:3px;font:500 13px/1.2 ${F.body};color:${C.ink};white-space:nowrap`)}>
+                    Use {homeRegion}
+                  </button>
+                ) : null}
+              </span>
+            </span>
+          </label>
 
-          <div style={S('padding:18px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-            <div style={S('font:600 15px/1.3 Geist;letter-spacing:-0.02em')}>What verified means</div>
-            <div style={S('margin-top:7px;font:450 13px/1.5 Geist;color:#6B635C')}>
-              A green check means a VolunteerU reviewer checked the organization by hand. Student projects don&apos;t carry one.
+          <label className="vu-sb-seg vu-sb-seg--when" htmlFor="dz-when">
+            <span className="vu-sb-ic" aria-hidden="true"><Icon name="calendar" size={20} /></span>
+            <span className="vu-sb-body">
+              <span className="vu-sb-label">When</span>
+              <select
+                id="dz-when"
+                className="vu-sb-input vu-sb-select"
+                data-set={when ? 'true' : 'false'}
+                value={when}
+                onChange={(e) => setParams({ when: e.target.value || null })}
+              >
+                {WHEN_OPTIONS.map((o) => (
+                  <option key={o.v} value={o.v}>
+                    {o.l}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </label>
+
+          <button type="submit" className="vu-sb-go">
+            <Icon name="search" size={20} />
+            <span>Search</span>
+          </button>
+          {!phone ? suggestBox : null}
+        </form>
+
+        <button type="button" className="dz-fbtn" onClick={openFilters} aria-label={`Filters${nFilters ? `, ${nFilters} active` : ''}`} style={tablet ? { padding: '0 18px' } : undefined}>
+          <Icon name="sliders" size={18} />
+          {tablet ? null : 'Filters'}
+          {nFilters ? <span className="dz-fbtn-n" aria-hidden="true">{nFilters}</span> : null}
+        </button>
+      </div>
+
+      <CategoryRow className="dz-cats" value={catValue} onChange={pickCategory} short={phone} label="Causes" />
+
+      <div className={mapSide ? 'vu-layout-map dz-split' : 'dz-split'}>
+        <div className="dz-list">
+          {/* The sort shares the row with the Opportunities / Nonprofits
+              switch, at its right end, so it never needs a row of its own
+              (the chip row below fills the list column beside the map). On
+              phones that row has no room left; sorting is in Filters there. */}
+          <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+            <Segmented
+              label="Show"
+              value={view}
+              onChange={(v) => setParams({ view: v === 'np' ? 'nonprofits' : null })}
+              options={[
+                { v: 'opp', l: 'Opportunities', count: listingCount === null ? null : formatCount(listingCount), panelId: 'dz-panel' },
+                { v: 'np', l: 'Nonprofits', count: npTotal, panelId: 'dz-panel' },
+              ]}
+            />
+            {view === 'opp' && !phone ? (
+              <label className="dz-sort" style={S('margin-left:auto')}>
+                <span className="vu-sr">Sort opportunities by</span>
+                <select value={sort} onChange={(e) => setParams({ sort: e.target.value === 'recent' ? null : e.target.value })}>
+                  {SORTS.map((o) => (
+                    <option key={o.v} value={o.v}>
+                      {o.l}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="chevron-down" size={16} />
+              </label>
+            ) : null}
+          </div>
+
+          <div id="dz-panel" role="tabpanel" aria-label={view === 'opp' ? 'Opportunities' : 'Nonprofits'}>
+            {view === 'opp' ? (
+              <>
+                <div className="dz-chips">
+                  <div role="radiogroup" aria-label="Who posted it" className="dz-chipgroup">
+                    {KINDS.map((o) => {
+                      const on = kind === o.k;
+                      return (
+                        <button key={o.k} type="button" role="radio" aria-checked={on} className="dz-chip" onClick={() => setParams({ kind: o.k === 'all' ? null : o.k })}>
+                          {o.t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="dz-chipsep" aria-hidden="true" />
+                  <div role="group" aria-label="Where it happens" className="dz-chipgroup">
+                    {[
+                      { k: 'person', t: 'In person' },
+                      { k: 'online', t: 'Online' },
+                    ].map((o) => {
+                      const on = place === o.k;
+                      return (
+                        <button key={o.k} type="button" aria-pressed={on} className="dz-chip" onClick={() => togglePlace(o.k)}>
+                          {o.t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* The count is on the Opportunities tab above, so the
+                    sentence is said to screen readers only, as results change. */}
+                <span aria-live="polite" className="vu-sr">
+                  {line}
+                </span>
+                {windows.length ? (
+                  // The free time saved at sign-up, on its own row so it's
+                  // never scrolled out of sight. Tapping one drops it.
+                  <div role="group" aria-label="When you're free" className="dz-chips" style={S('margin-top:10px')}>
+                    {windows.map((w) => (
+                      <button key={w} type="button" aria-pressed="true" className="dz-chip" title={`Stop filtering by ${w.toLowerCase()}`} onClick={() => toggleWindow(w)} style={S('display:inline-flex;align-items:center;gap:6px;flex:none')}>
+                        {w}
+                        <Icon name="x" size={14} />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {showMatch ? (
+                  <div style={S('margin-top:28px')}>
+                    <DiscoverListings
+                      mode="match"
+                      interest={interest}
+                      causes={((state.prefs && state.prefs.causes) || []).filter((c) => CAUSES.includes(c))}
+                      near={near || homeRegion}
+                      when={when}
+                      windows={windows}
+                      initial={phone || (wide && !mapSide) ? 3 : 2}
+                      cols={mapSide ? 2 : 3}
+                      highlight={pickedId}
+                      onHover={setHoverId}
+                      onCount={setMatchCount}
+                      onRows={(list) => setPickIds(list.map((l) => l.id))}
+                    />
+                  </div>
+                ) : null}
+
+                {showMatch && matchCount ? <div aria-hidden="true" style={S(`margin-top:40px;border-top:1px solid ${C.line}`)} /> : null}
+
+                <DiscoverListings
+                  bare
+                  q={q}
+                  causes={causes}
+                  kind={kind}
+                  place={place}
+                  near={near}
+                  sort={sort}
+                  when={when}
+                  windows={windows}
+                  savedOnly={savedOnly}
+                  initial={6}
+                  cols={mapSide ? 2 : 3}
+                  highlight={pickedId}
+                  onHover={setHoverId}
+                  onClearFilters={clearFilters}
+                  onCount={setListingCount}
+                  onRows={(list, photos) => setRows({ list, photos })}
+                  excludeIds={showMatch ? pickIds : []}
+                />
+              </>
+            ) : null}
+
+            <div className={view === 'opp' ? 'dz-np-preview' : 'dz-np-full'} hidden={view === 'opp' && (!showPreviewNp || !npHasQuery)}>
+              <WebNonprofits
+                id="nonprofits"
+                q={q}
+                near={webNear}
+                causes={causes}
+                kind="all"
+                area={npArea}
+                limit={view === 'opp' ? 4 : 0}
+                heading={view === 'opp' ? npHeading : ''}
+                onOpen={openNonprofit}
+                onClear={() => runSearch('')}
+                onCount={setNonprofitCount}
+                onResults={setOrgs}
+                onSeeAll={() => {
+                  setParams({ view: 'nonprofits' });
+                  if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
+                }}
+              />
             </div>
-            <Pressable
-              label="How verification works"
-              onClick={verifyInfo}
-              className={cx(H.secondary, H.press)}
-              style={S('margin-top:14px;display:inline-flex;align-items:center;white-space:nowrap;flex:none;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E7C0AC;background:#fff;font:600 14px/1 Geist;color:#C2603C;cursor:pointer;transition:background .16s ease, border-color .16s ease')}
-            >
-              How verification works
-            </Pressable>
+          </div>
+
+          <div className="dz-foot">
+            <p>
+              <Icon name="badge-check" size={16} color={C.confirmed} />
+              <span>
+                A green check means a VolunteerU reviewer checked the organization by hand. Student projects don&apos;t carry one.{' '}
+                <button type="button" className="vu-link-ul" onClick={verifyInfo}>
+                  How verification works
+                </button>
+              </span>
+            </p>
+            <p>
+              <span>
+                Need people for your own project?{' '}
+                <button type="button" className="vu-link-ul" onClick={() => router.push('/volunteers')}>
+                  Find volunteers
+                </button>
+              </span>
+            </p>
           </div>
         </div>
+
+        {mapSide ? (
+          <aside className="vu-sticky" aria-label="Map">
+            <DiscoverMap
+              {...mapProps}
+              highlight={hoverId}
+              onPick={setPickedId}
+              onOpenNonprofit={openNonprofit}
+              style={{ height: 'min(820px, calc(100vh - 48px))', minHeight: 520 }}
+            />
+          </aside>
+        ) : null}
       </div>
+
+      {!mapSide ? (
+        <button
+          type="button"
+          onClick={openMapSheet}
+          style={S(`position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--vu-tabbar-h, 0px) + 16px);z-index:40;height:46px;padding:0 20px;border-radius:${R.pill};background:${C.ink};color:#fff;display:inline-flex;align-items:center;gap:8px;font:600 15px/1 ${F.body};box-shadow:0 6px 20px rgba(30,36,33,.3);cursor:pointer`)}
+          className="dz-mappill"
+        >
+          <Icon name="map" size={18} />
+          Map
+        </button>
+      ) : null}
     </div>
   );
 }
+

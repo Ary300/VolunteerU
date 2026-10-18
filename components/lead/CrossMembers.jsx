@@ -12,17 +12,22 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Pressable, Field, Select, TextArea, EmptyState, Avatar, Icon } from '../ui.jsx';
-import { openModal, toast } from '../../lib/overlays.js';
+import Link from 'next/link';
+import { Pressable, Field, Select, TextArea, EmptyState, Avatar, Icon, Button, StatusText, IconButton } from '../ui.jsx';
+import { C, F, R } from '../../lib/tokens.js';
+import { openModal, toast, menuFromEvent } from '../../lib/overlays.js';
 import { copyText } from '../../lib/db.js';
 import { loadProjectMembers, setMemberAssignment, confirmMemberHour, checkInCodeMatches } from '../../lib/listings.js';
 import MessageThread from '../MessageThread.jsx';
 
-const MONO = "'Geist Mono',monospace";
-const LABEL = 'font:600 14px/1.2 Geist;color:#1A1714';
-const MODAL_PRIMARY = 'display:inline-flex;align-items:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer';
-const MODAL_SECONDARY = 'display:inline-flex;align-items:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer';
-const OUTLINE_BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;padding:0 12px;height:36px;border-radius:10px;border:1px solid #E7C0AC;background:#fff;font:600 13px/1 Geist;color:#A8482A;cursor:pointer';
+const H2 = `margin:0;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`;
+const META = `font:400 14px/1.4 ${F.body};color:${C.ink2}`;
+const SMALL = `font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+const NUM = 'font-variant-numeric:tabular-nums';
+const RULE = `border-bottom:1px solid ${C.line}`;
+/** Outline row action (Message, Rate, Copy link, Add a task). */
+const OUTLINE_BTN = `display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;padding:0 12px;height:36px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:600 13px/1 ${F.body};color:${C.ink};cursor:pointer;white-space:nowrap`;
+const OUTLINE_CLS = cx('vu-btn', 'vu-btn-outline', H.press);
 
 const RELIABILITY = ['', 'Needs support', 'Developing', 'Solid', 'Strong', 'Exceptional'];
 
@@ -83,19 +88,19 @@ function RatingForm({ api, app, onSaved }) {
             label={`${n} out of 5`}
             onClick={() => setStars(n)}
             className={cx(H.press)}
-            style={S(`display:grid;place-items:center;width:42px;height:42px;border-radius:10px;cursor:pointer;color:${n <= stars ? '#C2603C' : '#D8CFC5'}`)}
+            style={S(`display:grid;place-items:center;width:44px;height:44px;border-radius:${R.control};cursor:pointer;color:${n <= stars ? C.ember : C.line2}`)}
           >
             <Icon name="star" size={28} filled={n <= stars} />
           </Pressable>
         ))}
       </div>
-      <div aria-live="polite" style={S('margin-top:8px;font:500 13px/1 Geist;color:#57504A')}>{stars ? `${stars} out of 5, ${RELIABILITY[stars]}` : 'Pick 1 to 5 stars'}</div>
+      <div aria-live="polite" style={S(`margin-top:8px;font:500 14px/1.2 ${F.body};color:${C.ink2}`)}>{stars ? `${stars} out of 5, ${RELIABILITY[stars]}` : 'Pick 1 to 5 stars'}</div>
       <div style={S('margin-top:16px')}>
         <TextArea label="Feedback (optional)" value={note} onChange={setNote} maxLength={280} minHeight={70} placeholder="e.g. Showed up early and helped set up" />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>Cancel</Pressable>
-        <Pressable label="Save rating" disabled={busy || !stars} onClick={save} className={cx(H.primary, H.press)} style={s(MODAL_PRIMARY, !stars ? 'opacity:.5;cursor:default' : '')}>{busy ? 'Saving' : 'Save rating'}</Pressable>
+      <div style={S('margin-top:20px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Pressable label="Save rating" disabled={busy || !stars} onClick={save} className={cx('vu-btn', 'vu-btn-primary', H.press)} style={s(`display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 18px;border-radius:${R.control};border:1px solid ${C.ember};background:${C.ember};color:#fff;font:600 15px/1 ${F.body};cursor:pointer`, !stars ? 'opacity:.45;cursor:default' : '')}>{busy ? 'Saving' : 'Save rating'}</Pressable>
       </div>
     </div>
   );
@@ -104,10 +109,10 @@ function RatingForm({ api, app, onSaved }) {
 function RateButton({ app, onSaved }) {
   const stars = app.assignment && app.assignment.rating && app.assignment.rating.stars;
   return (
-    <Pressable label={stars ? `Rated ${stars} out of 5, change rating for ${app.applicant_name}` : `Rate ${app.applicant_name}`} onClick={() => openRating(app, onSaved)} className={cx(H.secondary, H.press)} style={S(OUTLINE_BTN)}>
+    <Pressable label={stars ? `Rated ${stars} out of 5, change rating for ${app.applicant_name}` : `Rate ${app.applicant_name}`} onClick={() => openRating(app, onSaved)} className={OUTLINE_CLS} style={S(OUTLINE_BTN)}>
       {stars ? (
         <>
-          <Icon name="star" size={14} filled />
+          <Icon name="star" size={14} filled color={C.ember} />
           {stars} of 5
         </>
       ) : 'Rate'}
@@ -126,9 +131,8 @@ function MessageButton({ app, p }) {
     });
   }
   return (
-    <Pressable label={`Message ${app.applicant_name}`} onClick={open} className={cx(H.secondary, H.press)} style={S(OUTLINE_BTN)}>
-      <Icon name="message" size={14} />
-      Message
+    <Pressable label={`Message ${app.applicant_name}`} title={`Message ${app.applicant_name}`} onClick={open} className={cx('vu-iconbtn-sm', H.press)} style={S('width:36px;height:36px;cursor:pointer')}>
+      <Icon name="message" size={18} />
     </Pressable>
   );
 }
@@ -147,7 +151,7 @@ function LastCheckIn({ app, p }) {
   const line = `Checked in${last.session ? ` for ${last.session}` : ''}${when}`;
   if (match === true) {
     return (
-      <div style={S('margin-top:6px;display:inline-flex;align-items:center;gap:6px;font:450 12px/1.4 Geist;color:#3F6B4E')}>
+      <div style={S(`margin-top:6px;display:inline-flex;align-items:center;gap:6px;font:500 13px/1.4 ${F.body};color:${C.confirmed}`)}>
         <Icon name="check" size={13} />
         <span>{line}</span>
       </div>
@@ -155,7 +159,7 @@ function LastCheckIn({ app, p }) {
   }
   const flag = match === false ? `Code ${last.code} doesn't match your check-in code` : 'No check-in code entered';
   return (
-    <div style={S('margin-top:6px;display:flex;align-items:flex-start;gap:6px;font:450 12px/1.4 Geist;color:#8A5A20')}>
+    <div style={S(`margin-top:6px;display:flex;align-items:flex-start;gap:6px;font:500 13px/1.4 ${F.body};color:${C.waiting}`)}>
       <span style={S('flex:none;margin-top:1px')}><Icon name="alert" size={13} /></span>
       <span>
         {line}
@@ -186,39 +190,40 @@ function useMembers(p) {
       });
   }, [p.listingId]);
   useEffect(() => { load(); }, [load]);
+  // Members tick tasks and log hours from their own accounts. Pick that up
+  // when the lead comes back to this tab instead of asking them to refresh.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener('focus', load);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', load);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load]);
   return [members, load, setMembers];
 }
 
-/** Small share-your-link banner, reused across both org types. */
-export function ShareLink({ p, tone = 'soft' }) {
+/** The project's join link as one plain line with a Copy button, reused
+    across both org types. No fill: it sits between the heading and the list.
+    Callers may still pass the old `tone` prop; it no longer changes anything. */
+export function ShareLink({ p }) {
   const link = joinLink(p);
-  const bg = tone === 'soft' ? '#FAF6F3' : '#fff';
   async function copy() {
     if (!link || p.archived) return;
     const ok = await copyText(link);
     toast(ok ? { title: 'Join link copied', message: 'Anyone with the link can see this project and apply.', tone: 'ok' } : { title: 'Copy this link', message: link, tone: 'warn' });
   }
-  if (!link) {
-    return (
-      <div style={s('padding:14px 16px;border-radius:12px;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#8A5A20', `background:${bg}`)}>
-        Your join link turns on once this project is published.
-      </div>
-    );
-  }
-  if (p.archived) {
-    return (
-      <div style={s('padding:14px 16px;border-radius:12px;border:1px solid #EFE3DC;font:450 13px/1.5 Geist;color:#8A5A20', `background:${bg}`)}>
-        This project is archived, so its join link doesn't take applications.
-      </div>
-    );
-  }
+  const note = (t) => <p style={S(`margin:0;${META}`)}>{t}</p>;
+  if (!link) return note('Your join link turns on once this project is published.');
+  if (p.archived) return note("This project is archived, so its join link doesn't take applications.");
   return (
-    <div style={s('padding:14px 16px;border-radius:12px;border:1px solid #EFE3DC;display:flex;align-items:center;gap:12px;flex-wrap:wrap', `background:${bg}`)}>
-      <div style={S('min-width:0;flex:1')}>
-        <div style={S('font:500 13px/1.2 Geist;color:#57504A')}>Your join link</div>
-        <div className="vu-trunc" style={S('margin-top:5px;font:450 13px/1.3 Geist;color:#332D28')}>{link}</div>
+    <div style={S('display:flex;align-items:center;gap:12px;flex-wrap:wrap')}>
+      <div style={S('min-width:0;flex:1 1 240px')}>
+        <div style={S(`font:600 14px/1.3 ${F.body};color:${C.ink}`)}>Your join link</div>
+        <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>{link}</div>
       </div>
-      <Pressable label="Copy join link" onClick={copy} className={cx(H.secondary, H.press)} style={S(OUTLINE_BTN)}>
+      <Pressable label="Copy join link" onClick={copy} className={OUTLINE_CLS} style={S(OUTLINE_BTN)}>
         <Icon name="copy" size={14} />
         Copy link
       </Pressable>
@@ -249,12 +254,12 @@ function MemberHoursConfirm({ app, onDone }) {
     } else toast({ title: "Couldn't save that", message: 'Check your connection and try again.', tone: 'danger' });
   }
   return (
-    <div style={S('margin-top:12px')}>
+    <div style={S('margin-top:14px;padding-left:min(52px, max(0px, calc(100vw - 720px)))')} className="vu-lead-hours">
       <div style={S('display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap')}>
-        <div style={S('font:500 13px/1.2 Geist;color:#57504A')}>Logged hours</div>
-        <div style={S('font:450 12px/1.2 Geist;color:#6B635C')}>
-          <span style={S('color:#3F6B4E')}>{hrsLabel(done)} confirmed</span>
-          {waiting > 0 ? <span style={S('color:#8A5A20')}>, {hrsLabel(waiting)} waiting</span> : null}
+        <div style={S(`font:600 14px/1.2 ${F.body};color:${C.ink}`)}>Logged hours</div>
+        <div style={S(`display:flex;align-items:center;gap:14px;flex-wrap:wrap;${NUM}`)}>
+          <StatusText tone="ok">{hrsLabel(done)} confirmed</StatusText>
+          {waiting > 0 ? <StatusText tone="wait">{hrsLabel(waiting)} waiting</StatusText> : null}
         </div>
       </div>
       <ul style={S('margin:6px 0 0;padding:0;list-style:none')}>
@@ -262,24 +267,22 @@ function MemberHoursConfirm({ app, onDone }) {
           const on = !!confirmed[h.id];
           const working = busy === h.id;
           return (
-            <li key={h.id} style={S('display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 0;border-top:1px solid #F1EBE4;flex-wrap:wrap')}>
-              <span style={S('font:450 13px/1.3 Geist;flex:1;min-width:140px;color:#332D28')}>
+            <li key={h.id} style={S(`border-top:1px solid ${C.line}`)}>
+              <div style={S('display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 0;flex-wrap:wrap')}>
+              <span style={S(`font:400 14px/1.35 ${F.body};flex:1;min-width:140px;color:${C.ink}`)}>
                 {h.activity}
-                {h.date ? <span style={S('color:#6B635C')}>, {h.date}</span> : null}
+                {h.date ? <span style={S(`color:${C.ink2}`)}>, {h.date}</span> : null}
               </span>
-              <span style={S(`font:500 12px/1 ${MONO};color:#57504A`)}>{hrsLabel(h.hrs)}</span>
+              <span style={S(`font:600 14px/1 ${F.body};color:${C.ink};${NUM}`)}>{hrsLabel(h.hrs)}</span>
               {on ? (
                 <span style={S('flex:none;display:inline-flex;align-items:center;gap:10px')}>
-                  <span style={S('display:inline-flex;align-items:center;gap:4px;font:500 12px/1 Geist;color:#3F6B4E')}>
-                    <Icon name="check" size={13} />
-                    {working ? 'Removing' : 'Confirmed'}
-                  </span>
+                  <StatusText tone="ok">{working ? 'Removing' : 'Confirmed'}</StatusText>
                   <Pressable
                     label={`Remove confirmation for ${h.activity}`}
                     disabled={working}
                     onClick={() => toggle(h)}
-                    className={cx(H.press)}
-                    style={s('flex:none;display:inline-flex;align-items:center;padding:0 4px;height:32px;border:0;background:none;font:500 12px/1 Geist;color:#57504A;text-decoration:underline;text-underline-offset:3px;cursor:pointer', working ? 'opacity:.6' : '')}
+                    className={cx('vu-link', H.press)}
+                    style={s(`flex:none;display:inline-flex;align-items:center;padding:0 4px;height:36px;border:0;background:none;font:600 13px/1 ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px;cursor:pointer`, working ? 'opacity:.6' : '')}
                   >
                     Undo
                   </Pressable>
@@ -289,12 +292,14 @@ function MemberHoursConfirm({ app, onDone }) {
                   label={`Confirm ${hrsLabel(h.hrs)} for ${h.activity}`}
                   disabled={working}
                   onClick={() => toggle(h)}
-                  className={cx(H.press)}
-                  style={s('flex:none;display:inline-flex;align-items:center;padding:0 11px;height:32px;border-radius:8px;font:600 12px/1 Geist;cursor:pointer;background:#fff;border:1px solid #A8482A;color:#A8482A', working ? 'opacity:.6' : '')}
+                  className={cx('vu-btn', 'vu-btn-dark', H.press)}
+                  style={s(`flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:36px;border-radius:${R.control};font:600 13px/1 ${F.body};cursor:pointer;background:${C.ink};border:1px solid ${C.ink};color:#fff`, working ? 'opacity:.6' : '')}
                 >
+                  <Icon name="check" size={14} stroke={2} />
                   {working ? 'Confirming' : 'Confirm'}
                 </Pressable>
               )}
+              </div>
             </li>
           );
         })}
@@ -311,10 +316,19 @@ export function TeamMembersManager({ p }) {
 
   function assignRole(app, roleId) {
     const role = roles.find((r) => r.id === roleId);
-    setMemberAssignment(app.id, { role: role ? { id: role.id, name: role.name, briefing: role.briefing, color: role.color } : null }).then((res) => {
-      if (res.ok) { toast({ title: role ? 'Role saved' : 'Role cleared', message: role ? `${app.applicant_name} is now ${role.name}` : app.applicant_name, tone: 'ok', timeout: 2000 }); reload(); }
-      else toast({ title: "Couldn't save the role", message: 'Check your connection and try again.', tone: 'danger' });
-    });
+    setMemberAssignment(app.id, { role: role ? { id: role.id, name: role.name, briefing: role.briefing, color: role.color } : null })
+      .catch((error) => ({ ok: false, error }))
+      .then((res) => {
+        if (res.ok) {
+          // Role rows on the Tasks tab count link members by this role; tell them to reload.
+          window.dispatchEvent(new Event('vu:applications-changed'));
+          toast({ title: role ? 'Role saved' : 'Role cleared', message: role ? `${app.applicant_name} is now ${role.name}` : app.applicant_name, tone: 'ok', timeout: 2000 });
+          reload();
+        } else {
+          console.error('[lead] could not save member role', res.error);
+          toast({ title: "Couldn't save the role", message: 'Check your connection and try again.', tone: 'danger' });
+        }
+      });
   }
 
   function editTasks(app) {
@@ -326,28 +340,18 @@ export function TeamMembersManager({ p }) {
   }
 
   return (
-    <div style={S('padding:20px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-      <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-        <div style={S('min-width:0;flex:1')}>
-          <h2 style={S(`margin:0;${LABEL}`)}>Members from your join link</h2>
-          <div style={S('margin-top:6px;font:450 13px/1.4 Geist;color:#57504A')}>People you accepted through your join link. Give each one a role and tasks.</div>
-        </div>
-        <Pressable label="Refresh members" onClick={reload} className={cx(H.secondary, H.press)} style={S('flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:34px;border-radius:9px;border:1px solid #E8E1D9;background:#fff;font:500 13px/1 Geist;color:#57504A;cursor:pointer')}>
-          <Icon name="refresh" size={13} />
-          Refresh
-        </Pressable>
-      </div>
+    <section aria-labelledby="tm-members">
+      <h2 id="tm-members" style={S(H2)}>Members from your join link</h2>
+      <p style={S(`margin:6px 0 0;${META}`)}>People you accepted through your join link. Give each one a role and tasks.</p>
 
-      <div style={S('margin-top:14px')}><ShareLink p={p} /></div>
+      <div style={S('margin-top:16px')}><ShareLink p={p} /></div>
 
       {members === null ? (
-        <div role="status" style={S('margin-top:16px;font:450 13px/1.5 Geist;color:#6B635C')}>Loading members</div>
+        <div role="status" style={S(`margin-top:16px;${SMALL}`)}>Loading members</div>
       ) : members.length === 0 ? (
-        <div style={S('margin-top:16px')}>
-          <EmptyState compact icon="users" title="No members from your link yet" body="Accept an application from your join link and they show up here." />
-        </div>
+        <EmptyState compact icon="users" title="No members from your link yet" body="Accept an application from your join link and they show up here." />
       ) : (
-        <div style={S('margin-top:16px;display:flex;flex-direction:column;gap:12px')}>
+        <div style={S(`margin-top:16px;display:flex;flex-direction:column;border-top:1px solid ${C.line}`)}>
           {members.map((app) => {
             const a = app.assignment || {};
             const tasks = a.tasks || [];
@@ -355,23 +359,23 @@ export function TeamMembersManager({ p }) {
             const doneCount = tasks.filter((t) => done[t.id] === 'done').length;
             const acked = a.role && app.member_state && app.member_state.briefingAck && app.member_state.briefingAck[a.role.id];
             return (
-              <div key={app.id} style={S('padding:16px;border-radius:13px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:14px')}>
-                  <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
-                    <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
-                      <Avatar name={app.applicant_name} fs={14} />
-                    </div>
+              <div key={app.id} style={S(`padding:18px 0;${RULE}`)}>
+                <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:center;justify-content:space-between;gap:16px')}>
+                  <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+                    <span className="vu-row-avatar">
+                      <Avatar name={app.applicant_name} fs={13} />
+                    </span>
                     <div style={S('min-width:0')}>
-                      <div style={S('font:600 14px/1.2 Geist;color:#1A1714')}>{app.applicant_name}</div>
-                      <div style={S('margin-top:3px;font:450 12px/1.3 Geist;color:#6B635C')}>
-                        {app.position ? `Applied as ${app.position}` : 'Joined through your link'}
+                      <div style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{app.applicant_name}</div>
+                      <div style={S(`margin-top:3px;${SMALL}`)}>
+                        {app.position ? `Applied as ${app.position}` : 'Joined through your join link'}
                         {a.role ? (acked ? ', read their briefing' : ", hasn't read their briefing") : ''}
                       </div>
                       <LastCheckIn app={app} p={p} />
                     </div>
                   </div>
-                  <div style={S('display:flex;align-items:center;gap:9px;flex:none;flex-wrap:wrap')}>
-                    <div style={S('min-width:150px')}>
+                  <div style={S('display:flex;align-items:center;gap:8px;flex:none;flex-wrap:wrap')}>
+                    <div style={S('flex:1 1 160px;min-width:160px')}>
                       <Select
                         label=""
                         ariaLabel={`Role for ${app.applicant_name}`}
@@ -379,27 +383,31 @@ export function TeamMembersManager({ p }) {
                         options={[{ v: '', l: 'No role yet' }, ...roles.map((r) => ({ v: r.id, l: r.name }))]}
                         onChange={(v) => assignRole(app, v)}
                         bg="#fff"
-                        fs={13}
+                        fs={14}
                       />
                     </div>
-                    <Pressable label={`Tasks for ${app.applicant_name}`} onClick={() => editTasks(app)} className={cx(H.primary, H.press)} style={S('display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:38px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer')}>
-                      {tasks.length ? `Tasks (${doneCount} of ${tasks.length} done)` : 'Add tasks'}
-                    </Pressable>
-                    <MessageButton app={app} p={p} />
-                    <RateButton app={app} onSaved={reload} />
+                    {/* One group, so the buttons wrap together under the role picker. */}
+                    <div style={S('display:flex;align-items:center;gap:8px;flex:none')}>
+                      <Pressable label={`Tasks for ${app.applicant_name}`} onClick={() => editTasks(app)} className={OUTLINE_CLS} style={S(OUTLINE_BTN)}>
+                        <Icon name="list" size={14} />
+                        {tasks.length ? `Tasks (${doneCount} of ${tasks.length} done)` : 'Add tasks'}
+                      </Pressable>
+                      <RateButton app={app} onSaved={reload} />
+                      <MessageButton app={app} p={p} />
+                    </div>
                   </div>
                 </div>
                 {tasks.length ? (
-                  <ul style={S('margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px')}>
+                  <ul style={S('margin:12px 0 0;padding:0 0 0 min(52px, max(0px, calc(100vw - 720px)));list-style:none')}>
                     {tasks.map((t) => {
                       const st = done[t.id] === 'done';
                       return (
-                        <li key={t.id} style={S('display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:9px;background:#fff;border:1px solid #F1EBE4')}>
-                          <span aria-hidden="true" style={s('width:16px;height:16px;border-radius:4px;flex:none;display:grid;place-items:center', st ? 'background:#3F6B4E;color:#fff' : 'background:#fff;border:1px solid #D8CFC5')}>
-                            {st ? <Icon name="check" size={11} stroke={2.5} /> : null}
+                        <li key={t.id} style={S(`display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid ${C.line}`)}>
+                          <span aria-hidden="true" style={s('width:18px;height:18px;border-radius:50%;flex:none;display:grid;place-items:center', st ? `background:${C.confirmed};color:#fff` : `background:#fff;border:1.5px solid ${C.line2}`)}>
+                            {st ? <Icon name="check" size={12} stroke={2.5} /> : null}
                           </span>
-                          <span style={s('font:450 13px/1.3 Geist;flex:1;min-width:0', st ? 'color:#6B635C;text-decoration:line-through' : 'color:#332D28')}>{t.title}</span>
-                          <span style={s('font:500 12px/1 Geist;flex:none', st ? 'color:#3F6B4E' : 'color:#6B635C')}>{st ? 'Done' : 'To do'}</span>
+                          <span style={s(`font:400 14px/1.35 ${F.body};flex:1;min-width:0`, st ? `color:${C.ink2}` : `color:${C.ink}`)}>{t.title}</span>
+                          <span style={s(`font:600 13px/1 ${F.body};flex:none`, st ? `color:${C.confirmed}` : `color:${C.ink2}`)}>{st ? 'Done' : 'To do'}</span>
                         </li>
                       );
                     })}
@@ -411,7 +419,7 @@ export function TeamMembersManager({ p }) {
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -437,19 +445,19 @@ function MemberTaskForm({ api, app, onSaved }) {
     <div>
       <div style={S('display:flex;flex-direction:column;gap:10px')}>
         {tasks.map((t, i) => (
-          <div key={t.id} style={S('padding:12px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8')}>
+          <div key={t.id} style={S(`padding:12px 0;border-bottom:1px solid ${C.line}`)}>
             <div style={S('display:flex;align-items:center;gap:10px')}>
               <div style={S('flex:1;min-width:0')}>
                 <Field label="" ariaLabel={`Task ${i + 1} title`} value={t.title} onChange={(v) => setT(i, { title: v })} placeholder="e.g. Pick up the trash grabbers" bg="#fff" fs={14} maxLength={90} />
               </div>
               {done[t.id] === 'done' ? (
-                <span style={S('display:inline-flex;align-items:center;gap:4px;font:500 12px/1 Geist;color:#3F6B4E;flex:none')}>
+                <span style={S(`display:inline-flex;align-items:center;gap:4px;font:600 13px/1 ${F.body};color:${C.confirmed};flex:none`)}>
                   <Icon name="check" size={12} />
                   Done
                 </span>
               ) : null}
-              <Pressable label={`Remove task ${i + 1}`} onClick={() => remove(i)} className={cx(H.danger, H.press)} style={S('display:grid;place-items:center;width:34px;height:34px;border-radius:8px;border:1px solid #EBD3C8;background:#fff;color:#A8482A;cursor:pointer;flex:none')}>
-                <Icon name="x" size={14} />
+              <Pressable label={`Remove task ${i + 1}`} onClick={() => remove(i)} className={cx('vu-iconbtn-sm', H.press)} style={S('width:40px;height:40px;cursor:pointer')}>
+                <Icon name="trash" size={18} />
               </Pressable>
             </div>
             <div style={S('margin-top:8px')}>
@@ -457,17 +465,116 @@ function MemberTaskForm({ api, app, onSaved }) {
             </div>
           </div>
         ))}
-        {!tasks.length ? <div style={S('padding:14px;border-radius:11px;border:1px dashed #D8CFC5;background:#FCFAF8;font:450 13px/1.5 Geist;color:#57504A;text-align:center')}>No tasks yet. Add the first thing you want them to do.</div> : null}
+        {!tasks.length ? <p style={S(`margin:0;${META}`)}>No tasks yet. Add the first thing you want them to do.</p> : null}
       </div>
-      <Pressable label="Add a task" onClick={add} className={cx(H.secondary, H.press)} style={S(`margin-top:12px;${OUTLINE_BTN}`)}>
+      <Pressable label="Add a task" onClick={add} className={OUTLINE_CLS} style={S(`margin-top:12px;${OUTLINE_BTN}`)}>
         <Icon name="plus" size={14} />
         Add a task
       </Pressable>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_SECONDARY)}>Cancel</Pressable>
-        <Pressable label="Save tasks" disabled={busy} onClick={save} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>{busy ? 'Saving' : 'Save tasks'}</Pressable>
+      <div style={S('margin-top:20px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <Button variant="outline" onClick={() => api.close()}>Cancel</Button>
+        <Button variant="primary" busy={busy} onClick={save} aria-label="Save tasks">{busy ? 'Saving' : 'Save tasks'}</Button>
       </div>
     </div>
+  );
+}
+
+/* -------- volunteering: one row pattern for "person + their steps" -------- */
+
+/** One setup step as a pill. With `onToggle` it's a checkbox the lead flips
+    (roster people). Without it, it shows the same pill read-only: join-link
+    members tick their own steps from their account, so the lead only sees them. */
+export function StepPill({ label, done, who, onToggle }) {
+  const base = `display:inline-flex;align-items:center;gap:8px;padding:0 14px 0 10px;min-height:36px;border-radius:${R.pill};font:500 14px/1.2 ${F.body};transition:background .16s ease, border-color .16s ease`;
+  const tone = done ? `background:${C.confirmedTint};border:1px solid ${C.confirmedTint};color:${C.confirmed}` : `background:#fff;border:1px solid ${C.line2};color:${C.ink}`;
+  const mark = (
+    <span aria-hidden="true" style={s('width:18px;height:18px;border-radius:50%;flex:none;display:grid;place-items:center', done ? `background:${C.confirmed};color:#fff` : `background:#fff;border:1.5px solid ${C.line2}`)}>
+      {done ? <Icon name="check" size={12} stroke={2.5} /> : null}
+    </span>
+  );
+  if (!onToggle) {
+    return (
+      <span title={`${who} marks this step themselves`} style={s(base, tone)}>
+        {mark}
+        {label}
+        <span className="vu-sr">{done ? ', done' : ', not done'}</span>
+      </span>
+    );
+  }
+  return (
+    <Pressable
+      role="checkbox"
+      aria-checked={!!done}
+      label={`${label} for ${who}`}
+      onClick={onToggle}
+      className={cx(done ? '' : H.chip, H.press)}
+      style={s(base, tone, 'cursor:pointer')}
+    >
+      {mark}
+      {label}
+    </Pressable>
+  );
+}
+
+/** A person and their steps: Avatar, name, "1 of 2 done", then the pills.
+    Roster people and join-link members share it, so the tab reads as one list.
+    `extra` sits under the status (a check-in flag); `end` is the row's menu. */
+export function ProgressRow({ name, ready, cleared, total, steps, onToggle, extra, end }) {
+  return (
+    <li style={S(`padding:14px 0;${RULE}`)}>
+      <div className={cx('vu-pl-row', end ? 'has-end' : '')}>
+        <div className="vu-pl-who" style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+          <span className="vu-row-avatar">
+            <Avatar name={name} fs={13} />
+          </span>
+          <div style={S('min-width:0')}>
+            <div className="vu-trunc" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{name}</div>
+            <div style={S('margin-top:5px')}>
+              <StatusText tone={ready ? 'ok' : 'wait'}>{ready ? 'Ready for shifts' : `${cleared} of ${total} done`}</StatusText>
+            </div>
+            {extra}
+          </div>
+        </div>
+        <div className="vu-pl-steps" style={S('display:flex;gap:8px;flex-wrap:wrap;min-width:0')}>
+          {steps.map((step) => (
+            <StepPill key={step.id} label={step.label} done={!!step.done} who={name} onToggle={onToggle ? () => onToggle(step) : null} />
+          ))}
+        </div>
+        {end ? <div className="vu-pl-end">{end}</div> : null}
+      </div>
+    </li>
+  );
+}
+
+/** Rate and Message for one join-link member, behind one more button. */
+function MemberMenu({ app, p, onSaved }) {
+  const stars = app.assignment && app.assignment.rating && app.assignment.rating.stars;
+  function message() {
+    openModal({
+      title: app.applicant_name,
+      subtitle: p.name ? `About ${p.name}` : 'Member',
+      Body: () => <MessageThread applicationId={app.id} recipientId={app.applicant_id} recipientName={app.applicant_name} />,
+    });
+  }
+  return (
+    <IconButton
+      icon="more"
+      label={`More actions for ${app.applicant_name || "Volunteer"}`}
+      aria-haspopup="menu"
+      onClick={(e) =>
+        menuFromEvent(
+          e,
+          [
+            { key: 'rate', label: stars ? `Change rating (${stars} of 5)` : 'Rate', icon: 'star' },
+            { key: 'message', label: 'Message', icon: 'message' },
+          ],
+          (key) => {
+            if (key === 'rate') openRating(app, onSaved);
+            else if (key === 'message') message();
+          }
+        )
+      }
+    />
   );
 }
 
@@ -480,59 +587,36 @@ export function PipelineMembers({ p }) {
   if (members === null) return null;
 
   return (
-    <div style={S('position:relative;border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-      <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4')}>
-        <h2 style={S(`margin:0;${LABEL}`)}>Members from your join link</h2>
-        <div style={S('margin-top:5px;font:450 13px/1.4 Geist;color:#57504A')}>People you accepted through your join link. They mark their own steps done.</div>
-      </div>
-      <div style={S('padding:16px 20px')}><ShareLink p={p} /></div>
+    <section aria-labelledby="pl-members">
+      <h2 id="pl-members" style={S(H2)}>Members from your join link</h2>
+      <p style={S(`margin:6px 0 0;${META}`)}>
+        People you accepted through your join link. They mark their own steps done. Confirm the hours they log on the{' '}
+        <Link href={`/lead/${p.id}/hours`} className={cx('vu-link', H.link)} style={S(`color:${C.ink};font-weight:600;text-decoration:underline;text-underline-offset:3px`)}>Hours tab</Link>.
+      </p>
+      <div style={S('margin-top:16px')}><ShareLink p={p} /></div>
       {members.length === 0 ? (
-        <div style={S('padding:0 20px 20px')}>
-          <EmptyState compact icon="users" title="No members from your link yet" body="People you accept through your join link show up here with their progress." />
-        </div>
+        <EmptyState compact icon="users" title="No members from your link yet" body="People you accept through your join link show up here with their progress." />
       ) : (
-        members.map((app) => {
-          const doneMap = (app.member_state && app.member_state.pipeline) || {};
-          const required = steps.filter((x) => x.required !== false);
-          const cleared = required.filter((x) => doneMap[x.id]).length;
-          const ready = required.length === 0 || cleared === required.length;
-          return (
-            <div key={app.id} style={S('padding:14px 20px;border-top:1px solid #F1EBE4')}>
-              <div style={S('display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
-                <div style={S('display:flex;align-items:center;gap:11px;min-width:180px;max-width:100%;flex:0 1 auto')}>
-                  <div style={S('width:32px;height:32px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <Avatar name={app.applicant_name} fs={13} />
-                  </div>
-                  <div style={S('min-width:0')}>
-                    <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{app.applicant_name}</div>
-                    <div style={s('margin-top:4px;font:500 12px/1 Geist', ready ? 'color:#3F6B4E' : 'color:#8A5A20')}>{ready ? 'Ready for shifts' : `${cleared} of ${required.length} done`}</div>
-                    <LastCheckIn app={app} p={p} />
-                  </div>
-                </div>
-                <div style={S('flex:1;display:flex;gap:7px;flex-wrap:wrap;min-width:0')}>
-                  {steps.map((step) => {
-                    const on = !!doneMap[step.id];
-                    return (
-                      <span key={step.id} style={s('display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;font:500 12px/1.2 Geist', on ? 'background:#EAF3EC;border:1px solid #CFE4D5;color:#3F6B4E' : 'background:#FCFAF8;border:1px solid #F1EBE4;color:#57504A')}>
-                        <span aria-hidden="true" style={s('width:14px;height:14px;border-radius:4px;flex:none;display:grid;place-items:center', on ? 'background:#3F6B4E;color:#fff' : 'background:#fff;border:1px solid #D8CFC5')}>
-                          {on ? <Icon name="check" size={10} stroke={2.5} /> : null}
-                        </span>
-                        {step.label}
-                        <span className="vu-sr">{on ? ', done' : ', not done'}</span>
-                      </span>
-                    );
-                  })}
-                </div>
-                <div style={S('display:flex;gap:8px;flex:none;flex-wrap:wrap')}>
-                  <MessageButton app={app} p={p} />
-                  <RateButton app={app} onSaved={reload} />
-                </div>
-              </div>
-              <MemberHoursConfirm app={app} onDone={reload} />
-            </div>
-          );
-        })
+        <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+          {members.map((app) => {
+            const doneMap = (app.member_state && app.member_state.pipeline) || {};
+            const required = steps.filter((x) => x.required !== false);
+            const cleared = required.filter((x) => doneMap[x.id]).length;
+            return (
+              <ProgressRow
+                key={app.id}
+                name={app.applicant_name || 'Volunteer'}
+                ready={required.length === 0 || cleared === required.length}
+                cleared={cleared}
+                total={required.length}
+                steps={steps.map((x) => ({ id: x.id, label: x.label, done: !!doneMap[x.id] }))}
+                extra={<LastCheckIn app={app} p={p} />}
+                end={<MemberMenu app={app} p={p} onSaved={reload} />}
+              />
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </section>
   );
 }

@@ -5,17 +5,22 @@
    The organizer posts updates that every member (and anyone with the join
    link) sees. Backed by listings.announcements, so it's cross-user and saved. Pass
    canPost for the leader view; leave it off for the read-only member/public view.
+   Plain section: heading, composer, then the posts as divided rows. A rule
+   under it separates it from whatever follows.
    ========================================================================== */
 
 import { useEffect, useState } from 'react';
-import { S, s, cx, H } from '../lib/style.js';
-import { Icon, Pressable } from './ui.jsx';
+import { S } from '../lib/style.js';
+import { C, F } from '../lib/tokens.js';
+import { Button, IconButton, TextArea } from './ui.jsx';
 import { toast, confirmDialog } from '../lib/overlays.js';
 import { loadAnnouncements, postAnnouncement, deleteAnnouncement } from '../lib/listings.js';
 
-const MONO = "'Geist Mono',monospace";
+const MAX_LEN = 1000;
 
-function whenLabel(at) {
+/** "just now", "5 min ago", "3h ago", "2d ago", then "Oct 12". Shared with the
+    read-only notes on /join so every board dates posts the same way. */
+export function whenLabel(at) {
   if (!at) return '';
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return '';
@@ -48,7 +53,7 @@ export default function AnnouncementBoard({ listingId, canPost = false, compact 
   }
 
   async function remove(an) {
-    const ok = await confirmDialog({ title: 'Delete this update?', body: an.body, confirmLabel: 'Delete update', cancelLabel: 'Keep it' });
+    const ok = await confirmDialog({ title: 'Delete this update?', body: an.body, confirmLabel: 'Delete update', cancelLabel: 'Cancel', tone: 'danger' });
     if (!ok) return;
     const res = await deleteAnnouncement(listingId, an.id);
     if (res.ok) { setItems(res.announcements); toast({ title: 'Update deleted', tone: 'ok' }); }
@@ -59,59 +64,55 @@ export default function AnnouncementBoard({ listingId, canPost = false, compact 
   if (!canPost && (items === null || items.length === 0)) return null;
 
   return (
-    <div style={S(`padding:${compact ? '18px' : '22px'};border-radius:16px;border:1px solid #E8E1D9;background:#fff`)}>
-      <h2 style={S('margin:0;font:600 15px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>{title}</h2>
+    <section style={S(`padding-bottom:${compact ? 20 : 28}px;border-bottom:1px solid ${C.line}`)}>
+      <h2 style={S(`margin:0;font:600 ${compact ? 17 : 20}px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{title}</h2>
 
       {canPost ? (
         !listingId ? (
-          <div style={S('margin-top:12px;padding:12px 14px;border-radius:11px;background:#FAF6F3;border:1px solid #EFE3DC;font:450 12px/1.5 Geist;color:#8A5A20')}>
+          <p style={S(`margin:10px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
             You can post updates once your project is published.
-          </div>
+          </p>
         ) : (
-          <div style={S('margin-top:12px')}>
-            <textarea
+          <div style={S('margin-top:14px;max-width:760px')}>
+            <TextArea
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              aria-label="Write an update"
+              onChange={(v) => setDraft(v)}
+              ariaLabel="Write an update"
               placeholder="e.g. Bring gloves Saturday. We meet at the side door."
-              className={H.input}
-              maxLength={1000}
-              style={S('display:block;width:100%;padding:12px 14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:64px;font:450 14px/1.55 Geist;color:#332D28;resize:vertical')}
+              maxLength={MAX_LEN}
+              minHeight={72}
             />
             <div style={S('margin-top:10px;display:flex;justify-content:flex-end')}>
-              <Pressable
-                label="Post update"
-                disabled={busy || !draft.trim()}
-                onClick={post}
-                className={cx(H.primary, H.press)}
-                style={s('display:inline-flex;align-items:center;gap:8px;padding:0 16px;height:38px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer', !draft.trim() ? 'opacity:.55' : '')}
-              >
+              <Button variant="dark" size="sm" busy={busy} disabled={!draft.trim()} aria-disabled={!draft.trim() || busy ? 'true' : undefined} onClick={post}>
                 {busy ? 'Posting' : 'Post update'}
-              </Pressable>
+              </Button>
             </div>
           </div>
         )
       ) : null}
 
-      <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-        {items && items.length ? (
-          items.map((an) => (
-            <div key={an.id} style={S('padding:14px 16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-              <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:10px')}>
-                <div style={S('font:450 14px/1.6 Geist;color:#332D28;white-space:pre-wrap;min-width:0')}>{an.body}</div>
+      {items && items.length ? (
+        <div style={S(`margin-top:${canPost ? 18 : 10}px;max-width:760px;display:flex;flex-direction:column`)}>
+          {items.map((an, i) => (
+            <div key={an.id} style={S(`padding:14px 0;${i ? `border-top:1px solid ${C.line}` : ''}`)}>
+              <div style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:12px')}>
+                <div style={S(`font:400 15px/1.55 ${F.body};color:${C.ink};white-space:pre-wrap;overflow-wrap:anywhere;min-width:0`)}>{an.body}</div>
                 {canPost ? (
-                  <Pressable label="Delete update" onClick={() => remove(an)} className={cx(H.toInk, H.press)} style={S('flex:none;display:grid;place-items:center;width:28px;height:28px;margin:-4px -6px 0 0;border-radius:8px;color:#8A8179;cursor:pointer')}>
-                    <Icon name="x" size={14} />
-                  </Pressable>
+                  <IconButton
+                    icon="trash"
+                    label="Delete update"
+                    onClick={() => remove(an)}
+                    style={{ width: 36, height: 36, flex: 'none', margin: '-8px -8px 0 0' }}
+                  />
                 ) : null}
               </div>
-              <div style={S(`margin-top:8px;font:500 10px/1 ${MONO};color:#8A8179`)}>{whenLabel(an.at)}</div>
+              <div style={S(`margin-top:6px;font:400 13px/1.3 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>{whenLabel(an.at)}</div>
             </div>
-          ))
-        ) : canPost ? (
-          <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>No updates yet. Posts show on your join page and on members' home.</div>
-        ) : null}
-      </div>
-    </div>
+          ))}
+        </div>
+      ) : canPost ? (
+        <p style={S(`margin:14px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>No updates yet. Posts show on your join page and on members' home.</p>
+      ) : null}
+    </section>
   );
 }

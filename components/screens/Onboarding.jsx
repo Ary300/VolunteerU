@@ -6,29 +6,37 @@
    plus first name and ZIP. Step 2 either sets up a student project or saves
    volunteer preferences that sort Discover. Every answer is persisted to
    `state.onboarding` as it changes, so a refresh resumes where it left off.
+
+   Layout: the form on white on the left, a photo of the work on the right
+   that follows the chosen intent. Under 1180px the photo goes and the form
+   starts right under a slim top bar.
    ========================================================================== */
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { Field, Select, Chip, Pressable, TextArea, Icon, countWords } from '../ui.jsx';
-import { Logo } from '../Logo.jsx';
+import { S, s } from '../../lib/style.js';
+import { C, F, causeOf } from '../../lib/tokens.js';
+import { Field, Select, Chip, TextArea, Button, RadioDot, countWords } from '../ui.jsx';
+import { Wordmark } from '../Logo.jsx';
+import { causeLabel } from '../LogHoursForm.jsx';
 import { useSnapshot, update, getState } from '../../lib/store.js';
-import { toast } from '../../lib/overlays.js';
+import { toast, dismissToast } from '../../lib/overlays.js';
 import { CAUSES, WINDOWS } from '../../lib/seed.js';
+import { PHOTOS } from '../../lib/photos.js';
 import { createProject, perform, signOut, addDays, formatSessionDate } from '../../lib/db.js';
 import { track } from '../../lib/analytics.js';
 import { defaultDraft, generatedSessions } from '../../lib/createDraft.js';
 import { sameSitePath } from '../../lib/safePath.js';
 
-const MONO = "'Geist Mono',monospace";
 const MISSION_MAX = 240;
+const INTEREST_MIN_CHARS = 8;
 const INTEREST_MAX_WORDS = 150;
 const POSITION_SUGGESTIONS = ['Tutor', 'Check-in lead', 'Supply lead', 'Photographer', 'Snacks'];
 const EXPERIENCE = ['First time', 'Helped run something', 'Led a group before'];
 const VOLUNTEERED = ['Never', 'A few times', 'Regularly'];
 const CAUSE_OPTIONS = ['Education', 'Food & hunger', 'Environment', 'Civic', 'Animals', 'Health', 'Seniors', 'Arts', 'Homelessness', 'Disaster relief'];
+const CAUSE_OPTION_ITEMS = CAUSE_OPTIONS.map((c) => ({ v: c, l: causeLabel(c) }));
 const CREW_OPTIONS = ['4 to 6', '8 to 12', '12 to 20', '20+'];
 const INTENT_KEYS = ['join', 'start', 'both'];
 
@@ -39,16 +47,23 @@ const INTENTS = [
   { k: 'both', t: 'Both', b: 'Volunteer now, start a project later' },
 ];
 
+// The photo beside the form follows the intent. Crops keep faces in a tall frame.
+const INTENT_PHOTO = {
+  join: { ...PHOTOS.food, pos: '38% center', alt: 'Volunteers packing boxes of food at a food bank' },
+  start: { ...PHOTOS.outdoor, pos: '72% center', alt: 'A student holding a clipboard with a volunteer sign-up sheet at a park cleanup' },
+  both: { ...PHOTOS.reading, pos: '28% center', alt: 'Volunteers sorting donations, one holding a clipboard' },
+};
+
 const DEFAULT_START = { name: '', cause: 'Education', site: '', crew: '8 to 12', mission: '', positions: [], experience: 'First time' };
 const DEFAULT_JOIN = { interest: '', location: '', causes: [], windows: [], radius: '5', hoursGoal: '', volunteered: 'Never' };
 
 // Pages a ?next= target may not send a student back to from here.
 const NEXT_BLOCKLIST = /^\/(onboarding|signin|signup|forgot|reset)(\/|\?|#|$)/;
 
-const PRIMARY_BTN =
-  'display:inline-flex;align-items:center;justify-content:center;gap:9px;white-space:nowrap;flex:none;padding:0 24px;height:46px;border-radius:12px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer;transition:background .16s ease, transform .16s ease';
-const LABEL = 'font:500 12px/1.3 Geist;color:#57504A';
-const OPTIONAL = 'color:#A9A097;font-weight:400';
+const LABEL = `display:block;font:600 13px/1.2 ${F.body};color:${C.ink}`;
+const OPTIONAL = `color:${C.ink2};font-weight:400`;
+const HINT = `margin:8px 0 0;font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+
 
 /** A ?next= value that stays on this site and doesn't loop back into auth. */
 function safeNext(raw) {
@@ -63,8 +78,47 @@ function nextSaturdayLabel() {
   return formatSessionDate(addDays(new Date(today.getFullYear(), today.getMonth(), today.getDate()), ahead));
 }
 
+/* Step 2 is mirrored in the URL (?step=2) with its own history entry, so the
+   browser Back button and the Android back gesture return to step 1 instead
+   of leaving onboarding. Step 1 is the bare /onboarding; other params
+   (?intent=, ?next=) are kept. */
+function readUrlStep() {
+  try {
+    return new URLSearchParams(window.location.search).get('step') === '2' ? 2 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function writeUrlStep(n, mode) {
+  try {
+    const url = new URL(window.location.href);
+    if (n === 2) url.searchParams.set('step', '2');
+    else url.searchParams.delete('step');
+    const href = `${url.pathname}${url.search}${url.hash}`;
+    if (mode !== 'push' && href === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+    // null state: Next.js adds its own router state to native history calls.
+    if (mode === 'push') window.history.pushState(null, '', href);
+    else window.history.replaceState(null, '', href);
+  } catch {
+    /* History unavailable: the step still lives in state.onboarding. */
+  }
+}
+
 function toggleIn(list, v) {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+}
+
+/** Arrow-key handler for a roving-tabindex radio group. */
+function radioKeys(e, options, value, choose, root) {
+  const dir = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
+  if (!dir) return;
+  e.preventDefault();
+  const i = Math.max(0, options.indexOf(value));
+  const next = (i + dir + options.length) % options.length;
+  choose(options[next]);
+  const el = root && root.querySelectorAll('[role="radio"]')[next];
+  if (el) el.focus();
 }
 
 export default function Onboarding() {
@@ -91,6 +145,18 @@ export default function Onboarding() {
   const [join, setJoin] = useState({ ...DEFAULT_JOIN, ...(ob.draft && ob.draft.join) });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  // Stays set once finish() succeeds, so a second click during navigation
+  // can't create a second project.
+  const finishing = useRef(false);
+  // The "Check the highlighted fields" toast, cleared once the form moves on.
+  const warnId = useRef(null);
+  const warn = () => {
+    warnId.current = toast({ title: 'Check the highlighted fields', tone: 'warn' });
+  };
+  const clearWarn = () => {
+    if (warnId.current) dismissToast(warnId.current);
+    warnId.current = null;
+  };
 
   // A landing CTA can preselect the intent. The mount value is applied above;
   // a later change to ?intent= only applies while the student hasn't chosen.
@@ -137,7 +203,9 @@ export default function Onboarding() {
       else if (start.mission.length > MISSION_MAX) e.mission = `Keep it to ${MISSION_MAX} characters.`;
       if (!start.positions.length) e.positions = 'Choose at least 1 position.';
     } else {
-      if (countWords(join.interest) > INTEREST_MAX_WORDS) e.interest = `Keep it to ${INTEREST_MAX_WORDS} words.`;
+      const interest = join.interest.trim();
+      if (interest.length < INTEREST_MIN_CHARS) e.interest = 'Enter a few words about what you want to do.';
+      else if (countWords(interest) > INTEREST_MAX_WORDS) e.interest = `Keep it to ${INTEREST_MAX_WORDS} words.`;
       if (!join.location.trim()) e.location = 'Enter your city or town.';
     }
     setErrors(e);
@@ -145,19 +213,88 @@ export default function Onboarding() {
   }
 
   function goStep(n) {
+    clearWarn();
     setErrors({});
     setStep(n);
     window.scrollTo(0, 0);
+    // The button that was pressed is gone, so put focus on the new heading.
+    requestAnimationFrame(() => {
+      const h = document.querySelector('.vu-ob-h1');
+      if (h) h.focus({ preventScroll: true });
+    });
   }
+
+  // True while the history entry under the current one is this page's step 1,
+  // so the on-page Back can pop it instead of stacking another entry.
+  const step1Below = useRef(false);
 
   function next() {
     if (!validateStep1()) {
-      toast({ title: 'Check the highlighted fields', tone: 'warn' });
+      warn();
       return;
     }
     setIntentChosen(true);
     goStep(2);
+    writeUrlStep(2, 'push');
+    step1Below.current = true;
   }
+
+  // The on-page Back matches the browser's: pop to the step 1 entry when it's
+  // there (the popstate handler shows step 1), otherwise rewrite this entry.
+  function back() {
+    if (step1Below.current && readUrlStep() === 2) {
+      step1Below.current = false;
+      window.history.back();
+      return;
+    }
+    goStep(1);
+    writeUrlStep(1, 'replace');
+  }
+
+  // On open, line the URL up with the saved step. A resume on step 2 gets a
+  // step 1 entry under it so Back still has somewhere to go. Deferred a tick
+  // so Next.js has patched history and keeps its router URL in step.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const u = readUrlStep();
+      if (step === 2 && u !== 2) {
+        writeUrlStep(1, 'replace');
+        writeUrlStep(2, 'push');
+        step1Below.current = true;
+      } else if (step === 1 && u === 2) {
+        writeUrlStep(1, 'replace');
+      }
+    }, 0);
+    return () => clearTimeout(t);
+    // Runs once on open; later moves go through next, back and popstate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Browser Back and Forward. Refreshed every render so it sees current
+  // answers when it validates a forward move to step 2.
+  const onHistory = useRef(null);
+  onHistory.current = () => {
+    if (finishing.current) return;
+    const u = readUrlStep();
+    if (u === step) return;
+    if (u === 2) {
+      if (!validateStep1()) {
+        warn();
+        writeUrlStep(1, 'replace');
+        return;
+      }
+      setIntentChosen(true);
+      step1Below.current = true;
+    } else {
+      step1Below.current = false;
+    }
+    goStep(u);
+  };
+  useEffect(() => {
+    const h = () => onHistory.current && onHistory.current();
+    window.addEventListener('popstate', h);
+    return () => window.removeEventListener('popstate', h);
+  }, []);
 
   function saveAnswers(st) {
     st.account.firstName = identity.firstName.trim();
@@ -229,11 +366,13 @@ export default function Onboarding() {
   }
 
   async function finish() {
-    if (busy) return;
+    if (busy || finishing.current) return;
     if (!validateStep2()) {
-      toast({ title: 'Check the highlighted fields', tone: 'warn' });
+      warn();
       return;
     }
+    finishing.current = true;
+    clearWarn();
     setBusy(true);
     try {
       await perform('onboarding.finish', () => update(saveAnswers));
@@ -249,20 +388,22 @@ export default function Onboarding() {
           : { title: 'Preferences saved', message: `Showing opportunities near ${join.location.trim()}.`, tone: 'ok' });
         router.replace(nextPath || '/discover');
       }
+      // Leave busy on: the page is navigating away.
     } catch (err) {
+      finishing.current = false;
+      setBusy(false);
       if (err && err.code === 'OFFLINE') toast({ title: "You're offline", message: 'Your answers are saved. Reconnect and try again.', tone: 'danger' });
       else if (!err || err.code !== 'DUPLICATE') {
         console.error('onboarding.finish failed', err);
         toast({ title: "Couldn't finish setup", message: 'Your answers are saved. Try again.', tone: 'danger' });
       }
-    } finally {
-      setBusy(false);
     }
   }
 
   // Skip keeps every answer already given. A project can't be half-created,
   // so the start path says plainly that nothing was made.
   function skip() {
+    clearWarn();
     let keptPrefs = false;
     update((st) => {
       const name = identity.firstName.trim();
@@ -295,107 +436,122 @@ export default function Onboarding() {
     toast({ title: 'Signed out', tone: 'ok' });
   }
 
+  const photo = INTENT_PHOTO[intent] || INTENT_PHOTO.join;
+
   return (
-    <div className="vu-onboard vu-fixed-width vu-screen" style={S('display:grid;grid-template-columns:1fr 1.08fr;min-height:100vh;min-width:1180px')}>
-      <Aside step={step} isStart={isStart} />
-      <div className="vu-onboard-form" id="vu-main" style={S('background:#FAF8F5;padding:56px 60px;display:flex;flex-direction:column;justify-content:center')}>
-        <div style={S('max-width:540px;width:100%')}>
-          {step === 1 ? (
-            <StepOne
-              intent={intent}
-              setIntent={chooseIntent}
-              identity={identity}
-              setIdentity={setIdentity}
-              errors={errors}
-              onNext={next}
-              onSkip={skip}
-              email={state.account.email || state.session.email}
-              onSwitch={switchAccount}
-            />
-          ) : isStart ? (
-            <StartForm start={start} setStart={setStart} errors={errors} busy={busy} onFinish={finish} onBack={() => goStep(1)} onSkip={skip} />
-          ) : (
-            <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={() => goStep(1)} onSkip={skip} />
-          )}
+    <div className="vu-ob vu-screen">
+      <div className="vu-ob-main" id="vu-main">
+        <header className="vu-ob-top">
+          <Link href="/" aria-label="VolunteerU home" style={S('display:inline-flex;color:inherit;border-radius:10px')}>
+            <Wordmark size={26} />
+          </Link>
+          <StepMeter step={step} />
+        </header>
+        <div className="vu-ob-body">
+          <div className="vu-ob-col">
+            {step === 1 ? (
+              <StepOne
+                intent={intent}
+                setIntent={chooseIntent}
+                identity={identity}
+                setIdentity={setIdentity}
+                errors={errors}
+                onNext={next}
+                onSkip={skip}
+                email={state.account.email || state.session.email}
+                onSwitch={switchAccount}
+              />
+            ) : isStart ? (
+              <StartForm start={start} setStart={setStart} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} />
+            ) : (
+              <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} />
+            )}
+          </div>
         </div>
+      </div>
+      <div className="vu-ob-photo" aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {/* 16px like every other photo; 24px is kept for the landing hero only. */}
+        <img key={photo.src} src={photo.src} alt="" style={{ objectPosition: photo.pos, borderRadius: 'var(--r-photo)' }} />
       </div>
     </div>
   );
 }
 
-function Aside({ step, isStart }) {
+/** "Step 1 of 2" with a two-segment bar, exposed as one progressbar. */
+function StepMeter({ step }) {
   return (
     <div
-      className="vu-onboard-aside"
-      style={S('position:relative;background:#1F1B18;background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 1px,transparent 1px 8px);padding:56px 52px;display:flex;flex-direction:column;justify-content:space-between;gap:32px;overflow:hidden')}
+      role="progressbar"
+      aria-valuenow={step}
+      aria-valuemin={1}
+      aria-valuemax={2}
+      aria-label={`Step ${step} of 2`}
+      style={S('display:flex;align-items:center;gap:12px')}
     >
-      <Link href="/" aria-label="VolunteerU home" style={S('position:relative;display:flex;align-items:center;gap:9px;width:max-content;color:inherit')}>
-        <Logo size={24} />
-        <div style={S('font:600 16px/1 Geist;letter-spacing:-0.03em;color:#fff')}>VolunteerU</div>
-      </Link>
-      <div style={S('position:relative;max-width:400px')}>
-        <div style={S(`font:500 13px/1 ${MONO};color:#D2775B`)}>Step {step} of 2</div>
-        <h2 style={S('margin:14px 0 0;font:600 34px/1.14 Geist;letter-spacing:-0.04em;color:#fff;text-wrap:balance')}>
-          {isStart ? '2 steps, then your project page is set up' : "2 steps, then we'll show what's near you"}
-        </h2>
-        <p style={S('margin:14px 0 0;font:400 16px/1.6 Geist;color:#A79E96;text-wrap:pretty')}>
-          {isStart
-            ? 'What you enter here fills in your project page. You can edit all of it later.'
-            : 'Your town and causes sort what you see on Discover. Change them any time in Settings.'}
-        </p>
-      </div>
-      <div role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={2} aria-label={`Step ${step} of 2`} style={S('position:relative;display:flex;gap:6px')}>
-        <div style={S('width:80px;height:3px;border-radius:2px;background:#D2775B')} />
-        <div style={s('width:80px;height:3px;border-radius:2px;transition:background .24s ease', `background:${step >= 2 ? '#D2775B' : '#3A332D'}`)} />
-      </div>
+      <span style={S(`font:600 13px/1 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums;white-space:nowrap`)}>Step {step} of 2</span>
+      <span aria-hidden="true" style={S('display:flex;gap:4px')}>
+        {[1, 2].map((n) => (
+          <span key={n} style={s('width:28px;height:4px;border-radius:999px;transition:background .24s ease', `background:${n <= step ? C.ink : C.line2}`)} />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function Heading({ children, sub }) {
+  return (
+    <div>
+      <h1 className="vu-ob-h1" tabIndex={-1} style={S(`margin:0;font:700 40px/1.05 ${F.display};letter-spacing:-0.03em;color:${C.ink};text-wrap:balance`)}>{children}</h1>
+      {sub ? <p style={S(`margin:10px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{sub}</p> : null}
     </div>
   );
 }
 
 function StepOne({ intent, setIntent, identity, setIdentity, errors, onNext, onSkip, email, onSwitch }) {
   const groupRef = useRef(null);
-
-  // Arrow keys move the choice, the standard radio group pattern.
-  function onKeyDown(e) {
-    const dir = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
-    if (!dir) return;
-    e.preventDefault();
-    const i = INTENTS.findIndex((x) => x.k === intent);
-    const nextIdx = (i + dir + INTENTS.length) % INTENTS.length;
-    setIntent(INTENTS[nextIdx].k);
-    const el = groupRef.current && groupRef.current.querySelectorAll('[role="radio"]')[nextIdx];
-    if (el) el.focus();
-  }
+  const keys = INTENTS.map((x) => x.k);
 
   return (
     <div className="vu-screen">
-      <h1 style={S('margin:0;font:600 34px/1.08 Geist;letter-spacing:-0.04em')}>What brings you here?</h1>
-      <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Pick one. You can do the other later.</p>
-      <div ref={groupRef} role="radiogroup" aria-label="What brings you here?" onKeyDown={onKeyDown} style={S('margin-top:24px;display:flex;flex-direction:column;gap:10px')}>
+      <Heading sub="Pick one. You can do the other later.">What brings you here?</Heading>
+      <div
+        ref={groupRef}
+        role="radiogroup"
+        aria-label="What brings you here?"
+        className="vu-ob-opts"
+        onKeyDown={(e) => radioKeys(e, keys, intent, setIntent, groupRef.current)}
+        style={S('margin-top:24px')}
+      >
         {INTENTS.map((i) => {
           const on = intent === i.k;
           return (
-            <Pressable
+            <div
               key={i.k}
               role="radio"
               aria-checked={on}
               tabIndex={on ? 0 : -1}
+              className="vu-ob-opt"
               onClick={() => setIntent(i.k)}
-              className={cx(on ? '' : H.chip, H.press)}
-              style={s(
-                'padding:18px 20px;border-radius:14px',
-                `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`,
-                `background:${on ? '#1F1B18' : '#FFFFFF'}`,
-                'cursor:pointer;transition:border-color .16s ease, background .16s ease'
-              )}
+              onKeyDown={(e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                  e.preventDefault();
+                  setIntent(i.k);
+                }
+              }}
             >
-              <div style={s('font:600 18px/1.2 Geist;letter-spacing:-0.03em', `color:${on ? '#FFFFFF' : '#1A1714'}`)}>{i.t}</div>
-              <div style={s('margin-top:6px;font:450 14px/1.4 Geist', `color:${on ? '#CFC7BF' : '#6B635C'}`)}>{i.b}</div>
-            </Pressable>
+              <span style={S('margin-top:1px')}>
+                <RadioDot checked={on} />
+              </span>
+              <span style={S('min-width:0')}>
+                <span style={S(`display:block;font:600 16px/1.3 ${F.body};color:${C.ink}`)}>{i.t}</span>
+                <span style={S(`display:block;margin-top:3px;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>{i.b}</span>
+              </span>
+            </div>
           );
         })}
       </div>
-      <div className="vu-2col-keep" style={S('margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
+      <div className="vu-ob-pair" style={S('margin-top:28px')}>
         <Field
           label="First name"
           value={identity.firstName}
@@ -411,29 +567,55 @@ function StepOne({ intent, setIntent, identity, setIdentity, errors, onNext, onS
           value={identity.zip}
           onChange={(v) => setIdentity((f) => ({ ...f, zip: v.replace(/\D/g, '').slice(0, 5) }))}
           onEnter={onNext}
-          placeholder="e.g. 46220"
+          placeholder="e.g. 46032"
           inputMode="numeric"
           autoComplete="postal-code"
           required
           error={errors.zip}
         />
       </div>
-      <div style={S('margin-top:28px;display:flex;align-items:center;gap:18px;flex-wrap:wrap')}>
-        <Pressable label="Next" onClick={onNext} className={H.press} style={S(PRIMARY_BTN)}>
+      <div className="vu-ob-actions">
+        <Button variant="primary" size="lg" onClick={onNext} extra="min-width:132px">
           Next
-        </Pressable>
-        <Pressable label="Skip for now" onClick={onSkip} className={H.toInk} style={S('font:500 14px/1 Geist;color:#6B635C;cursor:pointer')}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onSkip}>
           Skip for now
-        </Pressable>
+        </Button>
       </div>
       {email ? (
-        <div style={S('margin-top:22px;font:450 13px/1.5 Geist;color:#6B635C;overflow-wrap:anywhere')}>
+        <p style={S(`margin:28px 0 0;font:400 13px/1.5 ${F.body};color:${C.ink2};overflow-wrap:anywhere`)}>
           Signed in as {email}.{' '}
-          <Pressable as="span" label="Sign out" onClick={onSwitch} className={H.link} style={S('color:#C2603C;font-weight:500;cursor:pointer')}>
+          <button type="button" onClick={onSwitch} className="vu-link-ul" style={S(`padding:0;border:0;background:none;font:600 13px/1.5 ${F.body};color:${C.ink};cursor:pointer;text-decoration:underline;text-underline-offset:3px`)}>
             Sign out
-          </Pressable>
-        </div>
+          </button>
+        </p>
       ) : null}
+    </div>
+  );
+}
+
+/** A labelled single-choice row of pills (role=radiogroup, arrow keys move). */
+function PillChoice({ id, label, options, value, onChange }) {
+  const ref = useRef(null);
+  return (
+    <div>
+      <div id={id} style={S(LABEL)}>{label}</div>
+      <div
+        ref={ref}
+        role="radiogroup"
+        aria-labelledby={id}
+        onKeyDown={(e) => radioKeys(e, options, value, onChange, ref.current)}
+        style={S('margin-top:10px;display:flex;gap:8px;flex-wrap:wrap')}
+      >
+        {options.map((o) => {
+          const on = value === o;
+          return (
+            <button key={o} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} className="vu-ob-pill" onClick={() => onChange(o)}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -442,42 +624,42 @@ function StartForm({ start, setStart, errors, busy, onFinish, onBack, onSkip }) 
   const set = (k) => (v) => setStart((f) => ({ ...f, [k]: v }));
   return (
     <div className="vu-screen">
-      <h1 style={S('margin:0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>About your project</h1>
-      <div className="vu-2col-keep" style={S('margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:14px')}>
-        <Field label="Project name" value={start.name} onChange={set('name')} placeholder="e.g. Northside Reading Circle" maxLength={60} required error={errors.name} />
-        <Select label="Cause" value={start.cause} onChange={set('cause')} options={CAUSE_OPTIONS} />
-        <Field label="Where it happens" value={start.site} onChange={set('site')} placeholder="e.g. Eastside Library" maxLength={80} required error={errors.site} />
-        <Select label="People you need" value={start.crew} onChange={set('crew')} options={CREW_OPTIONS} />
-      </div>
-      <div style={S('margin-top:20px')}>
-        <TextArea
-          label="What it does, in a sentence"
-          value={start.mission}
-          onChange={set('mission')}
-          placeholder="e.g. Reading help for 2nd graders after school"
-          maxLength={MISSION_MAX}
-          counter
-          minHeight={80}
-          error={errors.mission}
-        />
-      </div>
-      <div style={S('margin-top:20px')}>
-        <div id="ob-pos" style={S(LABEL)}>Positions you need</div>
-        <div role="group" aria-labelledby="ob-pos" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
-          {POSITION_SUGGESTIONS.map((p) => (
-            <Chip key={p} label={p} on={start.positions.includes(p)} onClick={() => setStart((f) => ({ ...f, positions: toggleIn(f.positions, p) }))} py={9} px={13} fs={13} role="checkbox" />
-          ))}
+      <Heading sub="This fills in your project page. You can change all of it later.">About your project</Heading>
+      <div style={S('margin-top:28px')}>
+        <div className="vu-ob-sec vu-ob-pair">
+          <Field label="Project name" value={start.name} onChange={set('name')} placeholder="e.g. Northside Reading Circle" maxLength={60} required error={errors.name} />
+          <Select label="Cause" value={start.cause} onChange={set('cause')} options={CAUSE_OPTION_ITEMS} />
+          <Field label="Where it happens" value={start.site} onChange={set('site')} placeholder="e.g. Carmel Clay Public Library" maxLength={80} required error={errors.site} />
+          <Select label="People you need" value={start.crew} onChange={set('crew')} options={CREW_OPTIONS} />
         </div>
-        {errors.positions ? <div className="vu-err" role="alert">{errors.positions}</div> : null}
-      </div>
-      <div style={S('margin-top:20px')}>
-        <div id="ob-exp" style={S(LABEL)}>Have you organized anything before?</div>
-        <div role="group" aria-labelledby="ob-exp" style={S('margin-top:10px;display:flex;gap:8px;flex-wrap:wrap')}>
-          {EXPERIENCE.map((e) => (
-            <Chip key={e} label={e} on={start.experience === e} onClick={() => setStart((f) => ({ ...f, experience: e }))} py={11} px={15} fs={14} />
-          ))}
+        <div className="vu-ob-sec">
+          <TextArea
+            label="What it does, in a sentence"
+            value={start.mission}
+            onChange={set('mission')}
+            placeholder="e.g. Reading help for 2nd graders after school"
+            maxLength={MISSION_MAX}
+            counter
+            required
+            minHeight={88}
+            error={errors.mission}
+          />
         </div>
-        <div style={S('margin-top:10px;font:450 13px/1.5 Geist;color:#6B635C')}>Most people pick First time. Your project page starts with a setup checklist.</div>
+        <div className="vu-ob-sec">
+          <div id="ob-pos" style={S(LABEL)}>
+            Positions you need<span aria-hidden="true" style={S(`color:${C.ember}`)}> *</span>
+          </div>
+          <div role="group" aria-labelledby="ob-pos" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
+            {POSITION_SUGGESTIONS.map((p) => (
+              <Chip key={p} label={p} on={start.positions.includes(p)} onClick={() => setStart((f) => ({ ...f, positions: toggleIn(f.positions, p) }))} py={10} px={15} fs={14} role="checkbox" />
+            ))}
+          </div>
+          {errors.positions ? <div className="vu-err" role="alert">{errors.positions}</div> : <p style={S(HINT)}>Pick any that fit. You can add your own later.</p>}
+        </div>
+        <div className="vu-ob-sec">
+          <PillChoice id="ob-exp" label="Have you organized anything before?" options={EXPERIENCE} value={start.experience} onChange={set('experience')} />
+          <p style={S(HINT)}>Most people pick First time. Your project page starts with a setup checklist.</p>
+        </div>
       </div>
       <FinishRow label="Create project" busyLabel="Creating project" busy={busy} onFinish={onFinish} onBack={onBack} onSkip={onSkip} />
     </div>
@@ -488,52 +670,58 @@ function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip }) {
   const set = (k) => (v) => setJoin((f) => ({ ...f, [k]: v }));
   return (
     <div className="vu-screen">
-      <h1 style={S('margin:0;font:600 32px/1.08 Geist;letter-spacing:-0.04em')}>What are you looking for?</h1>
-      <p style={S('margin:10px 0 0;font:450 15px/1.5 Geist;color:#6B635C')}>Only your town is required. The rest helps us sort what you see.</p>
-      <div style={S('margin-top:22px')}>
-        <Field label="Where are you?" value={join.location} onChange={set('location')} placeholder="City or town, e.g. Fairfax" autoComplete="address-level2" maxLength={60} required error={errors.location} />
-      </div>
-      <div style={S('margin-top:20px')}>
-        <TextArea
-          label="What kind of volunteering sounds good? (optional)"
-          value={join.interest}
-          onChange={set('interest')}
-          maxWords={INTEREST_MAX_WORDS}
-          counter
-          minHeight={96}
-          placeholder="e.g. Tutoring younger kids on weekends"
-          error={errors.interest}
-        />
-      </div>
-      <div id="ob-cause" style={S(`margin-top:24px;${LABEL}`)}>What do you want to help with? <span style={S(OPTIONAL)}>(optional)</span></div>
-      <div role="group" aria-labelledby="ob-cause" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
-        {CAUSES.map((c) => (
-          <Chip key={c} label={c} on={join.causes.includes(c)} onClick={() => setJoin((f) => ({ ...f, causes: toggleIn(f.causes, c) }))} py={10} px={14} fs={14} role="checkbox" />
-        ))}
-      </div>
-      <div id="ob-win" style={S(`margin-top:24px;${LABEL}`)}>When are you usually free? <span style={S(OPTIONAL)}>(optional)</span></div>
-      <div role="group" aria-labelledby="ob-win" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
-        {WINDOWS.map((w) => (
-          <Chip key={w} label={w} on={join.windows.includes(w)} onClick={() => setJoin((f) => ({ ...f, windows: toggleIn(f.windows, w) }))} py={10} px={14} fs={14} role="checkbox" />
-        ))}
-      </div>
-      <div style={S('margin-top:22px;max-width:300px')}>
-        <Field
-          label="Hours your school requires (optional)"
-          value={join.hoursGoal}
-          onChange={(v) => setJoin((f) => ({ ...f, hoursGoal: v.replace(/[^0-9]/g, '').slice(0, 4) }))}
-          inputMode="numeric"
-          placeholder="e.g. 40"
-          hint="Leave it blank if your school doesn't require hours."
-          maxLength={4}
-        />
-      </div>
-      <div style={S('margin-top:22px')}>
-        <div id="ob-vol" style={S(LABEL)}>Have you volunteered before?</div>
-        <div role="group" aria-labelledby="ob-vol" style={S('margin-top:10px;display:flex;gap:8px;flex-wrap:wrap')}>
-          {VOLUNTEERED.map((v) => (
-            <Chip key={v} label={v} on={join.volunteered === v} onClick={() => setJoin((f) => ({ ...f, volunteered: v }))} py={11} px={15} fs={14} />
-          ))}
+      <Heading sub="We use this to sort Discover. Change it any time in Settings.">What are you looking for?</Heading>
+      <div style={S('margin-top:28px')}>
+        <div className="vu-ob-sec">
+          <Field label="Where are you?" value={join.location} onChange={set('location')} placeholder="City or town, e.g. Carmel" autoComplete="address-level2" maxLength={60} required error={errors.location} />
+        </div>
+        <div className="vu-ob-sec">
+          <TextArea
+            label="What kind of volunteering sounds good?"
+            value={join.interest}
+            onChange={set('interest')}
+            maxWords={INTEREST_MAX_WORDS}
+            counter
+            required
+            minHeight={88}
+            placeholder="e.g. Tutoring younger kids on weekends"
+            hint="A sentence or two is plenty."
+            error={errors.interest}
+          />
+        </div>
+        <div className="vu-ob-sec">
+          <div id="ob-cause" style={S(LABEL)}>
+            What do you want to help with? <span style={S(OPTIONAL)}>(optional)</span>
+          </div>
+          <div role="group" aria-labelledby="ob-cause" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
+            {CAUSES.map((c) => (
+              <Chip key={c} label={causeLabel(c)} icon={causeOf(c).icon} on={join.causes.includes(c)} onClick={() => setJoin((f) => ({ ...f, causes: toggleIn(f.causes, c) }))} py={9} px={14} fs={14} role="checkbox" />
+            ))}
+          </div>
+        </div>
+        <div className="vu-ob-sec">
+          <div id="ob-win" style={S(LABEL)}>
+            When are you usually free? <span style={S(OPTIONAL)}>(optional)</span>
+          </div>
+          <div role="group" aria-labelledby="ob-win" style={S('margin-top:10px;display:flex;flex-wrap:wrap;gap:8px')}>
+            {WINDOWS.map((w) => (
+              <Chip key={w} label={w} on={join.windows.includes(w)} onClick={() => setJoin((f) => ({ ...f, windows: toggleIn(f.windows, w) }))} py={9} px={14} fs={14} role="checkbox" />
+            ))}
+          </div>
+        </div>
+        <div className="vu-ob-sec" style={S('max-width:340px')}>
+          <Field
+            label="Hours your school requires (optional)"
+            value={join.hoursGoal}
+            onChange={(v) => setJoin((f) => ({ ...f, hoursGoal: v.replace(/[^0-9]/g, '').slice(0, 4) }))}
+            inputMode="numeric"
+            placeholder="e.g. 40"
+            hint="Leave it blank if your school doesn't require hours."
+            maxLength={4}
+          />
+        </div>
+        <div className="vu-ob-sec">
+          <PillChoice id="ob-vol" label="Have you volunteered before?" options={VOLUNTEERED} value={join.volunteered} onChange={set('volunteered')} />
         </div>
       </div>
       <FinishRow label="Show opportunities" busyLabel="Saving" busy={busy} onFinish={onFinish} onBack={onBack} onSkip={onSkip} />
@@ -543,22 +731,19 @@ function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip }) {
 
 function FinishRow({ label, busyLabel, busy, onFinish, onBack, onSkip }) {
   return (
-    <>
-      <div style={S('margin-top:28px')}>
-        <Pressable label={busy ? busyLabel : label} disabled={busy} onClick={onFinish} className={H.press} style={S(PRIMARY_BTN)}>
-          {busy ? <span className="vu-spin" aria-hidden="true" /> : null}
-          {busy ? busyLabel : label}
-        </Pressable>
-      </div>
-      <div style={S('margin-top:18px;display:flex;align-items:center;gap:20px')}>
-        <Pressable label="Back" onClick={onBack} className={H.toInk} style={S('display:inline-flex;align-items:center;gap:6px;font:500 14px/1 Geist;color:#6B635C;cursor:pointer')}>
-          <Icon name="arrow-left" size={14} />
+    <div className="vu-ob-actions" style={S(`margin-top:36px;padding-top:24px;border-top:1px solid ${C.line}`)}>
+      <Button variant="primary" size="lg" busy={busy} onClick={onFinish} extra="min-width:188px">
+        {busy ? busyLabel : label}
+      </Button>
+      <span style={S('display:inline-flex;align-items:center;gap:20px')}>
+        <Button variant="ghost" size="sm" icon="arrow-left" iconSize={15} onClick={onBack}>
           Back
-        </Pressable>
-        <Pressable label="Skip for now" onClick={onSkip} className={H.toInk} style={S('font:500 14px/1 Geist;color:#6B635C;cursor:pointer')}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onSkip}>
           Skip for now
-        </Pressable>
-      </div>
-    </>
+        </Button>
+      </span>
+    </div>
   );
 }
+

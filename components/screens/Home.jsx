@@ -2,42 +2,96 @@
 
 /* ==========================================================================
    Home.jsx, the signed-in home (/app)
-   Search comes first, then live opportunities near the student and registered
-   nonprofits. Hours, upcoming shifts and the student's own project sit in the
-   side column as short summaries. An organization account gets its programs
-   and their application counts there instead of volunteer hours.
+   Search and the category row come first, then a photo grid of live
+   opportunities near the student. The right rail holds upcoming shifts, a
+   short hours summary and the student's own project. Under the grid: the
+   projects the student is in, registered nonprofits nearby and their
+   applications. An organization account gets its programs in the rail
+   instead of volunteer hours.
    ========================================================================== */
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { Icon, ImageSlot, Pressable, SkeletonRows } from '../ui.jsx';
-import VolunteerApplications from '../VolunteerApplications.jsx';
+import { S } from '../../lib/style.js';
+import { C, F, R, CATEGORIES } from '../../lib/tokens.js';
+import { Button, Pressable } from '../ui.jsx';
+import { SearchBar, CategoryRow, ListingCard, StatusText, DateBlock, dateParts, Sep } from '../vu/index.js';
 import MemberProjects from '../MemberProjects.jsx';
 import WebNonprofits from '../WebNonprofits.jsx';
 import HomeCharts from '../HomeCharts.jsx';
+import { inWindow } from '../DiscoverListings.jsx';
 import { useSnapshot } from '../../lib/store.js';
-import { activeProject, taskProgress, getOpportunity } from '../../lib/db.js';
+import { usePhotoPicker } from '../../lib/photos.js';
+import { toast } from '../../lib/overlays.js';
+import { activeProject, taskProgress, getOpportunity, toggleSaved } from '../../lib/db.js';
 import { searchListings, loadMyApplications, loadOwnerApplications, loadListingsByIds, listingShifts, myShiftSignUps } from '../../lib/listings.js';
 import { shiftDates } from '../../lib/calendar.js';
-import { plural, startTime } from '../../lib/format.js';
+import { plural, startTime, splitWhen } from '../../lib/format.js';
 import { nextShiftInfo, shiftLabel } from './JoinListing.jsx';
 
-const MAX_ROWS = 4;
+const MAX_CARDS = 6;
+const PHONE_QUERY = '(max-width: 719px)';
+// Between 900 and 1179px the rail drops below, so three cards still fit.
+const THREE_UP_QUERY = '(min-width: 900px) and (max-width: 1179px)';
+// Card width in the phone scroller (CARDS.md 1.7): one card plus a peek of the next.
+const PHONE_CARD = '248px';
 
-const H2 = 'margin:0;font:600 17px/1.25 Geist;letter-spacing:-0.02em;color:#1A1714';
-const CARD = 'border-radius:14px;border:1px solid #E8E1D9;background:#fff';
-const LINK = 'font:500 13px/1 Geist;color:#C2603C;text-decoration:none;flex:none';
-const INPUT =
-  'display:block;width:100%;height:44px;padding:0 14px;border-radius:11px;border:1px solid #E8E1D9;background:#FCFAF8;font:450 15px/1 Geist;color:#1A1714';
+const RAIL_H2 = `margin:0;font:600 17px/1.2 ${F.display};letter-spacing:-0.01em;color:${C.ink}`;
+const SEC_H2 = `margin:0;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`;
+const SMALL = `font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+const LINK = 'vu-link-ul';
 
-const APP_STATUS = {
-  pending: { label: 'Applied', bg: '#FDF3E7', color: '#8A5A20' },
-  accepted: { label: 'Accepted', bg: '#EAF3EC', color: '#3F6B4E' },
-  declined: { label: 'Not accepted', bg: '#F5E7E0', color: '#A8482A' },
-  withdrawn: { label: 'Withdrawn', bg: '#F6F2EE', color: '#8A8179' },
-};
+/* The category row on Home filters the grid in place. Same causes as the
+   mockup, plus student projects, which used to be a separate link. */
+const HOME_CATEGORIES = [
+  ...CATEGORIES.filter((c) => !['arts', 'civic'].includes(c.key)),
+  { key: 'student', label: 'Student projects', short: 'Students', icon: 'users', cause: null },
+];
+
+/* The photo badge for the viewer's own application (CARDS.md 1.4): accepted
+   reads "You're in", pending reads "Applied", anything else shows nothing. */
+const APP_BADGE = { accepted: 'in', pending: 'applied' };
+
+/* Viewport bucket for the grid: 'phone' (sideways scroller), 'three'
+   (900 to 1179px: globals.css drops vu-grid-3 to 2 columns under 1180px,
+   Home keeps 3 so six photos don't stack three screens tall), or 'wide'. Starts
+   'wide' so server and first client render agree; listings load after
+   mount, so the switch happens before any card shows. */
+function useGridMode() {
+  const [mode, setMode] = useState('wide');
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const phone = window.matchMedia(PHONE_QUERY);
+    const three = window.matchMedia(THREE_UP_QUERY);
+    const sync = () => setMode(phone.matches ? 'phone' : three.matches ? 'three' : 'wide');
+    sync();
+    phone.addEventListener('change', sync);
+    three.addEventListener('change', sync);
+    return () => {
+      phone.removeEventListener('change', sync);
+      three.removeEventListener('change', sync);
+    };
+  }, []);
+  return mode;
+}
+
+/* True while the rail sits beside the main column (globals.css stacks
+   .vu-layout-rail to one column under 1180px). Starts true so server and
+   first client render agree. */
+const RAIL_BESIDE_QUERY = '(min-width: 1180px)';
+function useRailBeside() {
+  const [beside, setBeside] = useState(true);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia(RAIL_BESIDE_QUERY);
+    const sync = () => setBeside(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return beside;
+}
 
 /* Turns the stored "Sat, Oct 24 · 1:00-4:00 PM" into "Sat, Oct 24 at 1–4 PM".
    A shift that already happened reads as "No upcoming shift posted yet". */
@@ -66,6 +120,13 @@ function splitSession(raw) {
   return m ? [m[1], m[2]] : [String(raw || '').trim(), ''];
 }
 
+/* Start of a listing's next session in ms, or MAX when unknown or past. */
+function nextStart(listing) {
+  if (!hasUpcomingShift(listing.next_session)) return Number.MAX_SAFE_INTEGER;
+  const [d, t] = splitSession(listing.next_session);
+  return startMs(d, t);
+}
+
 /* Applications that may hold shift sign-ups. A pending applicant can sign up
    for shifts before the organizer answers (the join page says so). */
 const SIGNUP_STATUSES = ['pending', 'accepted'];
@@ -75,9 +136,11 @@ const SIGNUP_STATUSES = ['pending', 'accepted'];
    expected at that next shift, so Home needs the listing's shifts to tell. */
 function fallbackCandidates(apps) {
   return (apps || []).filter(
-    (a) => a.status === 'accepted' && a.listings && !myShiftSignUps(a).length && hasUpcomingShift(a.listings.next_session),
+    (a) => a.status === 'accepted' && a.listings && !a.listings.unlisted && !myShiftSignUps(a).length && hasUpcomingShift(a.listings.next_session),
   );
 }
+
+const orgName = (listing) => String(listing.site || '').split(',')[0].trim();
 
 /* The volunteer's upcoming shifts, soonest first:
    - every shift they signed up for (member_state.shifts) on a pending or
@@ -89,6 +152,9 @@ function upcomingShifts(apps, posted) {
   const out = [];
   for (const a of apps || []) {
     if (!a.listings || !SIGNUP_STATUSES.includes(a.status)) continue;
+    // An archived project's listing is hidden from members, so only the saved
+    // copy comes back, marked unlisted: it has no more shifts to go to.
+    if (a.listings.unlisted) continue;
     const href = `/join/${a.listing_id}`;
     for (const sh of myShiftSignUps(a)) {
       if (sh.past) continue;
@@ -96,6 +162,7 @@ function upcomingShifts(apps, posted) {
         key: `${a.id}:${sh.id}`,
         title: a.listings.name,
         when: shiftLabel(sh),
+        date: sh.d,
         where: orgName(a.listings),
         href,
         pending: a.status === 'pending',
@@ -111,6 +178,7 @@ function upcomingShifts(apps, posted) {
       key: a.id,
       title: a.listings.name,
       when: sessionLabel(a.listings.next_session),
+      date: d,
       where: orgName(a.listings),
       href: `/join/${a.listing_id}`,
       pending: false,
@@ -120,120 +188,82 @@ function upcomingShifts(apps, posted) {
   return out.sort((x, y) => x.start - y.start);
 }
 
-/* Lowest "ages N+" across a listing's positions, or null when none is stated. */
-function minAge(listing) {
-  const ages = (listing.positions || [])
-    .map((p) => /ages?\s*(\d{1,2})\s*\+/i.exec(String(p.m || '')))
-    .filter(Boolean)
-    .map((m) => Number(m[1]));
-  return ages.length ? Math.min(...ages) : null;
+/* What the grid asks searchListings for, per category. `local` filters by
+   the saved place first and falls back to everywhere when nothing matches. */
+function queryFor(cat, region) {
+  if (cat.key === 'online') return { filters: { place: 'online' }, local: false };
+  if (cat.key === 'student') return { filters: { kind: 'student' }, local: Boolean(region) };
+  if (cat.cause) return { filters: { causes: [cat.cause] }, local: Boolean(region) };
+  return { filters: {}, local: Boolean(region) };
 }
 
-const orgName = (listing) => String(listing.site || '').split(',')[0].trim();
-
-function SearchCard({ region }) {
-  const router = useRouter();
-  const [what, setWhat] = useState('');
-  const [where, setWhere] = useState(region);
-  useEffect(() => setWhere(region), [region]);
-
-  function submit(e) {
-    e.preventDefault();
-    const qs = new URLSearchParams();
-    if (what.trim()) qs.set('q', what.trim());
-    // Always pass near, even empty, so clearing "Where" searches everywhere
-    // instead of Discover falling back to the saved location.
-    qs.set('near', where.trim());
-    router.push(`/discover?${qs.toString()}`);
-  }
-
-  return (
-    <form role="search" aria-label="Search opportunities" onSubmit={submit} style={S(`${CARD};padding:16px;border-radius:16px`)}>
-      <div className="vu-stack" style={S('display:flex;align-items:flex-end;gap:12px')}>
-        <label style={S('flex:1.4;min-width:0;display:flex;flex-direction:column;gap:7px')}>
-          <span style={S('font:500 13px/1 Geist;color:#57504A')}>What</span>
-          <span style={S('position:relative;display:block')}>
-            <span style={S('position:absolute;left:14px;top:14px;display:flex;color:#8A8179;pointer-events:none')}><Icon name="search" size={16} /></span>
-            <input
-              className={H.input}
-              type="search"
-              value={what}
-              onChange={(e) => setWhat(e.target.value)}
-              placeholder="Food bank, tutoring, animal shelter"
-              enterKeyHint="search"
-              style={S(`${INPUT};padding-left:38px`)}
-            />
-          </span>
-        </label>
-        <label style={S('flex:1;min-width:0;display:flex;flex-direction:column;gap:7px')}>
-          <span style={S('font:500 13px/1 Geist;color:#57504A')}>Where</span>
-          <input
-            className={H.input}
-            value={where}
-            onChange={(e) => setWhere(e.target.value)}
-            placeholder="City or ZIP"
-            autoComplete="address-level2"
-            style={S(INPUT)}
-          />
-        </label>
-        <button
-          type="submit"
-          className={cx(H.press)}
-          style={S('flex:none;display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 22px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer')}
-        >
-          Search
-        </button>
-      </div>
-      <div style={S('margin-top:12px;display:flex;gap:18px;flex-wrap:wrap')}>
-        <Link href="/discover?kind=student" className={H.link} style={S(LINK)}>Browse student projects</Link>
-        <Link href="/discover" className={H.link} style={S(LINK)}>See all opportunities</Link>
-      </div>
-    </form>
-  );
+/* Discover link carrying the same filters as the grid. near is always set:
+   the saved place when the grid was local, empty otherwise, so Discover
+   doesn't re-apply the saved location to a grid that fell back to
+   everywhere (or ignored location, as Online does). A "this week" grid
+   links with when=week, so Discover lists and counts the same week. */
+function discoverHref(cat, region, local, week) {
+  const qs = new URLSearchParams();
+  qs.set('near', local && region ? region : '');
+  if (week) qs.set('when', 'week');
+  if (cat.key === 'online') qs.set('place', 'online');
+  if (cat.key === 'student') qs.set('kind', 'student');
+  if (cat.cause) qs.set('causes', cat.cause);
+  const s = qs.toString();
+  return s ? `/discover?${s}` : '/discover';
 }
 
-function ListingRow({ listing, app }) {
-  const st = app ? APP_STATUS[app.status] : null;
-  const age = minAge(listing);
-  const meta = [orgName(listing), listing.cause].filter(Boolean).join(', ');
-  const when = [listing.next_session ? sessionLabel(listing.next_session) : '', age ? `Ages ${age}+` : ''].filter(Boolean).join(', ');
+/* Section heading for the grid. "this week" only when every card shown has
+   its next session in the coming 7 days. */
+function gridHeading(cat, region, local, allThisWeek) {
+  const week = allThisWeek ? ' this week' : '';
+  if (cat.key === 'online') return `Online and remote${week}`;
+  const place = local && region ? ` near ${region}` : '';
+  if (cat.key === 'student') return `Student projects${place || ' on VolunteerU'}${week}`;
+  if (cat.cause) return `${cat.label}${place || ' on VolunteerU'}${week}`;
+  return place ? `Open${place}${week}` : `Open on VolunteerU${week}`;
+}
+
+/* Empty grid heading, per category. Cause labels are nouns ("Animals",
+   "Seniors"), so they follow "for" instead of sitting in front of
+   "opportunities". */
+function emptyTitle(cat, region) {
+  if (cat.key === 'near') return `Nothing posted${region ? ` in ${region}` : ''} yet`;
+  if (cat.key === 'student') return 'No student projects posted yet';
+  if (cat.key === 'online') return 'No online opportunities posted yet';
+  return `Nothing posted for ${cat.label.toLowerCase()} yet`;
+}
+
+function GridSkeleton({ phone }) {
   return (
-    <Link
-      href={`/join/${listing.id}`}
-      className={cx(H.card, H.press)}
-      style={S(`${CARD};display:flex;align-items:center;gap:14px;padding:12px;text-decoration:none;color:inherit;transition:border-color .16s ease`)}
-    >
-      <div aria-hidden="true" style={S('flex:none;width:72px;height:72px;border-radius:10px;overflow:hidden;background:#EFE9E2')}>
-        {listing.cover ? <ImageSlot src={listing.cover} radius={10} placeholder="" alt="" /> : null}
-      </div>
-      <div style={S('min-width:0;flex:1')}>
-        <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-          <span style={S('font:600 15px/1.25 Geist;letter-spacing:-0.01em;color:#1A1714')}>{listing.name}</span>
-          {listing.org_class === 'student' ? (
-            <span style={S('padding:3px 8px;border-radius:6px;background:#F6F2EE;font:500 11px/1.2 Geist;color:#57504A')}>Student project</span>
-          ) : null}
-          {st ? (
-            <span style={S(`padding:3px 8px;border-radius:6px;background:${st.bg};font:500 11px/1.2 Geist;color:${st.color}`)}>{st.label}</span>
-          ) : null}
+    <div className={phone ? 'vu-hscroll' : 'vu-grid-3'} aria-hidden="true" style={phone ? S(`margin:0 -16px;padding:0 16px;display:grid;grid-auto-flow:column;grid-auto-columns:${PHONE_CARD}`) : undefined}>
+      {Array.from({ length: phone ? 2 : 3 }, (_, i) => (
+        <div key={i}>
+          <div className="vu-skel" style={S(`aspect-ratio:4/3;border-radius:${R.photo}`)} />
+          <div className="vu-skel" style={S(`margin-top:10px;height:16px;width:70%;border-radius:${R.pill}`)} />
+          <div className="vu-skel" style={S(`margin-top:8px;height:13px;width:50%;border-radius:${R.pill}`)} />
         </div>
-        {meta ? <div style={S('margin-top:4px;font:450 13px/1.4 Geist;color:#6B635C')}>{meta}</div> : null}
-        {when ? <div style={S('margin-top:2px;font:450 13px/1.4 Geist;color:#8A8179')}>{when}</div> : null}
-      </div>
-    </Link>
+      ))}
+    </div>
   );
 }
 
-function OpenNearYou({ region, apps }) {
+function OpenNearYou({ region, apps, cat, mode }) {
+  const phone = mode === 'phone';
+  const threeUp = mode === 'three';
+  const { state } = useSnapshot();
   const [res, setRes] = useState(null); // { rows, local } | { error: true }
   const [attempt, setAttempt] = useState(0);
+  const saved = state.saved || [];
 
   useEffect(() => {
     let alive = true;
     setRes(null);
+    const { filters, local } = queryFor(cat, region);
     (async () => {
       try {
-        const near = region ? await searchListings({ near: region }) : [];
-        const rows = near.length ? near : await searchListings();
+        const near = local ? await searchListings({ ...filters, near: region }) : [];
+        const rows = near.length ? near : await searchListings(filters);
         if (alive) setRes({ rows, local: near.length > 0 });
       } catch (err) {
         console.error('Home: loading listings failed', err);
@@ -241,78 +271,133 @@ function OpenNearYou({ region, apps }) {
       }
     })();
     return () => { alive = false; };
-  }, [region, attempt]);
+  }, [region, attempt, cat]);
 
   const byListing = new Map((apps || []).map((a) => [a.listing_id, a]));
-  const heading = res && res.local && region ? `Open near ${region}` : 'Open on VolunteerU';
-  // Things the student can still apply to come first; ones they already
-  // applied to follow, and declined or withdrawn ones sink to the end.
+  // Things the student can still apply to come first, soonest session first;
+  // ones they already applied to follow, and declined or withdrawn ones sink.
   const rank = (l) => {
     const a = byListing.get(l.id);
     if (!a) return 0;
     return a.status === 'accepted' || a.status === 'pending' ? 1 : 2;
   };
-  const rows = res && res.rows ? [...res.rows].sort((a, b) => rank(a) - rank(b)).slice(0, MAX_ROWS) : [];
+  const rows = res && res.rows
+    ? [...res.rows].sort((a, b) => rank(a) - rank(b) || nextStart(a) - nextStart(b)).slice(0, MAX_CARDS)
+    : [];
+  // Same rule as Discover and the /join page: a listing shows its own photo or
+  // its cause tile, never a stock photo, so the card matches its detail page.
+  const photos = usePhotoPicker(rows, { seed: false });
   // searchListings returns one page (80 rows) and carries the exact match
   // count as rows.total; the page length is only a fallback.
   const total = res && res.rows ? (Number.isFinite(res.rows.total) ? res.rows.total : res.rows.length) : 0;
-  const seeAll = region && res && res.local ? `/discover?near=${encodeURIComponent(region)}` : '/discover';
+  const local = Boolean(res && res.local);
+  // "this week" uses Discover's own When rule (inWindow), so the heading,
+  // the count on "See all" and the page it opens all mean the same week.
+  const now = new Date();
+  const allThisWeek = rows.length > 0 && rows.every((l) => inWindow(l, 'week', now));
+  const heading = gridHeading(cat, region, local, allThisWeek);
+  const seeAll = discoverHref(cat, region, local, allThisWeek);
+  // Under a "this week" heading the number counts this week's listings. That
+  // is exact only when the loaded page holds every match; otherwise the link
+  // carries no number and Discover counts them.
+  const pageComplete = Boolean(res && res.rows && !res.rows.hasMore && res.rows.length >= total);
+  const seeAllCount = allThisWeek
+    ? (pageComplete ? res.rows.filter((l) => inWindow(l, 'week', now)).length : null)
+    : total;
+  const fellBack = res && !res.error && !local && region && cat.key !== 'online' && total > 0;
+
+  function save(listing) {
+    const now2 = toggleSaved(listing.id);
+    toast(now2
+      ? { title: 'Saved', message: listing.name, tone: 'ok', actionLabel: 'Undo', onAction: () => toggleSaved(listing.id) }
+      : { title: 'Removed from saved', message: listing.name, tone: 'brand', actionLabel: 'Undo', onAction: () => toggleSaved(listing.id) });
+  }
 
   return (
-    <section aria-labelledby="home-open-h">
-      <div style={S('display:flex;align-items:baseline;justify-content:space-between;gap:12px')}>
-        <h2 id="home-open-h" style={S(H2)}>{heading}</h2>
+    <section aria-labelledby="home-open-h" aria-busy={res === null ? 'true' : undefined}>
+      <div className="vu-sec-head">
+        <h2 id="home-open-h" style={S(`${SEC_H2};font-size:clamp(20px, 5.2vw, 22px)`)}>{heading}</h2>
         {total > 0 ? (
-          <Link href={seeAll} className={H.link} style={S(LINK)}>{total > MAX_ROWS ? `See all ${total}` : 'See all'}</Link>
+          <Link href={seeAll} className={LINK} style={S(`flex:none;font:600 15px/1.2 ${F.body}`)}>
+            {seeAllCount !== null && seeAllCount > rows.length ? `See all ${seeAllCount}` : 'See all'}
+          </Link>
         ) : null}
       </div>
-      {res && !res.local && region && total > 0 ? (
-        <p style={S('margin:6px 0 0;font:450 13px/1.5 Geist;color:#8A8179')}>Nothing posted in {region} yet. These are open elsewhere.</p>
+      {fellBack ? (
+        <p style={S(`margin:6px 0 0;${SMALL}`)}>Nothing posted in {region} yet. These are open elsewhere.</p>
       ) : null}
-      <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:10px')}>
-        {res === null ? <SkeletonRows n={3} h={96} /> : null}
+
+      <div style={S('margin-top:18px')}>
+        {res === null ? <GridSkeleton phone={phone} /> : null}
         {res && res.error ? (
-          <div role="alert" style={S(`${CARD};padding:18px 20px`)}>
-            <div style={S('font:450 14px/1.5 Geist;color:#57504A')}>Couldn't load opportunities. Check your connection and try again.</div>
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className={cx(H.secondary, H.press)}
-              style={S('margin-top:12px;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}
-            >
-              Try again
-            </button>
+          <div role="alert">
+            <p style={S(`margin:0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>Couldn't load opportunities. Check your connection and try again.</p>
+            <div style={S('margin-top:12px')}>
+              <Button size="sm" icon="refresh" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>
+            </div>
           </div>
         ) : null}
         {res && !res.error && total === 0 ? (
-          <div style={S(`${CARD};padding:20px`)}>
-            <div style={S('font:600 15px/1.3 Geist;color:#1A1714')}>Nothing posted{region ? ` in ${region}` : ''} yet</div>
-            <div style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#6B635C')}>Search registered nonprofits near you instead.</div>
-            <Link href="/discover" className={cx(H.press)} style={S('margin-top:14px;display:inline-flex;align-items:center;height:38px;padding:0 16px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;text-decoration:none')}>
-              Search nonprofits
-            </Link>
+          <div>
+            <p style={S(`margin:0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
+              {emptyTitle(cat, region)}. Search registered nonprofits near you instead.
+            </p>
+            <div style={S('margin-top:12px')}>
+              <Button size="sm" href="/discover">Search nonprofits</Button>
+            </div>
           </div>
         ) : null}
-        {rows.map((l) => <ListingRow key={l.id} listing={l} app={byListing.get(l.id)} />)}
+        {rows.length ? (
+          <div
+            className={phone ? 'vu-hscroll' : 'vu-grid-3'}
+            style={phone
+              ? S(`margin:0 -16px;padding:0 16px;scroll-padding:0 16px;display:grid;grid-auto-flow:column;grid-auto-columns:${PHONE_CARD}`)
+              : threeUp ? S('grid-template-columns:repeat(3, minmax(0, 1fr))') : undefined}
+          >
+            {rows.map((l) => {
+              const app = byListing.get(l.id);
+              const isSaved = saved.includes(l.id);
+              // The card reads date and time from the stored label. A past or
+              // missing next shift falls back to the first published shift,
+              // else no date (the tile then says "No dates yet").
+              const shifts = listingShifts(l);
+              const when = hasUpcomingShift(l.next_session) ? l.next_session : shifts[0] ? shiftLabel(shifts[0]) : '';
+              return (
+                <ListingCard
+                  key={l.id}
+                  href={`/join/${l.id}`}
+                  title={l.name}
+                  org={orgName(l)}
+                  verified={Boolean(l.verified)}
+                  studentProject={l.org_class === 'student'}
+                  when={when}
+                  moreDates={when && shifts.length > 1 ? shifts.length - 1 : 0}
+                  online={l.delivery === 'remote'}
+                  photo={photos.get(l.id)}
+                  cause={l.cause}
+                  saved={isSaved}
+                  onToggleSave={() => save(l)}
+                  headingLevel={3}
+                  badge={app ? APP_BADGE[app.status] || '' : ''}
+                />
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </section>
   );
 }
 
-/* Shown in place of a section whose applications didn't load, so an outage
-   never reads as "you haven't signed up for anything". */
+/* Shown in place of a section whose data didn't load, so an outage never
+   reads as "you haven't signed up for anything". */
 function LoadError({ text, onRetry }) {
   return (
     <div role="alert" style={S('margin-top:10px')}>
-      <div style={S('font:450 13px/1.5 Geist;color:#57504A')}>{text}</div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className={cx(H.secondary, H.press)}
-        style={S('margin-top:12px;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;cursor:pointer')}
-      >
-        Try again
-      </button>
+      <p style={S(`margin:0;${SMALL}`)}>{text}</p>
+      <div style={S('margin-top:12px')}>
+        <Button size="sm" icon="refresh" onClick={onRetry}>Try again</Button>
+      </div>
     </div>
   );
 }
@@ -325,7 +410,7 @@ function Upcoming({ apps, posted, failed, onRetry, bookings, hideEmpty = false }
       const opp = getOpportunity(b.oppId);
       if (!opp) return null;
       const shift = opp.shifts.find((x) => x.id === b.shiftId) || opp.shifts[0];
-      return { key: b.id, title: opp.title, when: `${shift.d} at ${startTime(shift.t)}`, where: opp.org, href: `/opportunity/${opp.id}` };
+      return { key: b.id, title: opp.title, when: `${shift.d} at ${startTime(shift.t)}`, date: shift.d, where: opp.org, href: `/opportunity/${opp.id}` };
     })
     .filter(Boolean);
   const items = [...booked, ...joined];
@@ -333,37 +418,55 @@ function Upcoming({ apps, posted, failed, onRetry, bookings, hideEmpty = false }
   if (hideEmpty && apps !== null && posted !== null && !failed && !items.length) return null;
 
   return (
-    <section aria-labelledby="home-upcoming-h" style={S(`${CARD};padding:20px`)}>
-      <h2 id="home-upcoming-h" style={S('margin:0;font:600 15px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>Upcoming</h2>
+    <section aria-labelledby="home-upcoming-h" className="vu-rail-sec">
+      <h2 id="home-upcoming-h" style={S(RAIL_H2)}>Upcoming</h2>
       {apps === null || posted === null ? (
-        <div style={S('margin-top:14px')}><SkeletonRows n={1} h={60} /></div>
+        <div aria-hidden="true" style={S('margin-top:14px;display:flex;gap:16px;align-items:center')}>
+          <div className="vu-skel" style={S(`width:56px;height:60px;border-radius:${R.control}`)} />
+          <div style={S('flex:1')}>
+            <div className="vu-skel" style={S(`height:14px;width:80%;border-radius:${R.pill}`)} />
+            <div className="vu-skel" style={S(`margin-top:8px;height:12px;width:55%;border-radius:${R.pill}`)} />
+          </div>
+        </div>
       ) : failed && !items.length ? (
         <LoadError text="Couldn't load your shifts. Check your connection and try again." onRetry={onRetry} />
       ) : items.length ? (
-        <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:10px')}>
-          {items.map((it) => (
-            <Pressable
-              key={it.key}
-              label={`${it.title}, ${it.when}${it.pending ? ', applied' : ''}`}
-              onClick={() => router.push(it.href)}
-              className={cx(H.cardSoft, H.press)}
-              style={S('padding:12px 14px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8;cursor:pointer;transition:border-color .16s ease')}
-            >
-              <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-                <span style={S('font:600 14px/1.3 Geist;letter-spacing:-0.01em;color:#1A1714')}>{it.title}</span>
-                {it.pending ? (
-                  <span style={S(`padding:3px 8px;border-radius:6px;background:${APP_STATUS.pending.bg};font:500 11px/1.2 Geist;color:${APP_STATUS.pending.color}`)}>{APP_STATUS.pending.label}</span>
-                ) : null}
-              </div>
-              <div style={S('margin-top:4px;font:450 13px/1.4 Geist;color:#57504A')}>{it.when}</div>
-              {it.where ? <div className="vu-trunc" style={S('margin-top:2px;font:450 12px/1.4 Geist;color:#8A8179')}>{it.where}</div> : null}
-            </Pressable>
-          ))}
+        <div style={S('margin-top:4px')}>
+          {items.map((it, i) => {
+            // The date block carries the weekday, day and month, so the meta
+            // line is the time and place. Without the month a Nov 7 shift
+            // read as a bare "Sat 7".
+            const { time } = splitWhen(it.when);
+            const dated = Boolean(dateParts(it.date || it.when));
+            const last = i === items.length - 1;
+            return (
+              <Pressable
+                key={it.key}
+                label={`${it.title}, ${it.when}${it.pending ? ', applied' : ''}`}
+                onClick={() => router.push(it.href)}
+                className={dated ? 'vu-row vu-home-up' : 'vu-row vu-row--nolead vu-home-up'}
+                style={S(`cursor:pointer;${last ? 'border-bottom:0;padding-bottom:0' : ''}`)}
+              >
+                {dated ? <DateBlock date={it.date || it.when} size="md" month /> : null}
+                <span style={S('display:block;min-width:0')}>
+                  <span className="vu-row-t vu-home-up-t">{it.title}</span>
+                  <span className="vu-row-m">
+                    {time || (dated ? '' : it.when)}
+                    {(time || !dated) && it.where ? <Sep /> : null}
+                    {it.where}
+                  </span>
+                  {it.pending ? (
+                    <span style={S('display:block;margin-top:8px')}><StatusText tone="wait">Applied</StatusText></span>
+                  ) : null}
+                </span>
+              </Pressable>
+            );
+          })}
         </div>
       ) : (
-        <div style={S('margin-top:10px')}>
-          <div style={S('font:450 13px/1.5 Geist;color:#6B635C')}>Shifts you sign up for show up here.</div>
-          <Link href="/discover" className={H.link} style={S(`${LINK};display:inline-block;margin-top:10px`)}>Find a shift</Link>
+        <div style={S('margin-top:8px')}>
+          <p style={S(`margin:0;${SMALL}`)}>Shifts you sign up for show up here.</p>
+          <Link href="/discover" className={LINK} style={S(`display:inline-block;margin-top:12px;font:600 14px/1.2 ${F.body}`)}>Find a shift</Link>
         </div>
       )}
       {failed && items.length ? (
@@ -374,13 +477,12 @@ function Upcoming({ apps, posted, failed, onRetry, bookings, hideEmpty = false }
 }
 
 function YourProject({ proj }) {
-  const btn = 'margin-top:14px;display:inline-flex;align-items:center;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;text-decoration:none;transition:background .16s ease, border-color .16s ease';
   if (!proj) {
     return (
-      <section aria-labelledby="home-project-h" style={S(`${CARD};padding:20px`)}>
-        <h2 id="home-project-h" style={S('margin:0;font:600 15px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>Run a student project</h2>
-        <p style={S('margin:6px 0 0;font:450 13px/1.5 Geist;color:#6B635C')}>Post one and other students can apply to help.</p>
-        <Link href="/create" className={cx(H.secondary, H.press)} style={S(btn)}>Start a student project</Link>
+      <section aria-labelledby="home-project-h" className="vu-rail-sec">
+        <h2 id="home-project-h" style={S(RAIL_H2)}>Run a student project</h2>
+        <p style={S(`margin:6px 0 12px;${SMALL}`)}>Post one and other students can apply to help.</p>
+        <Button variant="dark" size="sm" href="/create">Start a student project</Button>
       </section>
     );
   }
@@ -394,16 +496,16 @@ function YourProject({ proj }) {
   ].filter(Boolean);
 
   return (
-    <section aria-labelledby="home-project-h" style={S(`${CARD};padding:20px`)}>
-      <h2 id="home-project-h" style={S('margin:0;font:600 15px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>Your project</h2>
-      <div style={S('margin-top:10px;font:600 16px/1.3 Geist;letter-spacing:-0.02em;color:#1A1714')}>{proj.name}</div>
-      {facts.map((f) => <div key={f} style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>{f}</div>)}
+    <section aria-labelledby="home-project-h" className="vu-rail-sec">
+      <h2 id="home-project-h" style={S(RAIL_H2)}>Your project</h2>
+      <div style={S(`margin-top:10px;font:600 16px/1.3 ${F.body};color:${C.ink}`)}>{proj.name}</div>
+      {facts.map((f) => <div key={f} style={S(`margin-top:2px;${SMALL}`)}>{f}</div>)}
       {progress.total ? (
-        <div role="progressbar" aria-label="Setup steps done" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} style={S('margin-top:12px;height:6px;border-radius:4px;background:#F1EBE4')}>
-          <div style={s(`width:${Math.round(progress.pct)}%`, 'height:100%;border-radius:4px;background:#C2603C;transition:width .36s cubic-bezier(.16,1,.3,1)')} />
+        <div role="progressbar" aria-label="Setup steps done" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} style={S(`margin-top:12px;height:6px;border-radius:${R.pill};background:${C.line};overflow:hidden`)}>
+          <div style={S(`width:${Math.round(progress.pct)}%;height:100%;border-radius:${R.pill};background:${C.ink};transition:width .36s cubic-bezier(.16,1,.3,1)`)} />
         </div>
       ) : null}
-      <Link href={`/lead/${proj.id}/overview`} className={cx(H.secondary, H.press)} style={S(btn)}>Open project</Link>
+      <Button size="sm" href={`/lead/${proj.id}/overview`} extra="margin-top:14px">Open project</Button>
     </section>
   );
 }
@@ -421,7 +523,7 @@ function hasAnyHours(state) {
 }
 
 /* The organization's programs with their application counts, first in the
-   side column so an organizer sees who's waiting before anything else. */
+   rail so an organizer sees who's waiting before anything else. */
 function OrgPrograms({ projects }) {
   const [apps, setApps] = useState(null); // rows | { error: true }
   const [attempt, setAttempt] = useState(0);
@@ -444,7 +546,6 @@ function OrgPrograms({ projects }) {
     };
   }, [attempt]);
 
-  const btn = 'display:inline-flex;align-items:center;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;text-decoration:none;transition:background .16s ease, border-color .16s ease';
   const rows = Array.isArray(apps) ? apps : [];
   const counts = (p) => {
     const mine = rows.filter((a) => p.listingId && a.listing_id === p.listingId);
@@ -455,14 +556,14 @@ function OrgPrograms({ projects }) {
   };
 
   return (
-    <section aria-labelledby="home-programs-h" style={S(`${CARD};padding:20px`)}>
-      <h2 id="home-programs-h" style={S('margin:0;font:600 15px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>
+    <section aria-labelledby="home-programs-h" className="vu-rail-sec">
+      <h2 id="home-programs-h" style={S(RAIL_H2)}>
         {projects.length === 1 ? 'Your program' : 'Your programs'}
       </h2>
       {apps && apps.error ? (
         <LoadError text="Couldn't load applications to your programs. Check your connection and try again." onRetry={() => setAttempt((n) => n + 1)} />
       ) : null}
-      <div style={S('margin-top:4px;display:flex;flex-direction:column')}>
+      <div style={S('margin-top:4px')}>
         {projects.map((p, i) => {
           const c = counts(p);
           const line = apps === null
@@ -473,15 +574,22 @@ function OrgPrograms({ projects }) {
                   c.waiting ? `${c.waiting} ${plural(c.waiting, 'application')} waiting` : 'No applications waiting',
                   c.accepted ? `${c.accepted} accepted` : '',
                 ].filter(Boolean).join(', ');
+          const review = c.waiting && !(apps && apps.error);
+          const last = i === projects.length - 1;
+          // One row per program: the name opens it, and the single button is
+          // the next thing to do (review waiting applications, else open it).
           return (
-            <div key={p.id} data-testid="home-program" style={S(`padding:14px 0 2px;${i > 0 ? 'border-top:1px solid #F1EBE4;margin-top:12px' : ''}`)}>
-              <div style={S('font:600 16px/1.3 Geist;letter-spacing:-0.02em;color:#1A1714')}>{p.name}</div>
-              {line ? <div style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>{line}</div> : null}
-              <div style={S('margin-top:12px;display:flex;gap:10px;flex-wrap:wrap')}>
-                {c.waiting && !(apps && apps.error) ? (
-                  <Link href={`/lead/${p.id}/applications`} className={cx(H.secondary, H.press)} style={S(btn)}>Review applications</Link>
-                ) : null}
-                <Link href={`/lead/${p.id}/overview`} className={cx(H.secondary, H.press)} style={S(btn)}>Open program</Link>
+            <div key={p.id} data-testid="home-program" className="vu-row vu-row--nolead" style={S(`grid-template-columns:minmax(0,1fr);row-gap:12px;${last ? 'border-bottom:0;padding-bottom:0' : ''}`)}>
+              <div style={S('min-width:0')}>
+                <Link href={`/lead/${p.id}/overview`} className="vu-row-t vu-home-up-t" style={S('text-decoration-line:none')}>{p.name}</Link>
+                {line ? <span className="vu-row-m">{line}</span> : null}
+              </div>
+              <div className="vu-row-end" style={S('grid-column:1;justify-content:flex-start')}>
+                {review ? (
+                  <Button variant="dark" size="sm" href={`/lead/${p.id}/applications`}>Review applications</Button>
+                ) : (
+                  <Button size="sm" href={`/lead/${p.id}/overview`}>Open program</Button>
+                )}
               </div>
             </div>
           );
@@ -493,6 +601,10 @@ function OrgPrograms({ projects }) {
 
 export default function Home() {
   const { state } = useSnapshot();
+  const router = useRouter();
+  const mode = useGridMode();
+  const phone = mode === 'phone';
+  const railBeside = useRailBeside();
   const proj = activeProject();
   const [apps, setApps] = useState(null);
   const [appsFailed, setAppsFailed] = useState(false);
@@ -539,50 +651,107 @@ export default function Home() {
   const zip = (state.onboarding && state.onboarding.zip) || state.account.zip || '';
   const nonprofitNear = [region, zip].filter(Boolean).join(' ');
   const org = isOrgAccount(state);
+  // The rail's "Your hours" is the one hours summary on Home. MemberProjects
+  // is told so it lists each project's entries without a second summary.
+  const railHours = !org || hasAnyHours(state);
+  // Projects the student is in get their own slot in the layout grid, so on
+  // a phone (one column) they come right after the opportunities and before
+  // the rail. A failed read shows its error in the same slot.
+  const memberSlot = appsFailed || (Array.isArray(apps) && apps.some((a) => a.status === 'accepted'));
+  // The project blocks list each project's hours with their own Log hours
+  // button, so the rail drops its own Log hours button while they show.
+  const projectsShown = !appsFailed && Array.isArray(apps) && apps.some((a) => a.status === 'accepted');
+
+  const [what, setWhat] = useState('');
+  const [where, setWhere] = useState(region);
+  useEffect(() => setWhere(region), [region]);
+  const [when, setWhen] = useState('');
+  const [catKey, setCatKey] = useState('near');
+  const cat = HOME_CATEGORIES.find((c) => c.key === catKey) || HOME_CATEGORIES[0];
+
+  function search({ what: w, where: p, when: t }) {
+    const qs = new URLSearchParams();
+    if (w) qs.set('q', w);
+    // Always pass near, even empty, so clearing "Where" searches everywhere
+    // instead of Discover falling back to the saved location.
+    qs.set('near', p);
+    // Discover filters on the next shift falling inside this window.
+    if (t) qs.set('when', t);
+    router.push(`/discover?${qs.toString()}`);
+  }
 
   return (
-    <div className="vu-screen vu-pad-40" style={S('padding:32px 40px 96px')}>
-      <h1 style={S('margin:0 0 18px;font:600 26px/1.1 Geist;letter-spacing:-0.035em;color:#1A1714')}>
-        {region ? `Find volunteer work near ${region}` : 'Find volunteer work'}
-      </h1>
-      <SearchCard region={region} />
+    <div className="vu-page vu-screen">
+      <h1 className="vu-sr">{region ? `Find volunteer work near ${region}` : 'Find volunteer work'}</h1>
+      <SearchBar
+        what={what}
+        onWhat={setWhat}
+        where={where}
+        onWhere={setWhere}
+        when={when}
+        onWhen={setWhen}
+        onSubmit={search}
+      />
+      <div style={S('margin-top:28px')}>
+        <CategoryRow
+          value={catKey}
+          items={HOME_CATEGORIES}
+          short={phone}
+          label="Show opportunities for"
+          onChange={(key) => setCatKey(key)}
+        />
+      </div>
 
-      {/* One grid so the side column can sit right after the opportunities on
-          a phone (where .vu-split collapses to one column) and beside them on
-          desktop. The side column spans the three main rows. */}
-      <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:28px 24px;margin-top:28px;align-items:start')}>
-        <OpenNearYou region={region} apps={apps} />
-        <div style={S('grid-row:span 3;display:flex;flex-direction:column;gap:14px')}>
+      {/* One grid. Beside the rail (1180px and up) the main column holds the
+          opportunities, the projects the student is in and then everything
+          else, and the rail spans all three rows. Stacked (under 1180px) the
+          DOM order holds: opportunities, projects you're in, the rail, then
+          nonprofits and applications. */}
+      <div className="vu-layout-rail" style={S('margin-top:36px;row-gap:56px')}>
+        <div style={S(`min-width:0;${railBeside ? 'grid-column:1' : ''}`)}>
+          <OpenNearYou region={region} apps={apps} cat={cat} mode={mode} />
+        </div>
+        {memberSlot ? (
+          <div style={S(`min-width:0;${railBeside ? 'grid-column:1' : ''}`)}>
+            {appsFailed ? (
+              <section aria-labelledby="home-apps-h">
+                <h2 id="home-apps-h" style={S(SEC_H2)}>Your projects and applications</h2>
+                <LoadError text="Couldn't load your projects and applications. Check your connection and try again." onRetry={retryApps} />
+              </section>
+            ) : (
+              <MemberProjects key={`m${appsAttempt}`} hoursInRail={railHours} />
+            )}
+          </div>
+        ) : null}
+        <aside
+          aria-label="Your shifts, hours and project"
+          style={S(`min-width:0;${railBeside ? `grid-column:2;grid-row:1 / span ${memberSlot ? 3 : 2}` : ''}`)}
+        >
           {org ? (
             <>
               <OrgPrograms projects={state.projects} />
               <Upcoming apps={apps} posted={posted} failed={appsFailed || postedFailed} onRetry={retryApps} bookings={state.bookings} hideEmpty />
-              {hasAnyHours(state) ? <HomeCharts /> : null}
+              {railHours ? <HomeCharts projectsShown={projectsShown} /> : null}
             </>
           ) : (
             <>
               <Upcoming apps={apps} posted={posted} failed={appsFailed || postedFailed} onRetry={retryApps} bookings={state.bookings} />
-              <HomeCharts />
+              <HomeCharts projectsShown={projectsShown} />
               <YourProject proj={proj} />
             </>
           )}
+        </aside>
+        {/* Nonprofits nearby. The full applications list lives on My crew
+            and Profile; Home only surfaces pending ones in Upcoming. */}
+        <div style={S(`min-width:0;display:flex;flex-direction:column;gap:56px;${railBeside ? 'grid-column:1' : ''}`)}>
+          <WebNonprofits
+            near={nonprofitNear}
+            causes={state.prefs.causes || []}
+            /* No heading: the list comes from IRS records for the whole
+               state, so WebNonprofits titles it from the scope it searched
+               ("Nonprofits in Indiana"), the same as Discover. */
+          />
         </div>
-        <WebNonprofits
-          near={nonprofitNear}
-          causes={state.prefs.causes || []}
-          heading={region ? `Nonprofits near ${region}` : 'Nonprofits near you'}
-        />
-        {appsFailed ? (
-          <section aria-labelledby="home-apps-h" style={S(`${CARD};padding:20px`)}>
-            <h2 id="home-apps-h" style={S('margin:0;font:600 16px/1.3 Geist;letter-spacing:-0.015em;color:#1A1714')}>Your projects and applications</h2>
-            <LoadError text="Couldn't load your projects and applications. Check your connection and try again." onRetry={retryApps} />
-          </section>
-        ) : (
-          <div key={appsAttempt} style={S('display:flex;flex-direction:column;gap:16px')}>
-            <MemberProjects />
-            <VolunteerApplications />
-          </div>
-        )}
       </div>
     </div>
   );

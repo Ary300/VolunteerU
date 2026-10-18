@@ -1,70 +1,113 @@
 'use client';
 
 /* ==========================================================================
-   MyRatings.jsx, how organizers have rated this volunteer
-   Each rating was written by an organizer on the volunteer's application
-   (CrossMembers.jsx) and shows here on the volunteer's own profile. Renders
-   nothing until rated.
+   MyRatings.jsx, what organizers said about this volunteer.
+   Ratings are written by an organizer on the volunteer's application
+   (CrossMembers.jsx); notes come from state.leadFeedback. Profile passes both
+   in (it already loaded the applications); used on its own it loads ratings.
+   Renders nothing until there is at least one rating or note.
    ========================================================================== */
 
 import { useEffect, useState } from 'react';
-import { S, s } from '../lib/style.js';
-import { Icon } from './ui.jsx';
+import { S } from '../lib/style.js';
+import { C, F } from '../lib/tokens.js';
 import { loadMyRatings } from '../lib/listings.js';
+import { Sep } from './vu/ListingCard.jsx';
 
-function Stars({ n }) {
-  const full = Math.round(Number(n) || 0);
+/** Meta parts joined with the house separator (an ink3 middle dot). */
+function metaLine(parts) {
+  const list = parts.filter(Boolean);
+  return list.length ? list.map((p, i) => <span key={i}>{i ? <Sep /> : null}{p}</span>) : null;
+}
+
+/** Ratings from already-loaded applications, newest first (same rule as loadMyRatings). */
+export function ratingsFrom(apps) {
+  return (apps || [])
+    .filter((a) => a.assignment && a.assignment.rating && a.assignment.rating.stars)
+    .map((a) => ({ ...a.assignment.rating, org: (a.listings && a.listings.name) || 'A project', cause: a.listings && a.listings.cause }))
+    .sort((x, y) => String(y.ratedAt || '').localeCompare(String(x.ratedAt || '')));
+}
+
+export function averageStars(ratings) {
+  if (!ratings || !ratings.length) return 0;
+  return ratings.reduce((t, r) => t + Number(r.stars || 0), 0) / ratings.length;
+}
+
+/** An average as people say it: 5 -> "5", 4.666 -> "4.7". */
+export function starsLabel(avg) {
+  const r = Math.round(Number(avg || 0) * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
+/** "Oct 10" from an ISO timestamp, or '' when it can't be read. */
+function shortDate(iso) {
+  const d = iso ? new Date(iso) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+}
+
+/* One note as a plain row: what happened, the organizer's words, then meta. */
+function NoteRow({ lead, text, meta }) {
   return (
-    <span role="img" aria-label={`${Math.round((Number(n) || 0) * 10) / 10} out of 5`} style={S('display:inline-flex;align-items:center;gap:2px')}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Icon key={i} name="star" size={14} filled={i <= full} color={i <= full ? '#C2603C' : '#D9D0C6'} />
-      ))}
-    </span>
+    <li className="vu-pf-note" style={S(`padding:18px 0;border-top:1px solid ${C.line};min-width:0`)}>
+      {lead ? <div style={S(`font:600 15px/1.4 ${F.body};color:${C.ink}`)}>{lead}</div> : null}
+      {text ? (
+        <blockquote className="vu-break" style={S(`margin:${lead ? '6px' : '0'} 0 0;max-width:640px;font:400 15px/1.55 ${F.body};color:${C.ink}`)}>{text}</blockquote>
+      ) : null}
+      {meta ? <div style={S(`margin-top:6px;font:400 13px/1.4 ${F.body};color:${C.ink2}`)}>{meta}</div> : null}
+    </li>
   );
 }
 
-/** `divider` (style string) draws a rule after the block, only when it renders. */
-export default function MyRatings({ divider } = {}) {
-  const [ratings, setRatings] = useState(null);
+/**
+ * @param {object} props
+ * @param {Array} [props.ratings] from ratingsFrom(); omitted, the block loads its own
+ * @param {Array} [props.notes]   state.leadFeedback rows { id, t, who, when }
+ * @param {string} [props.headingId]
+ */
+export default function MyRatings({ ratings: given, notes = [], headingId = 'vu-ratings-h' } = {}) {
+  const controlled = given !== undefined;
+  const [own, setOwn] = useState(null);
   useEffect(() => {
+    if (controlled) return undefined;
     let live = true;
     loadMyRatings()
-      .then((r) => { if (live) setRatings(r); })
+      .then((r) => { if (live) setOwn(r); })
       .catch((e) => {
         console.error('loadMyRatings failed', e);
-        if (live) setRatings([]);
+        if (live) setOwn([]);
       });
     return () => { live = false; };
-  }, []);
+  }, [controlled]);
 
-  if (ratings === null || ratings.length === 0) return null;
-  const avg = ratings.reduce((a, r) => a + Number(r.stars || 0), 0) / ratings.length;
+  const ratings = (controlled ? given : own) || [];
+  const list = notes || [];
+  if (!ratings.length && !list.length) return null;
+  const avg = averageStars(ratings);
 
   return (
-    <section aria-labelledby="vu-ratings-h">
-      <div style={S('display:flex;align-items:baseline;justify-content:space-between;gap:12px')}>
-        <h2 id="vu-ratings-h" style={S('margin:0;font:600 16px/1.2 Geist;letter-spacing:-0.01em;color:#1A1714')}>Ratings from organizers</h2>
-        <div style={S('font:450 12px/1 Geist;color:#8A8179')}>{ratings.length} {ratings.length === 1 ? 'rating' : 'ratings'}</div>
+    <div>
+      <div className="vu-sec-head" style={S('display:flex;align-items:baseline;justify-content:space-between;gap:8px 16px;flex-wrap:wrap')}>
+        <h2 id={headingId} style={S(`margin:0;font:650 24px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`)}>Notes from organizers</h2>
+        {ratings.length ? (
+          <span style={S(`font:400 14px/1.3 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>
+            {ratings.length === 1 ? '' : 'Average '}{starsLabel(avg)} out of 5 from {ratings.length} {ratings.length === 1 ? 'rating' : 'ratings'}
+          </span>
+        ) : null}
       </div>
-      <div style={S('margin-top:12px;display:flex;align-items:center;gap:12px')}>
-        <div style={S(`font:600 30px/1 Geist;letter-spacing:-0.03em;font-variant-numeric:tabular-nums`)}>{avg.toFixed(1)}</div>
-        <Stars n={avg} />
-      </div>
-      <div style={S('margin-top:14px;display:flex;flex-direction:column')}>
-        {ratings.slice(0, 5).map((r, i) => (
-          <div key={`${r.org}-${r.ratedAt || ''}-${i}`} style={s('padding:12px 0', i ? 'border-top:1px solid #F1EBE4' : '')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap')}>
-              <div style={S('font:600 13px/1.2 Geist;color:#1A1714;min-width:0')}>{r.org}</div>
-              <div style={S('display:flex;align-items:center;gap:8px')}>
-                <Stars n={r.stars} />
-                {r.reliability ? <span style={S('font:500 12px/1 Geist;color:#3F6B4E')}>{r.reliability}</span> : null}
-              </div>
-            </div>
-            {r.note ? <div className="vu-break" style={S('margin-top:6px;font:450 13px/1.5 Geist;color:#57504A')}>“{r.note}”</div> : null}
-          </div>
+      <ul style={S(`margin:14px 0 0;padding:0;list-style:none;border-bottom:1px solid ${C.line}`)}>
+        {ratings.slice(0, 6).map((r, i) => (
+          <NoteRow
+            key={`r-${r.org}-${r.ratedAt || ''}-${i}`}
+            lead={`${r.org} rated you ${Number(r.stars)} out of 5`}
+            text={r.note || ''}
+            meta={metaLine([r.reliability, shortDate(r.ratedAt)])}
+          />
         ))}
-      </div>
-      {divider ? <div aria-hidden="true" style={S(divider)} /> : null}
-    </section>
+        {list.map((f) => (
+          <NoteRow key={`n-${f.id}`} text={f.t} meta={metaLine([f.who, f.when])} />
+        ))}
+      </ul>
+    </div>
   );
 }
+

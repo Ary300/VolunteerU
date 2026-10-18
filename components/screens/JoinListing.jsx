@@ -5,36 +5,45 @@
    Anyone can view it signed out. Applying goes through sign-in and lands back
    here. It reads the live Supabase listing (never local seed data), so the
    application it creates is the one the organizer sees on /lead.
+
+   Layout: title and facts, the listing's own photo when it has one, then the
+   details on the left and a sticky action panel on the right with the shifts,
+   the apply form or where the application stands. Under 960px the panel sits
+   right under the header.
    ========================================================================== */
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { S, s, cx, H } from '../../lib/style.js';
-import { ImageSlot } from '../ui.jsx';
-import { Logo } from '../Logo.jsx';
+import Link from 'next/link';
+import { S, cx, H } from '../../lib/style.js';
+import { C, F, R, causeOf, causeKey } from '../../lib/tokens.js';
+import { Button, Icon, StatusPill, StatusText, ErrorState } from '../ui.jsx';
+import { Wordmark } from '../Logo.jsx';
+import { MarketingHeader, MarketingFooter } from '../Marketing.jsx';
+import { useSnapshot } from '../../lib/store.js';
+import DateBlock, { dateParts } from '../vu/DateBlock.jsx';
+import { fmtRange } from '../../lib/format.js';
+import { photoFor } from '../../lib/photos.js';
 import { toast, confirmDialog } from '../../lib/overlays.js';
-import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp } from '../../lib/listings.js';
+import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp, memberHourEntries } from '../../lib/listings.js';
 import { safeUrl } from '../MemberProjects.jsx';
 import { isPastShift, parseTimeRange } from '../../lib/calendar.js';
 import { isArchivedApplication } from '../VolunteerApplications.jsx';
+import { whenLabel } from '../AnnouncementBoard.jsx';
 
-const MONO = "'Geist Mono',monospace";
-/* The "Verified" badge says one word on screen; the explanation is its hover
+/* The verified check sits after the organization's name; the explanation is its hover
    title and screen-reader text. Shared with Detail and Apply. */
 export const VERIFIED_NOTE = 'A VolunteerU reviewer checked this organization by hand.';
 export const VERIFIED_LABEL = `Verified. ${VERIFIED_NOTE}`;
 export const SR_ONLY = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap';
 const KIND = { meeting: 'Meeting', form: 'Form', training: 'Training', check: 'Check' };
 const NOTE_MAX = 400;
-
-const PRIMARY_BTN = 'flex:none;padding:0 20px;height:46px;border-radius:12px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 15px/1 Geist;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center';
-const SECONDARY_BTN = 'flex:none;padding:0 18px;height:46px;border-radius:12px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 14px/1 Geist;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center';
-const DANGER_BTN = 'flex:none;padding:0 18px;height:46px;border-radius:12px;border:1px solid #EBD3C8;background:#fff;color:#A8482A;font:600 14px/1 Geist;cursor:pointer';
-const SMALL_PRIMARY = 'flex:none;padding:0 16px;height:38px;border-radius:10px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 13px/1 Geist;cursor:pointer';
-const SMALL_DANGER = 'flex:none;padding:0 14px;height:38px;border-radius:10px;border:1px solid #EBD3C8;background:#fff;color:#A8482A;font:600 13px/1 Geist;cursor:pointer';
+/* Shifts shown in the panel before "Show all". */
+const SHIFT_PREVIEW = 4;
 /* Application statuses that can hold shift sign-ups (lib/listings.js agrees). */
 const SIGNUP_STATUSES = ['pending', 'accepted'];
+/* Statuses whose join link opens. Unlisted is off Discover, link still open. */
+const OPEN_STATUSES = ['live', 'unlisted'];
 
 /* One clock reading in the house style: "9 AM", "9:30 PM", "noon", "midnight". */
 function clockPart(min) {
@@ -51,13 +60,18 @@ const WHOLE_RANGE_RX = new RegExp(`^${END_RX}\\s*(?:to|\\u2013|-)\\s*${END_RX}$`
 const SINGLE_TIME_RX = /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i;
 
 /**
- * Any shift time the app has stored, in the one format every screen shows:
- * "10:00 AM - 12:00 PM" → "10 AM–noon", "3:30-5:30 PM" → "3:30–5:30 PM",
- * "1:00-4:00 PM" → "1–4 PM", "12:00 PM" → "noon". Text that isn't a time
+ * Any shift time the app has stored, in the one format every screen shows
+ * (lib/format.js fmtRange): "1:00-4:00 PM" → "1 to 4 PM", "3:30-5:30 PM" →
+ * "3:30 to 5:30 PM", "10:00 AM-1:00 PM" → "10 AM to 1 PM". A stored "noon"
+ * or "midnight" end keeps its word ("9 AM to noon"). Text that isn't a time
  * comes back as it was.
  */
 export function formatShiftTime(t) {
   const raw = String(t || '').trim();
+  if (!/noon|midnight/i.test(raw) && (SINGLE_TIME_RX.test(raw) || WHOLE_RANGE_RX.test(raw))) {
+    const house = fmtRange(raw);
+    if (house) return house;
+  }
   const one = SINGLE_TIME_RX.exec(raw);
   if (one) {
     const h = Number(one[1]);
@@ -72,8 +86,8 @@ export function formatShiftTime(t) {
   const a = clockPart(range.start);
   const b = clockPart(range.end);
   const end = b.mer ? `${b.text} ${b.mer}` : b.text;
-  if (a.mer && a.mer === b.mer) return `${a.text}–${end}`;
-  return `${a.mer ? `${a.text} ${a.mer}` : a.text}–${end}`;
+  if (a.mer && a.mer === b.mer) return `${a.text} to ${end}`;
+  return `${a.mer ? `${a.text} ${a.mer}` : a.text} to ${end}`;
 }
 
 /* Splits a stored next-shift label into its date and time. The app has
@@ -90,20 +104,28 @@ function splitShift(text) {
 }
 
 /** Reads a stored next shift ("Sat, Oct 24 · 1:00-4:00 PM") into the label
-    every screen shows ("Sat, Oct 24 at 1–4 PM") and whether it already happened. */
+    every screen shows ("Sat, Oct 24 · 1 to 4 PM") and whether it already happened. */
 export function nextShiftInfo(raw, now = new Date()) {
   const text = String(raw || '').trim();
   if (!text || /not scheduled/i.test(text)) return null;
   const [datePart, timePart] = splitShift(text);
-  const label = timePart ? `${datePart} at ${formatShiftTime(timePart)}` : datePart;
+  const label = timePart ? `${datePart} · ${formatShiftTime(timePart)}` : datePart;
   return { label, past: isPastShift({ d: datePart, t: timePart }, now) };
 }
 
-/** "Sat, Oct 24 at 1–4 PM" for one published shift. */
+/** "Sat, Oct 24 · 1 to 4 PM" for one published shift (cards, rows, toasts). */
 export function shiftLabel(sh) {
   if (!sh) return '';
   const t = formatShiftTime(sh.t);
-  return t ? `${sh.d} at ${t}` : String(sh.d || '');
+  return t ? `${sh.d} · ${t}` : String(sh.d || '');
+}
+
+/** "Sat, Oct 24, 1 to 4 PM": the same shift inside a sentence, where a
+    middle dot would read as a typo. */
+export function shiftPhrase(sh) {
+  if (!sh) return '';
+  const t = formatShiftTime(sh.t);
+  return t ? `${sh.d}, ${t}` : String(sh.d || '');
 }
 
 function friendlyError(e) {
@@ -113,24 +135,57 @@ function friendlyError(e) {
   return "Your application didn't send. Check your connection and try again.";
 }
 
+/* Sticky offset for the action panel. A panel taller than the window sticks
+   by its bottom edge (negative top), so every control in it stays reachable
+   without an inner scroll. */
+function useStickyTop(ref, gap = 24) {
+  const [top, setTop] = useState(gap);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === 'undefined') return undefined;
+    const measure = () => setTop(Math.min(gap, window.innerHeight - el.offsetHeight - gap));
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  });
+  return top;
+}
+
+/* True while the apply form's own submit button is on screen (above the
+   phone action bar), so the bar steps aside instead of doubling it. */
+function useSubmitInView(panelRef, barHeight = 80) {
+  const [inView, setInView] = useState(false);
+  const target = useRef(null);
+  const io = useRef(null);
+  useEffect(() => {
+    const el = panelRef.current ? panelRef.current.querySelector('[data-apply-submit]') : null;
+    if (el === target.current) return;
+    target.current = el;
+    if (io.current) io.current.disconnect();
+    io.current = null;
+    if (!el || typeof IntersectionObserver === 'undefined') { setInView(false); return; }
+    io.current = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { rootMargin: `0px 0px -${barHeight}px 0px` });
+    io.current.observe(el);
+  });
+  useEffect(() => () => { if (io.current) io.current.disconnect(); }, []);
+  return inView;
+}
+
 /* Listing ids are UUIDs. Anything else on /join is a typo or an old link. */
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/* A retired /opportunity, /apply or /projects link (the old built-in
-   catalogue) lands here with ?old=1. Public, so a signed-out visitor never
-   meets a sign-in step just to learn the link is old. */
-function OutdatedLink({ signedIn }) {
-  const href = signedIn ? '/discover' : '/#search';
-  return (
-    <div style={S('padding:48px 32px;text-align:center;border-radius:18px;border:1px solid #E8E1D9;background:#fff')}>
-      <h1 style={S('margin:0;font:600 22px/1.2 Geist;letter-spacing:-0.03em')}>This link is out of date</h1>
-      <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C')}>Search for the opportunity by name to find its current page.</div>
-      <Link href={href} className={H.press} style={S(`margin-top:18px;${PRIMARY_BTN};height:44px;font-size:14px`)}>Search opportunities</Link>
-    </div>
-  );
-}
-
-export default function JoinListing({ id, outdated = false }) {
+/**
+ * @param {{ id: string, outdated?: boolean, preview?: object | null }} props
+ *   preview: the public fields app/join/[id]/page.js read on the server. It
+ *   draws the header while the browser loads the listing and the visitor's
+ *   application, so the page has its title, org, date and photo without JS.
+ */
+export default function JoinListing({ id, outdated = false, preview = null }) {
   const router = useRouter();
   const stale = outdated && !UUID_RX.test(String(id || ''));
   const [listing, setListing] = useState(undefined); // undefined=loading, null=missing
@@ -145,40 +200,75 @@ export default function JoinListing({ id, outdated = false }) {
   // The member's application when the organizer archived this project: RLS
   // hides the listing from them, so the read above comes back empty.
   const [archivedApp, setArchivedApp] = useState(null);
+  // The applications read failed, so this page can't tell whether the
+  // student already applied. The panel says so instead of offering the form.
+  const [appsError, setAppsError] = useState(false);
+  const [appsRetrying, setAppsRetrying] = useState(false);
+  // The listing read itself failed (network, 5xx). That isn't a dead link,
+  // so the page offers a retry instead of "This link isn't active".
+  const [loadError, setLoadError] = useState(false);
+  const [loadNonce, setLoadNonce] = useState(0);
+  const panelRef = useRef(null);
+  const stickyTop = useStickyTop(panelRef);
+  const submitInView = useSubmitInView(panelRef);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [l, uid] = await Promise.all([getListing(id), myId()]);
-      if (!alive) return;
-      // A malformed id can't match any application's listing_id (a UUID).
-      if (uid && !l && UUID_RX.test(String(id || ''))) {
-        // A hidden listing may be a project this member was in that got
-        // archived. Check before showing "This link isn't active".
-        let gone = null;
-        try {
-          const mine = await loadMyApplications({ throwOnError: true });
-          gone = mine.find((a) => a.listing_id === id && isArchivedApplication(a)) || null;
-        } catch (err) {
+      // The listing, who's signed in and their applications load together, so
+      // the panel renders once in its real state (apply form or application
+      // status) instead of showing the form and then swapping it out.
+      // loadMyApplications returns [] when signed out.
+      let failed = false;
+      const [l, uid, mine] = await Promise.all([
+        getListing(id).catch((err) => {
+          console.error('[join] could not load the listing', err);
+          return 'error';
+        }),
+        myId(),
+        loadMyApplications({ throwOnError: true }).catch((err) => {
           console.error('[join] could not load your applications', err);
-        }
-        if (!alive) return;
-        setArchivedApp(gone);
+          failed = true;
+          return [];
+        }),
+      ]);
+      if (!alive) return;
+      if (l === 'error') {
+        setLoadError(true);
+        setMe(uid || null);
+        return;
       }
+      setLoadError(false);
+      // A malformed id can't match any application's listing_id (a UUID).
+      // A hidden listing may be a project this member was in that got
+      // archived. Check before showing "This link isn't active".
+      if (uid && !l && UUID_RX.test(String(id || ''))) {
+        setArchivedApp(mine.find((a) => a.listing_id === id && isArchivedApplication(a)) || null);
+      }
+      const found = uid && l ? mine.find((a) => a.listing_id === l.id) : null;
+      if (found) setApp(found);
+      setAppsError(!!uid && failed);
       setListing(l);
       setMe(uid || null);
-      if (uid && l) {
-        try {
-          const mine = await loadMyApplications({ throwOnError: true });
-          const found = mine.find((a) => a.listing_id === l.id);
-          if (alive && found) setApp(found);
-        } catch (err) {
-          console.error('[join] could not load your applications', err);
-        }
-      }
     })();
     return () => { alive = false; };
-  }, [id]);
+  }, [id, loadNonce]);
+
+  /** Reads the student's applications again after a failed load. */
+  async function retryApps() {
+    if (appsRetrying) return;
+    setAppsRetrying(true);
+    try {
+      const mine = await loadMyApplications({ throwOnError: true });
+      if (listing) setApp(mine.find((a) => a.listing_id === listing.id) || null);
+      else if (UUID_RX.test(String(id || ''))) setArchivedApp(mine.find((a) => a.listing_id === id && isArchivedApplication(a)) || null);
+      setAppsError(false);
+    } catch (err) {
+      console.error('[join] could not load your applications again', err);
+      toast({ title: "Couldn't load your application", message: 'Check your connection and try again.', tone: 'danger' });
+    }
+    setAppsRetrying(false);
+  }
 
   /** Re-reads this listing's application. Returns the row it found, or null. */
   async function refreshApp(fallback) {
@@ -195,7 +285,7 @@ export default function JoinListing({ id, outdated = false }) {
   }
 
   async function apply() {
-    if (busy || !listing) return;
+    if (busy || !listing || appsError) return;
     if (!me) { router.push(`/signin?next=${encodeURIComponent(`/join/${id}`)}`); return; }
     const positions = listing.positions || [];
     if (positions.length > 1 && !position) {
@@ -214,10 +304,10 @@ export default function JoinListing({ id, outdated = false }) {
         if (res && res.ok) {
           setApp({ ...found, member_state: res.member_state });
           setShiftPick('');
-          toast({ title: 'Applied and signed up', message: `${listing.name} has your application. You're signed up for ${shiftLabel(pick)}.`, tone: 'ok' });
+          toast({ title: 'Applied and signed up', message: `${listing.name} has your application. You're signed up for ${shiftPhrase(pick)}.`, tone: 'ok' });
         } else {
           if (res) console.error('[join] shift sign-up after applying failed', res.error);
-          toast({ title: 'Applied, shift not saved', message: 'Sign up for the shift below.', tone: 'warn' });
+          toast({ title: 'Applied, shift not saved', message: 'Sign up for the shift from the list of shifts.', tone: 'warn' });
         }
       } else {
         toast({ title: 'Applied', message: `${listing.name} will see your application.`, tone: 'ok' });
@@ -282,7 +372,7 @@ export default function JoinListing({ id, outdated = false }) {
     const res = await signUpForShift(app.id, sh.id);
     if (res.ok) {
       setApp((prev) => ({ ...prev, member_state: res.member_state }));
-      toast({ title: 'Signed up', message: `${shiftLabel(sh)}, ${listing.name}.`, tone: 'ok' });
+      toast({ title: 'Signed up', message: `${listing.name} · ${shiftLabel(sh)}`, tone: 'ok' });
     } else {
       console.error('[join] shift sign-up failed', res.error);
       toast({ title: "Couldn't sign up", message: res.error.message, tone: 'danger' });
@@ -296,7 +386,7 @@ export default function JoinListing({ id, outdated = false }) {
     if (shiftBusy || !app || !app.id) return;
     const ok = await confirmDialog({
       title: 'Cancel your sign-up?',
-      body: `${listing.name} will see you're not coming on ${shiftLabel(sh)}. You can sign up again before it starts.`,
+      body: `${listing.name} will see you're not coming on ${shiftPhrase(sh)}. You can sign up again before it starts.`,
       confirmLabel: 'Cancel sign-up',
       cancelLabel: 'Keep it',
       tone: 'danger',
@@ -306,7 +396,7 @@ export default function JoinListing({ id, outdated = false }) {
     const res = await cancelShiftSignUp(app.id, sh.id);
     if (res.ok) {
       setApp((prev) => ({ ...prev, member_state: res.member_state }));
-      toast({ title: 'Sign-up canceled', message: `${shiftLabel(sh)}.`, tone: 'ok' });
+      toast({ title: 'Sign-up canceled', message: `${listing.name} · ${shiftLabel(sh)}`, tone: 'ok' });
     } else {
       console.error('[join] cancel shift sign-up failed', res.error);
       toast({ title: "Couldn't cancel", message: res.error.message, tone: 'danger' });
@@ -328,23 +418,50 @@ export default function JoinListing({ id, outdated = false }) {
     setBusy(false);
   }
 
+  if (loadError) {
+    return (
+      <Shell signedIn={me === undefined ? undefined : !!me}>
+        <ErrorState
+          title="Couldn't load this opportunity"
+          body="Check your connection and try again."
+          onRetry={() => {
+            setLoadError(false);
+            setListing(undefined);
+            setLoadNonce((n) => n + 1);
+          }}
+        />
+      </Shell>
+    );
+  }
+  if (listing === undefined && preview && !stale) {
+    return <Shell signedIn={me === undefined ? undefined : !!me}><PreviewShell id={id} preview={preview} /></Shell>;
+  }
   if (listing === undefined) {
-    return <Shell><div role="status" style={S('padding:60px 0;text-align:center;font:450 15px/1.5 Geist;color:#8A8179')}>Loading</div></Shell>;
+    return <Shell signedIn={me === undefined ? undefined : !!me}><div role="status" aria-busy="true" style={S(`padding:80px 0;text-align:center;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>Loading</div></Shell>;
   }
   if (stale) {
-    return <Shell><OutdatedLink signedIn={!!me} /></Shell>;
+    return (
+      <Shell signedIn={!!me}>
+        <Notice icon="link" title="This link is out of date" body="Search for the opportunity by name to find its current page." cta="Search opportunities" href={me ? '/discover' : '/#search'} />
+      </Shell>
+    );
   }
   if (listing === null && archivedApp) {
-    return <Shell><ArchivedProject app={archivedApp} /></Shell>;
+    return <Shell signedIn={!!me}><ArchivedProject app={archivedApp} /></Shell>;
   }
-  if (listing === null || listing.status !== 'live') {
+  if (listing === null && appsError) {
+    // Hidden listing and no applications to check it against: it may be an
+    // archived project this student was in, so don't call the link dead yet.
     return (
-      <Shell>
-        <div style={S('padding:48px 32px;text-align:center;border-radius:18px;border:1px solid #E8E1D9;background:#fff')}>
-          <h1 style={S('margin:0;font:600 22px/1.2 Geist;letter-spacing:-0.03em')}>This link isn't active</h1>
-          <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C')}>The organizer may have paused it, or the link has a typo.</div>
-          <Link href="/discover" className={H.press} style={S(`margin-top:18px;${PRIMARY_BTN};height:44px;font-size:14px`)}>Browse opportunities</Link>
-        </div>
+      <Shell signedIn={!!me}>
+        <Notice icon="alert" title="Couldn't open this link" body="Your projects didn't load, so we can't tell whether this one was archived. Check your connection and try again." cta={appsRetrying ? 'Trying again' : 'Try again'} onAction={retryApps} busy={appsRetrying} />
+      </Shell>
+    );
+  }
+  if (listing === null || !OPEN_STATUSES.includes(listing.status)) {
+    return (
+      <Shell signedIn={!!me}>
+        <Notice icon="link" title="This link isn't active" body="The organizer may have paused it, or the link has a typo." cta="Browse opportunities" href="/discover" />
       </Shell>
     );
   }
@@ -363,396 +480,628 @@ export default function JoinListing({ id, outdated = false }) {
   // Upcoming sign-ups for a shift the organizer has since taken off the list.
   const orphanSignUps = mySignUps.filter((x) => !shifts.some((sh) => sh.id === x.id));
   // Signed in without an application: shifts are picked in the apply form.
-  const pickInForm = !!me && !isOwner && !app && shifts.length > 0;
-  const facts = [
+  const pickInForm = !!me && !isOwner && !app && !appsError && shifts.length > 0;
+  // The form's "Which role?" picker lists each role with its age and hours,
+  // so while it shows, the "Roles they need" section would repeat it.
+  const pickRoleInForm = !!me && !isOwner && !app && !appsError && positions.length > 1;
+  // The organizer types these counts in; nobody checks them, so they're
+  // credited to the organizer and never shown as fact.
+  const counts = [
     listing.events_hosted ? `${listing.events_hosted} ${listing.events_hosted === 1 ? 'event' : 'events'} hosted` : '',
-    listing.approx_volunteers ? `about ${listing.approx_volunteers} volunteers so far` : '',
-  ].filter(Boolean).join(', ');
+    listing.approx_volunteers ? `about ${listing.approx_volunteers} ${listing.approx_volunteers === 1 ? 'volunteer' : 'volunteers'} so far` : '',
+  ].filter(Boolean);
+  const facts = counts.length ? `The organizer reports ${counts.join(' and ')}.` : '';
+
+  const shiftList = isTeam ? null : pickInForm ? (
+    <ShiftPicker shifts={shifts} site={listing.site} value={shiftPick} onChange={setShiftPick} />
+  ) : (shifts.length || orphanSignUps.length) ? (
+    <ShiftList
+      shifts={shifts}
+      orphans={orphanSignUps}
+      site={listing.site}
+      canPick={canPickShifts}
+      signedUpIds={signedUpIds}
+      shiftBusy={shiftBusy}
+      onSignUp={signUpShift}
+      onCancel={cancelShift}
+    />
+  ) : (
+    <div style={S(`font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
+      <span style={S(`font-weight:600;color:${C.ink}`)}>Next shift </span>
+      {shift && !shift.past ? shift.label : 'No upcoming shift posted yet'}
+    </div>
+  );
+
+  // Phones: the about text comes first and this bar carries the main action
+  // (globals.css .vu-jl-bar). Hidden for the organizer and once there's an
+  // application or a load error, since the panel then isn't a form.
+  const showBar = !isOwner && !app && !appsError;
+  const barShift = shift && !shift.past ? shift.label : shifts[0] ? shiftLabel(shifts[0]) : '';
+  const barWhen = isTeam ? '' : barShift || 'No upcoming shift posted yet';
+  function jumpToApply() {
+    if (!me) { apply(); return; }
+    const el = panelRef.current;
+    if (!el) return;
+    const still = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+    const first = el.querySelector('input:not([disabled]),button:not([disabled]),textarea,select');
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  const panelShifts = shiftList && !pickInForm ? (
+    <div style={S(`margin-top:22px;padding-top:20px;border-top:1px solid ${C.line}`)}>
+      <h2 style={S(`margin:0 0 8px;font:600 17px/1.2 ${F.display};letter-spacing:-0.01em;color:${C.ink}`)}>Shifts</h2>
+      {shiftList}
+    </div>
+  ) : null;
 
   return (
-    <Shell>
-      <div style={S('border-radius:18px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-        <div style={S('height:180px;position:relative')}>
-          <ImageSlot src={listing.cover} shape="rounded" radius={0} placeholder="cover" alt="" />
-        </div>
-        <div className="vu-join-body" style={S('padding:24px 28px 28px')}>
-          <div style={S('display:flex;align-items:center;gap:8px;flex-wrap:wrap')}>
-            {/* Who runs it, the same way the Lead header says it. */}
-            {listing.org_class === 'official' ? (
-              <Tag bg="#EAF3EC" color="#3F6B4E">Organization</Tag>
-            ) : (
-              <Tag bg="#FDF3E7" color="#8A5A20">Student project</Tag>
-            )}
-            {listing.verified ? (
-              <Tag bg="#EAF3EC" color="#3F6B4E" title={VERIFIED_LABEL}>
-                <CheckIcon />
-                Verified
-                <span style={S(SR_ONLY)}>. {VERIFIED_NOTE}</span>
-              </Tag>
-            ) : null}
-            {isTeam ? <Tag bg="#F1EBE4" color="#57504A">Task team</Tag> : null}
-            {listing.cause ? <Tag bg="#F1EBE4" color="#57504A">{listing.cause}</Tag> : null}
-          </div>
-          <h1 className="vu-break" style={S('margin:14px 0 0;font:600 30px/1.1 Geist;letter-spacing:-0.04em')}>{listing.name}</h1>
-          {listing.site ? <div className="vu-break" style={S('margin-top:8px;font:450 14px/1.4 Geist;color:#8A8179')}>{listing.site}</div> : null}
-          {listing.mission ? <div className="vu-break" style={S('margin-top:16px;font:400 16px/1.6 Geist;color:#332D28;max-width:640px')}>{listing.mission}</div> : null}
-          {listing.bio ? <div className="vu-break" style={S('margin-top:12px;font:450 14px/1.6 Geist;color:#57504A;max-width:640px')}>{listing.bio}</div> : null}
+    <Shell signedIn={!!me}>
+      <ListingHeader listing={listing} isTeam={isTeam} />
 
-          {(!isTeam && !shifts.length) || facts ? (
-            <div style={S('margin-top:18px;display:flex;flex-direction:column;gap:6px;font:450 14px/1.5 Geist;color:#57504A')}>
-              {!isTeam && !shifts.length ? (
-                <div>
-                  <span style={S('color:#1A1714;font-weight:600')}>Next shift </span>
-                  {shift && !shift.past ? shift.label : 'No upcoming shift posted yet'}
-                </div>
-              ) : null}
-              {facts ? <div style={S('color:#8A8179')}>{facts.charAt(0).toUpperCase() + facts.slice(1)}</div> : null}
-            </div>
+      <div className={cx('vu-jl-grid', showBar && 'has-bar')}>
+        <div className="vu-jl-main">
+          {listing.mission || listing.bio || facts ? (
+            <section className="vu-jl-sec">
+              {listing.mission ? <p className="vu-break" style={S(`margin:0;font:400 18px/1.5 ${F.body};color:${C.ink};max-width:620px`)}>{listing.mission}</p> : null}
+              {listing.bio ? <p className="vu-break" style={S(`margin:${listing.mission ? 14 : 0}px 0 0;font:400 15px/1.6 ${F.body};color:${C.ink2};max-width:620px`)}>{listing.bio}</p> : null}
+              {facts ? <p style={S(`margin:${listing.mission || listing.bio ? 16 : 0}px 0 0;font:400 14px/1.4 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>{facts}</p> : null}
+            </section>
           ) : null}
 
-          {/* apply / status */}
-          <div id="vu-join-apply" aria-live="polite" style={S('margin-top:22px;padding:18px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-            {isOwner ? (
-              <StatusRow
-                title="You run this project"
-                body="Volunteers apply from this page. Their applications show up in Lead."
-              >
-                <Link href="/lead" className={cx(H.secondary, H.press)} style={S(SECONDARY_BTN)}>Open Lead</Link>
-              </StatusRow>
-            ) : app ? (
-              <AppStatus app={app} listing={listing} busy={busy} hasShifts={shifts.length > 0} onWithdraw={withdraw} onApplyAgain={applyAgain} />
-            ) : (
-              <div>
-                <h2 style={S('margin:0;font:600 16px/1.3 Geist;color:#1A1714')}>Applications are open</h2>
-                <div style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>
-                  {me ? 'The organizer reads each one and replies in the app.' : "Sign in or create a free account to apply. You'll come back here after."}
-                </div>
-                {needsConsent ? (
-                  <div style={S('margin-top:8px;font:450 13px/1.5 Geist;color:#6B635C')}>
-                    If you're under 16, you'll need a parent's OK on the consent form before your first shift.
-                  </div>
-                ) : null}
-
-                {me && positions.length > 1 ? (
-                  <fieldset style={S('margin:16px 0 0;padding:0;border:0;min-width:0')}>
-                    <legend style={S('padding:0;font:600 13px/1.3 Geist;color:#332D28')}>Which role?</legend>
-                    <div style={S('margin-top:8px;display:flex;flex-wrap:wrap;gap:8px')}>
-                      {positions.map((pos) => {
-                        const on = position === pos.t;
-                        return (
-                          <button
-                            key={pos.id || pos.t}
-                            type="button"
-                            role="radio"
-                            aria-checked={on}
-                            onClick={() => { setPosition(pos.t); setPosError(''); }}
-                            className={cx('vu-break', on ? '' : H.chip, H.press)}
-                            style={s(
-                              'padding:9px 13px;border-radius:10px;text-align:left;cursor:pointer;font:500 13px/1.25 Geist;max-width:100%',
-                              `border:1px solid ${on ? '#C2603C' : '#E4DDD4'}`,
-                              `background:${on ? '#fff' : '#FCFAF8'}`,
-                              `color:${on ? '#A8482A' : '#332D28'}`
-                            )}
-                          >
-                            {pos.t}
-                            {pos.m ? <span style={S('display:block;margin-top:3px;font:450 11.5px/1.3 Geist;color:#8A8179')}>{String(pos.m).replace(/\s*·\s*/g, ', ')}</span> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {posError ? <div className="vu-err" role="alert">{posError}</div> : null}
-                  </fieldset>
-                ) : null}
-
-                {pickInForm ? (
-                  <div style={S('margin-top:16px')}>
-                    <div id="vu-join-shift-label" style={S('font:600 13px/1.3 Geist;color:#332D28')}>{shifts.length === 1 ? 'Shift' : 'Which shift?'} <span style={S('font-weight:450;color:#8A8179')}>(optional)</span></div>
-                    <div role="radiogroup" aria-labelledby="vu-join-shift-label" style={S('margin-top:8px;display:flex;flex-wrap:wrap;gap:8px')}>
-                      {shifts.map((sh) => {
-                        const on = shiftPick === sh.id;
-                        return (
-                          <button
-                            key={sh.id}
-                            type="button"
-                            role="radio"
-                            aria-checked={on}
-                            onClick={() => setShiftPick(on ? '' : sh.id)}
-                            className={cx(on ? '' : H.chip, H.press)}
-                            style={s(
-                              'padding:9px 13px;border-radius:10px;text-align:left;cursor:pointer;font:500 13px/1.25 Geist;max-width:100%',
-                              `border:1px solid ${on ? '#C2603C' : '#E4DDD4'}`,
-                              `background:${on ? '#fff' : '#FCFAF8'}`,
-                              `color:${on ? '#A8482A' : '#332D28'}`
-                            )}
-                          >
-                            {shiftLabel(sh)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#8A8179')}>You can change shifts after you apply.</div>
-                  </div>
-                ) : null}
-
-                {me ? (
-                  <label style={S('display:block;margin-top:16px')}>
-                    <span style={S('font:600 13px/1.3 Geist;color:#332D28')}>Note to the organizer (optional)</span>
-                    <textarea
-                      value={note}
-                      maxLength={NOTE_MAX}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="e.g. Free most Saturday afternoons"
-                      rows={3}
-                      style={S('display:block;box-sizing:border-box;margin-top:8px;width:100%;padding:11px 12px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:450 14px/1.5 Geist;color:#1A1714;resize:vertical')}
-                    />
-                    <span style={S(`display:block;margin-top:4px;text-align:right;font:450 11px/1 ${MONO};color:#A9A097`)}>{note.length}/{NOTE_MAX}</span>
-                  </label>
-                ) : null}
-
-                <div style={S('margin-top:14px;display:flex;gap:10px;flex-wrap:wrap')}>
-                  <button type="button" onClick={apply} disabled={busy} data-busy={busy ? 'true' : undefined} className={cx(H.primary, H.press)} style={S(PRIMARY_BTN)}>
-                    {busy ? 'Applying' : me ? 'Apply to join' : 'Sign in to apply'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* the listing's upcoming shifts; applicants sign up for each one here */}
-          {!isTeam && !pickInForm && (shifts.length || orphanSignUps.length) ? (
-            canPickShifts ? (
-            <Section title="Shifts">
-              {shifts.map((sh) => (
-                <ShiftRow
-                  key={sh.id}
-                  shift={sh}
-                  site={listing.site}
-                  canPick={canPickShifts}
-                  signedUp={signedUpIds.has(sh.id)}
-                  busy={shiftBusy === sh.id}
-                  disabled={!!shiftBusy}
-                  onSignUp={() => signUpShift(sh)}
-                  onCancel={() => cancelShift(sh)}
-                />
-              ))}
-              {orphanSignUps.map((sh) => (
-                <ShiftRow
-                  key={sh.id}
-                  shift={sh}
-                  site={listing.site}
-                  canPick
-                  signedUp
-                  removed
-                  busy={shiftBusy === sh.id}
-                  disabled={!!shiftBusy}
-                  onCancel={() => cancelShift(sh)}
-                />
-              ))}
-            </Section>
-            ) : (
-              <Section title="Shifts" divided>
-                {shifts.map((sh) => <PlainShift key={sh.id} shift={sh} site={listing.site} />)}
-              </Section>
-            )
-          ) : null}
-
-          {/* roles (team) or positions (volunteering) */}
           {isTeam && roles.length ? (
             <Section title="Roles on this team">
-              {roles.map((r) => (
-                <div key={r.id} style={S('padding:14px 16px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                  <div style={S('display:flex;align-items:center;gap:8px')}>
-                    <span aria-hidden="true" style={s('width:9px;height:9px;border-radius:50%;flex:none', `background:${r.color || '#C2603C'}`)} />
-                    <div className="vu-break" style={S('min-width:0;font:600 14px/1.2 Geist')}>{r.name}</div>
-                  </div>
-                  {r.briefing ? <div className="vu-break" style={S('margin-top:6px;font:450 12.5px/1.5 Geist;color:#57504A')}>{r.briefing}</div> : null}
-                </div>
-              ))}
+              {roles.map((r) => <Row key={r.id} title={r.name} sub={r.briefing} />)}
             </Section>
           ) : null}
-          {!isTeam && positions.length ? (
+          {!isTeam && positions.length && !pickRoleInForm ? (
             <Section title="Roles they need">
-              {positions.map((pos) => (
-                <div key={pos.id || pos.t} style={S('padding:12px 14px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                  <div className="vu-break" style={S('font:600 14px/1.2 Geist')}>{pos.t}</div>
-                  {pos.m ? <div className="vu-break" style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>{String(pos.m).replace(/\s*·\s*/g, ', ')}</div> : null}
-                </div>
-              ))}
+              {positions.map((pos) => <Row key={pos.id || pos.t} title={pos.t} sub={pos.m ? String(pos.m).replace(/\s*·\s*/g, ', ') : ''} />)}
             </Section>
           ) : null}
 
-          {/* steps before the first shift (volunteering) */}
           {!isTeam && pipeline.length ? (
             <Section title="Before your first shift">
-              {pipeline.map((step, i) => (
-                <div key={step.id || i} style={S('display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:11px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                  <span aria-hidden="true" style={S(`width:22px;height:22px;border-radius:7px;flex:none;display:grid;place-items:center;background:#F1EBE4;font:600 10px/1 ${MONO};color:#8A8179`)}>{i + 1}</span>
-                  <div style={S('min-width:0;flex:1')}>
-                    <div className="vu-break" style={S('font:500 13px/1.3 Geist;color:#332D28')}>{step.label}</div>
-                    {step.note ? <div className="vu-break" style={S('margin-top:2px;font:450 12px/1.4 Geist;color:#8A8179')}>{step.note}</div> : null}
-                  </div>
-                  <span style={S(`flex:none;font:500 10px/1 ${MONO};color:#A9A097`)}>{KIND[step.kind] || 'Step'}</span>
-                </div>
-              ))}
+              <ol style={S('margin:0;padding:0;list-style:none')}>
+                {pipeline.map((step, i) => (
+                  <li key={step.id || i} style={S(`display:flex;align-items:flex-start;gap:16px;padding:14px 0;${i ? `border-top:1px solid ${C.line}` : ''}`)}>
+                    <div style={S('min-width:0;flex:1')}>
+                      <div className="vu-break" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{step.label}</div>
+                      {step.note ? <div className="vu-break" style={S(`margin-top:3px;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>{step.note}</div> : null}
+                    </div>
+                    <span style={S(`flex:none;padding-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{KIND[step.kind] || 'Step'}</span>
+                  </li>
+                ))}
+              </ol>
             </Section>
           ) : null}
 
           {(listing.announcements || []).length ? <OrganizerNotes items={listing.announcements} /> : null}
 
+          {!isTeam ? <WhereSection listing={listing} /> : null}
+
           {safeUrl(listing.website) ? (
-            <div style={S('margin-top:22px')}>
-              <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" className={H.link} style={S('display:inline-flex;align-items:center;gap:6px;font:500 14px/1 Geist;color:#C2603C;text-decoration:none')}>
+            <section className="vu-jl-sec">
+              <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:6px;font:600 15px/1.2 ${F.body}`)}>
                 Visit their website
-                <ExternalIcon />
-                <span style={S('position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap')}>(opens in a new tab)</span>
+                <Icon name="external" size={15} />
+                <span style={S(SR_ONLY)}>(opens in a new tab)</span>
               </a>
-            </div>
+            </section>
           ) : null}
         </div>
+        <aside ref={panelRef} id="vu-join-apply" className="vu-jl-panel" style={{ top: stickyTop }} aria-live="polite" aria-label={isOwner ? 'Your listing' : 'Apply'}>
+          {isOwner ? (
+            <StatusBlock title="You run this project" body="Volunteers apply from this page. Their applications show up in Lead." shifts={panelShifts}>
+              <Button href="/lead" variant="outline" full>Open Lead</Button>
+            </StatusBlock>
+          ) : app ? (
+            <AppStatus app={app} listing={listing} busy={busy} hasShifts={shifts.length > 0} onWithdraw={withdraw} onApplyAgain={applyAgain} shifts={panelShifts} />
+          ) : appsError ? (
+            <StatusBlock title="Couldn't load your application" body="We can't tell whether you already applied here. Check your connection and try again." shifts={panelShifts}>
+              <Button variant="outline" icon="refresh" full onClick={retryApps} disabled={appsRetrying} busy={appsRetrying}>
+                {appsRetrying ? 'Trying again' : 'Try again'}
+              </Button>
+            </StatusBlock>
+          ) : (
+            <ApplyForm
+              me={me}
+              needsConsent={needsConsent}
+              positions={positions}
+              position={position}
+              posError={posError}
+              onPosition={(t) => { setPosition(t); setPosError(''); }}
+              note={note}
+              onNote={setNote}
+              busy={busy}
+              onApply={apply}
+              shiftPicker={pickInForm ? shiftList : panelShifts}
+            />
+          )}
+        </aside>
       </div>
+      {showBar ? (
+        <div className="vu-jl-bar" data-off={submitInView ? 'true' : undefined}>
+          <span className="vu-jl-bar-meta"><b>{listing.name}</b>{barWhen}</span>
+          <Button variant="primary" onClick={jumpToApply}>{me ? 'Apply to join' : 'Sign in to apply'}</Button>
+        </div>
+      ) : null}
     </Shell>
   );
 }
 
-function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain }) {
-  const role = app.position ? ` as ${app.position}` : '';
-  if (app.status === 'accepted') {
-    return (
-      <StatusRow title="Accepted" body={`You're on ${listing.name}${role}. ${hasShifts ? 'Sign up for shifts below.' : 'Your role and next steps are on Home.'}`}>
-        <Link href="/app" className={cx(H.secondary, H.press)} style={S(SECONDARY_BTN)}>Go to Home</Link>
-        <button type="button" onClick={onWithdraw} disabled={busy} className={cx(H.danger, H.press)} style={S(DANGER_BTN)}>Withdraw application</button>
-      </StatusRow>
-    );
-  }
-  if (app.status === 'declined') {
-    return (
-      <StatusRow title="Not accepted" body={`${listing.name} passed on your application. Other opportunities are open on Discover.`}>
-        <Link href="/discover" className={cx(H.secondary, H.press)} style={S(SECONDARY_BTN)}>Find opportunities</Link>
-      </StatusRow>
-    );
-  }
-  if (app.status === 'withdrawn') {
-    return (
-      <StatusRow title="Withdrawn" body="You withdrew this application. You can apply again.">
-        <button type="button" onClick={onApplyAgain} disabled={busy} data-busy={busy ? 'true' : undefined} className={cx(H.primary, H.press)} style={S(PRIMARY_BTN)}>
-          {busy ? 'Applying' : 'Apply again'}
-        </button>
-      </StatusRow>
-    );
-  }
+/* ---- header and photo ---------------------------------------------------- */
+
+/* The organizer as a card's line A shows it: the organization's name is the
+   first part of the stored site ("Riverbend Food Bank, 3737 Waldemere Ave,
+   Rivertown"), and the address is what follows. A remote site names no one.
+   Student projects carry no organization, so their whole site is the address. */
+const NO_PLACE_RE = /^(remote|online|virtual)\b/i;
+function splitOrgSite(listing) {
+  const site = String((listing && (listing.site || listing.location)) || '').trim();
+  const official = !!listing && listing.org_class === 'official';
+  const parts = site.split(',').map((x) => x.trim()).filter(Boolean);
+  if (!official || !parts.length || NO_PLACE_RE.test(parts[0])) return { org: '', address: site };
+  return { org: parts[0], address: parts.slice(1).join(', ') };
+}
+
+/* Title, one meta line ("Riverbend Food Bank (check) · Food and hunger") and
+   the address. A listing with its own photo shows it under the header. The
+   dates live in one place, the panel's Shifts list, so the header never
+   repeats them. */
+function ListingHeader({ listing, isTeam }) {
+  const cause = listing.cause ? causeOf(listing.cause) : null;
+  const photo = photoFor(listing, { seed: false });
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photo && photo.src]);
+  const hasPhoto = !!photo && !broken;
+  const official = listing.org_class === 'official';
+  const { org, address } = splitOrgSite(listing);
+  const check = listing.verified ? (
+    <>
+      <span style={S('display:inline-block;margin-left:4px;vertical-align:-2px')} title={VERIFIED_LABEL}>
+        <Icon name="badge-check" size={15} color={C.confirmed} />
+      </span>
+      <span style={S(SR_ONLY)}> Verified organization. {VERIFIED_NOTE}</span>
+    </>
+  ) : null;
+  // An organization with no name on file still gets its check, as text.
+  const who = !official ? (
+    <span key="who">Student project</span>
+  ) : org ? (
+    <span key="who" style={S('white-space:nowrap')}>{org}{check}</span>
+  ) : listing.verified ? (
+    <span key="who" style={S('white-space:nowrap')}>Verified organization{check}</span>
+  ) : null;
+  const tokens = [
+    who,
+    isTeam ? <span key="kind">Task team</span> : null,
+    cause ? <span key="cause">{causeKey(listing.cause) === 'other' ? listing.cause : cause.label}</span> : null,
+  ].filter(Boolean);
   return (
-    <StatusRow title="Applied" body={`You applied${role}. Waiting to hear back, and their reply shows up on Home.${hasShifts && app.id ? ' You can sign up for shifts now.' : ''}`}>
-      <Link href="/app" className={cx(H.secondary, H.press)} style={S(SECONDARY_BTN)}>Go to Home</Link>
-      {app.id ? <button type="button" onClick={onWithdraw} disabled={busy} className={cx(H.danger, H.press)} style={S(DANGER_BTN)}>Withdraw application</button> : null}
-    </StatusRow>
+    <>
+      <header style={S(hasPhoto ? 'margin-bottom:24px' : '')}>
+        <h1 className="vu-break vu-jl-title" style={S(`margin:0;font:700 40px/1.05 ${F.display};letter-spacing:-0.03em;color:${C.ink}`)}>{listing.name}</h1>
+        {/* Inline text so a long line wraps like a sentence; the no-break space
+            keeps each dot on the end of the line it follows. */}
+        {tokens.length ? (
+          <p style={S(`margin:12px 0 0;font:500 15px/22px ${F.body};color:${C.ink2}`)}>
+            {tokens.map((t, i) => (
+              <span key={t.key}>
+                {i ? <span className="vu-sep" aria-hidden="true">{'\u00a0· '}</span> : null}
+                {t}
+              </span>
+            ))}
+          </p>
+        ) : null}
+        {address ? (
+          <p className="vu-break" style={S(`margin:${tokens.length ? 6 : 12}px 0 0;font:400 15px/20px ${F.body};color:${C.ink2}`)}>{address}</p>
+        ) : null}
+      </header>
+      {hasPhoto ? (
+        <div className="vu-jl-hero">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photo.src} alt="" onError={() => setBroken(true)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: photo.pos, display: 'block' }} />
+        </div>
+      ) : null}
+    </>
   );
 }
 
-/* One published shift. An applicant signs up or cancels from the row; anyone
-   else just sees the date. A past shift is never listed (listingShifts). */
-function ShiftRow({ shift, site, canPick, signedUp, removed, busy, disabled, onSignUp, onCancel }) {
-  const label = shiftLabel(shift);
-  const where = shift.loc && shift.loc !== site ? shift.loc : '';
+/* The page as the server draws it: the real header, the about text and a
+   panel with the next date that waits for the visitor's application. The
+   panel never offers the form here, so a member who already applied doesn't
+   see "Apply" flash before their status. Without JS the panel links to sign-in. */
+function PreviewShell({ id, preview }) {
+  const isTeam = preview.org_type === 'team';
+  const next = `/signin?next=${encodeURIComponent(`/join/${id}`)}`;
   return (
-    <div style={s('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:11px', `border:1px solid ${signedUp ? '#DCEADF' : '#F1EBE4'}`, `background:${signedUp ? '#F4F9F5' : '#FCFAF8'}`)}>
-      <div style={S('min-width:0;flex:1 1 200px')}>
-        <div className="vu-break" style={S('font:600 14px/1.3 Geist;color:#1A1714')}>{label}</div>
-        {where ? <div className="vu-break" style={S('margin-top:3px;font:450 12px/1.4 Geist;color:#8A8179')}>{where}</div> : null}
-        {removed ? <div style={S('margin-top:3px;font:450 12px/1.4 Geist;color:#A8482A')}>The organizer took this shift off the list.</div> : null}
-      </div>
-      {canPick ? (
-        <div style={S('display:flex;align-items:center;gap:10px;flex-wrap:wrap')}>
-          {signedUp ? (
-            <>
-              <span style={S('display:inline-flex;align-items:center;gap:5px;font:600 13px/1 Geist;color:#3F6B4E')}>
-                <CheckIcon />
-                Signed up
-              </span>
-              <button type="button" onClick={onCancel} disabled={disabled} aria-label={`Cancel sign-up for ${label}`} data-busy={busy ? 'true' : undefined} className={cx(H.danger, H.press)} style={S(SMALL_DANGER)}>
-                {busy ? 'Canceling' : 'Cancel sign-up'}
-              </button>
-            </>
-          ) : (
-            <button type="button" onClick={onSignUp} disabled={disabled} aria-label={`Sign up for ${label}`} data-busy={busy ? 'true' : undefined} className={cx(H.primary, H.press)} style={S(SMALL_PRIMARY)}>
-              {busy ? 'Signing up' : 'Sign up'}
-            </button>
-          )}
+    <>
+      <ListingHeader listing={preview} isTeam={isTeam} />
+      <div className="vu-jl-grid">
+        <div className="vu-jl-main">
+          {preview.mission || preview.bio ? (
+            <section className="vu-jl-sec">
+              {preview.mission ? <p className="vu-break" style={S(`margin:0;font:400 18px/1.5 ${F.body};color:${C.ink};max-width:620px`)}>{preview.mission}</p> : null}
+              {preview.bio ? <p className="vu-break" style={S(`margin:${preview.mission ? 14 : 0}px 0 0;font:400 15px/1.6 ${F.body};color:${C.ink2};max-width:620px`)}>{preview.bio}</p> : null}
+            </section>
+          ) : null}
         </div>
+        <aside className="vu-jl-panel" aria-label="Apply" aria-busy="true">
+          {!isTeam ? (
+            <div style={S(`font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
+              <span style={S(`font-weight:600;color:${C.ink}`)}>Next shift </span>
+              {preview.nextDate || 'No upcoming shift posted yet'}
+            </div>
+          ) : null}
+          <div role="status" className="vu-jl-wait" style={S(`margin-top:${isTeam ? 0 : 16}px;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>Loading</div>
+          <noscript>
+            <style>{'.vu-jl-wait{display:none}'}</style>
+            <div style={S('margin-top:16px')}>
+              <Button href={next} variant="primary" size="lg" full>Sign in to apply</Button>
+            </div>
+          </noscript>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+/* ---- action panel -------------------------------------------------------- */
+
+function ApplyForm({ me, needsConsent, positions, position, posError, onPosition, note, onNote, busy, onApply, shiftPicker }) {
+  return (
+    <div>
+      <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>Applications are open</h2>
+      <p style={S(`margin:6px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
+        {me ? 'The organizer reads each one and replies in the app.' : "Sign in or create a free account to apply. You'll come back here after."}
+      </p>
+      {needsConsent ? (
+        <p style={S(`margin:8px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
+          If you're under 16, you'll need a parent's OK on the consent form before your first shift.
+        </p>
       ) : null}
+
+      {me && positions.length > 1 ? (
+        <fieldset style={S('margin:20px 0 0;padding:0;border:0;min-width:0')}>
+          <legend id="vu-join-role-label" style={S(`padding:0;font:600 14px/1.3 ${F.body};color:${C.ink}`)}>Which role?</legend>
+          <div role="radiogroup" aria-labelledby="vu-join-role-label" style={S(OPTION_LIST)}>
+            {positions.map((pos) => (
+              <Option
+                key={pos.id || pos.t}
+                on={position === pos.t}
+                onClick={() => onPosition(pos.t)}
+                title={pos.t}
+                sub={pos.m ? String(pos.m).replace(/\s*·\s*/g, ', ') : ''}
+              />
+            ))}
+          </div>
+          {posError ? <div className="vu-err" role="alert">{posError}</div> : null}
+        </fieldset>
+      ) : null}
+
+      {shiftPicker}
+
+      {me ? (
+        <label style={S('display:block;margin-top:20px')}>
+          <span style={S('display:flex;align-items:baseline;justify-content:space-between;gap:12px')}>
+            <span style={S(`font:600 14px/1.3 ${F.body};color:${C.ink}`)}>Note to the organizer (optional)</span>
+            <span className="vu-count">{note.length}/{NOTE_MAX}</span>
+          </span>
+          <textarea
+            value={note}
+            maxLength={NOTE_MAX}
+            onChange={(e) => onNote(e.target.value)}
+            placeholder="e.g. Free most Saturday afternoons"
+            rows={3}
+            className={cx('vu-input', H.input)}
+            style={S(`display:block;box-sizing:border-box;margin-top:8px;width:100%;padding:12px 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.5 ${F.body};color:${C.ink};resize:vertical`)}
+          />
+        </label>
+      ) : null}
+
+      <div style={S('margin-top:20px')}>
+        <Button variant="primary" size="lg" full onClick={onApply} disabled={busy} data-busy={busy ? 'true' : undefined} data-apply-submit="">
+          {busy ? 'Applying' : me ? 'Apply to join' : 'Sign in to apply'}
+        </Button>
+      </div>
     </div>
   );
 }
 
-/* A shift for someone who can't sign up from here (signed out, or not an
-   applicant): a plain line under a divider, so it doesn't read as an input. */
-function PlainShift({ shift, site }) {
-  const where = shift.loc && shift.loc !== site ? shift.loc : '';
+/* Signed in, no application yet: pick one shift to sign up for with the
+   application. Optional, and changeable later. */
+function ShiftPicker({ shifts, site, value, onChange }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? shifts : shifts.filter((sh, i) => i < SHIFT_PREVIEW || sh.id === value);
   return (
-    <div style={S('padding:11px 0;border-bottom:1px solid #F1EBE4')}>
-      <div className="vu-break" style={S('font:500 14px/1.35 Geist;color:#1A1714')}>{shiftLabel(shift)}</div>
-      {where ? <div className="vu-break" style={S('margin-top:2px;font:450 12px/1.4 Geist;color:#8A8179')}>{where}</div> : null}
+    <div style={S('margin-top:20px')}>
+      <div id="vu-join-shift-label" style={S(`font:600 14px/1.3 ${F.body};color:${C.ink}`)}>
+        {shifts.length === 1 ? 'Shift' : 'Which shift?'} <span style={S(`font-weight:400;color:${C.ink2}`)}>(optional)</span>
+      </div>
+      <div role="radiogroup" aria-labelledby="vu-join-shift-label" style={S(OPTION_LIST)}>
+        {shown.map((sh) => {
+          const text = shiftText(sh, site);
+          return (
+            <Option
+              key={sh.id}
+              on={value === sh.id}
+              onClick={() => onChange(value === sh.id ? '' : sh.id)}
+              label={shiftPhrase(sh)}
+              lead={text.dated ? <DateBlock date={sh.d} size="sm" month /> : null}
+              title={text.title}
+              sub={text.sub}
+            />
+          );
+        })}
+      </div>
+      <MoreToggle total={shifts.length} shown={shown.length} all={all} onToggle={() => setAll((v) => !v)} />
+      <div style={S(`margin-top:8px;font:400 13px/1.4 ${F.body};color:${C.ink2}`)}>You can change shifts after you apply.</div>
+    </div>
+  );
+}
+
+/* The words beside a shift's DateBlock. The block already carries the
+   weekday, day and month, so the row leads with the time and adds the place
+   only when it differs from the listing's site. A shift whose date the block
+   can't read keeps its date as the title. */
+function shiftText(sh, site) {
+  const time = formatShiftTime(sh.t);
+  const where = sh.loc && sh.loc !== site ? sh.loc : '';
+  if (!dateParts(sh.d)) {
+    return { dated: false, title: String(sh.d || 'Date not set'), sub: [time, where].filter(Boolean).join(', ') };
+  }
+  if (time) return { dated: true, title: time, sub: where };
+  return { dated: true, title: where || 'Time not set', sub: '' };
+}
+
+/* Role and shift choices: plain rows split by dividers, no tiles. */
+const OPTION_LIST = `margin-top:8px;display:flex;flex-direction:column;border-bottom:1px solid ${C.line}`;
+
+/* A selectable row (role or shift): radio semantics, the radio on the right.
+   Chosen reads as ink text and a filled radio. */
+function Option({ on, onClick, title, sub, lead, label }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      aria-label={label}
+      onClick={onClick}
+      className={cx('vu-jl-option', H.press)}
+      data-on={on ? 'true' : 'false'}
+      style={S(`display:flex;align-items:center;gap:12px;width:100%;min-height:56px;text-align:left;padding:${lead ? 10 : 14}px 0;margin:0;border:0;border-top:1px solid ${C.line};border-radius:0;background:transparent;cursor:pointer;color:${C.ink}`)}
+    >
+      {lead}
+      <span style={S('min-width:0;flex:1')}>
+        <span className="vu-break" style={S(`display:block;font:${on ? 650 : 500} 15px/1.25 ${F.body};color:${on ? C.ink : C.ink2}`)}>{title}</span>
+        {sub ? <span className="vu-break" style={S(`display:block;margin-top:2px;font:400 13.5px/1.35 ${F.body};color:${C.ink2}`)}>{sub}</span> : null}
+      </span>
+      <span aria-hidden="true" className="vu-jl-radio" style={S(`flex:none;width:20px;height:20px;border-radius:50%;border:${on ? `6px solid ${C.ink}` : `1.5px solid ${C.line2}`};background:#fff;box-sizing:border-box`)} />
+    </button>
+  );
+}
+
+function MoreToggle({ total, shown, all, onToggle }) {
+  if (total <= SHIFT_PREVIEW) return null;
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={all} className="vu-link-ul" style={S(`margin-top:12px;padding:0;border:0;background:none;cursor:pointer;font:600 14px/1.2 ${F.body}`)}>
+      {all ? 'Show fewer shifts' : `Show all ${total} shifts`}
+      {!all && shown < total ? <span style={S(SR_ONLY)}>, {total - shown} hidden</span> : null}
+    </button>
+  );
+}
+
+/* The listing's upcoming shifts. An applicant signs up or cancels from the
+   row; anyone else just sees the dates. Past shifts are never listed. */
+function ShiftList({ shifts, orphans, site, canPick, signedUpIds, shiftBusy, onSignUp, onCancel }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? shifts : shifts.filter((sh, i) => i < SHIFT_PREVIEW || signedUpIds.has(sh.id));
+  return (
+    <div>
+      <ul style={S('margin:0;padding:0;list-style:none')}>
+        {shown.map((sh, i) => (
+          <ShiftRow
+            key={sh.id}
+            first={i === 0}
+            shift={sh}
+            site={site}
+            canPick={canPick}
+            signedUp={signedUpIds.has(sh.id)}
+            busy={shiftBusy === sh.id}
+            disabled={!!shiftBusy}
+            onSignUp={() => onSignUp(sh)}
+            onCancel={() => onCancel(sh)}
+          />
+        ))}
+        {orphans.map((sh) => (
+          <ShiftRow
+            key={sh.id}
+            shift={sh}
+            site={site}
+            canPick
+            signedUp
+            removed
+            busy={shiftBusy === sh.id}
+            disabled={!!shiftBusy}
+            onCancel={() => onCancel(sh)}
+          />
+        ))}
+      </ul>
+      <MoreToggle total={shifts.length} shown={shown.length} all={all} onToggle={() => setAll((v) => !v)} />
+    </div>
+  );
+}
+
+function ShiftRow({ shift, site, canPick, signedUp, removed, busy, disabled, onSignUp, onCancel, first = false }) {
+  const label = shiftPhrase(shift);
+  const text = shiftText(shift, site);
+  return (
+    <li style={S(`display:flex;align-items:center;gap:12px;padding:10px 0;${first ? '' : `border-top:1px solid ${C.line}`}`)}>
+      {text.dated ? <DateBlock date={shift.d} size="sm" month tone={signedUp ? 'white' : 'line'} className={signedUp ? 'vu-jl-date-on' : undefined} /> : null}
+      <div style={S('min-width:0;flex:1')}>
+        <div className="vu-break" style={S(`font:600 15px/1.25 ${F.body};color:${C.ink}`)}>{text.title}</div>
+        {text.sub ? <div className="vu-break" style={S(`margin-top:2px;font:400 13.5px/1.35 ${F.body};color:${C.ink2}`)}>{text.sub}</div> : null}
+        {removed ? <div style={S(`margin-top:3px;font:500 13px/1.35 ${F.body};color:${C.emberDeep}`)}>The organizer took this shift off the list.</div> : null}
+      </div>
+      {canPick ? (
+        signedUp ? (
+          <div style={S('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px')}>
+            <StatusText tone="ok">Signed up</StatusText>
+            <button type="button" onClick={onCancel} disabled={disabled} aria-label={`Cancel sign-up for ${label}`} data-busy={busy ? 'true' : undefined} className="vu-link-ul" style={S(`padding:0;border:0;background:none;cursor:pointer;font:600 13px/1.2 ${F.body};color:${C.emberDeep}`)}>
+              {busy ? 'Canceling' : 'Cancel sign-up'}
+            </button>
+          </div>
+        ) : (
+          <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} busy={busy} aria-label={`Sign up for ${label}`}>
+            {busy ? 'Signing up' : 'Sign up'}
+          </Button>
+        )
+      ) : null}
+    </li>
+  );
+}
+
+const APP_TONE = { accepted: 'ok', waitlisted: 'mute', declined: 'bad', withdrawn: 'mute', pending: 'wait' };
+
+function AppStatus({ app, listing, busy, hasShifts, onWithdraw, onApplyAgain, shifts }) {
+  const role = app.position ? ` as ${app.position}` : '';
+  const tone = APP_TONE[app.status] || 'wait';
+  if (app.status === 'accepted') {
+    return (
+      <StatusBlock tone={tone} shifts={shifts} title="Accepted" body={`You're on ${listing.name}${role}. ${hasShifts ? 'Sign up for the shifts you can make.' : 'Your role and next steps are on Home.'}`}>
+        <Button href="/app" variant="outline" full>Go to Home</Button>
+        <WithdrawLink onClick={onWithdraw} disabled={busy} />
+      </StatusBlock>
+    );
+  }
+  if (app.status === 'waitlisted') {
+    return (
+      <StatusBlock tone={tone} shifts={shifts} title="Waitlisted" body={`${listing.name} put you on the waitlist${role}. If a spot opens and they accept you, it shows up on Home.`}>
+        <Button href="/app" variant="outline" full>Go to Home</Button>
+        <WithdrawLink onClick={onWithdraw} disabled={busy} />
+      </StatusBlock>
+    );
+  }
+  if (app.status === 'declined') {
+    return (
+      <StatusBlock tone={tone} shifts={shifts} title="Not accepted" body={`${listing.name} passed on your application. Other opportunities are open on Discover.`}>
+        <Button href="/discover" variant="outline" full>Find opportunities</Button>
+        <HomeLink />
+      </StatusBlock>
+    );
+  }
+  if (app.status === 'withdrawn') {
+    return (
+      <StatusBlock tone={tone} shifts={shifts} title="Withdrawn" body="You withdrew this application. You can apply again.">
+        <Button variant="primary" size="lg" full onClick={onApplyAgain} disabled={busy} data-busy={busy ? 'true' : undefined}>
+          {busy ? 'Applying' : 'Apply again'}
+        </Button>
+        <HomeLink />
+      </StatusBlock>
+    );
+  }
+  return (
+    <StatusBlock tone={tone} shifts={shifts} title="Applied" body={`You applied${role}. Waiting to hear back, and their reply shows up on Home.${hasShifts && app.id ? ' You can sign up for shifts now.' : ''}`}>
+      <Button href="/app" variant="outline" full>Go to Home</Button>
+      {app.id ? <WithdrawLink onClick={onWithdraw} disabled={busy} /> : null}
+    </StatusBlock>
+  );
+}
+
+/* The panel's heading. A status shows as its pill; the owner gets plain text. */
+function StatusBlock({ tone, title, body, shifts, children }) {
+  return (
+    <div>
+      <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>
+        {tone ? <StatusPill tone={tone} icon={tone !== 'mute'}>{title}</StatusPill> : title}
+      </h2>
+      <p className="vu-break" style={S(`margin:12px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink}`)}>{body}</p>
+      {shifts}
+      <div style={S(`margin-top:${shifts ? 22 : 18}px;display:flex;flex-direction:column;align-items:center;gap:12px`)}>{children}</div>
+    </div>
+  );
+}
+
+function HomeLink() {
+  return (
+    <Link href="/app" className="vu-link-ul" style={S(`padding:4px 0;font:600 14px/1.2 ${F.body}`)}>Go to Home</Link>
+  );
+}
+
+function WithdrawLink({ onClick, disabled }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} className="vu-link-ul" style={S(`padding:4px 0;border:0;background:none;cursor:pointer;font:600 14px/1.2 ${F.body};color:${C.emberDeep}`)}>
+      Withdraw application
+    </button>
+  );
+}
+
+/* ---- details ------------------------------------------------------------- */
+
+function Section({ title, children }) {
+  return (
+    <section className="vu-jl-sec">
+      <h2 style={S(`margin:0 0 6px;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`)}>{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function Row({ title, sub }) {
+  return (
+    <div className="vu-jl-row" style={S('padding:14px 0')}>
+      <div className="vu-break" style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>{title}</div>
+      {sub ? <div className="vu-break" style={S(`margin-top:3px;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>{sub}</div> : null}
     </div>
   );
 }
 
 /** "Sat, Oct 17" for an organizer post ("Sat, Oct 17, 2025" in another year), '' if unreadable. */
-function postedOn(at) {
-  const d = at ? new Date(at) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
-}
-
-/* The organizer's posts (listings.announcements, newest first), read-only:
-   a heading and the messages, split by dividers. */
+/* The organizer's posts (listings.announcements, newest first), read-only. */
 function OrganizerNotes({ items }) {
   return (
-    <Section title="From the organizer" divided>
+    <Section title="From the organizer">
       {items.map((an) => (
-        <div key={an.id} style={S('padding:12px 0;border-bottom:1px solid #F1EBE4')}>
-          <div className="vu-break" style={S('font:450 14px/1.6 Geist;color:#332D28;white-space:pre-wrap')}>{an.body}</div>
-          {postedOn(an.at) ? <div style={S(`margin-top:6px;font:500 11px/1 ${MONO};color:#8A8179`)}>{postedOn(an.at)}</div> : null}
+        <div key={an.id} className="vu-jl-row" style={S('padding:14px 0')}>
+          <div className="vu-break" style={S(`font:400 15px/1.55 ${F.body};color:${C.ink};white-space:pre-wrap`)}>{an.body}</div>
+          {whenLabel(an.at) ? <div style={S(`margin-top:6px;font:400 13px/1.2 ${F.body};color:${C.ink2};font-variant-numeric:tabular-nums`)}>{whenLabel(an.at)}</div> : null}
         </div>
       ))}
     </Section>
   );
 }
 
-function StatusRow({ title, body, children }) {
+/* Where the shift happens: the address and a link that opens it in Google
+   Maps in a new tab. No drawn map, so the page never claims to show the
+   exact block. */
+function WhereSection({ listing }) {
+  const remote = listing.delivery === 'remote';
+  const address = String(listing.site || listing.location || '').trim();
+  if (!address && !remote) return null;
+  if (remote) {
+    return (
+      <Section title="Where you'll be">
+        <p style={S(`margin:8px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
+          Online. The organizer sends the link after you're accepted.
+        </p>
+      </Section>
+    );
+  }
+  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   return (
-    <div style={S('display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap')}>
-      <div style={S('min-width:0;flex:1 1 260px')}>
-        <h2 className="vu-break" style={S('margin:0;font:600 16px/1.3 Geist;color:#1A1714')}>{title}</h2>
-        <div className="vu-break" style={S('margin-top:4px;font:450 13px/1.5 Geist;color:#6B635C')}>{body}</div>
-      </div>
-      <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>{children}</div>
-    </div>
+    <Section title="Where you'll be">
+      <p className="vu-break" style={S(`margin:8px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink}`)}>{address}</p>
+      <a href={mapHref} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:6px;margin-top:10px;font:600 14px/20px ${F.body}`)}>
+        Open in Maps
+        <Icon name="external" size={14} />
+        <span style={S(SR_ONLY)}>(opens Google Maps in a new tab)</span>
+      </a>
+    </Section>
   );
 }
 
-function Tag({ bg, color, title, children }) {
-  return (
-    <span title={title} style={s('display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:6px', `background:${bg}`, `font:500 10px/1 ${MONO}`, `color:${color}`)}>
-      {children}
-    </span>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 8.5l3.2 3L13 4.5" />
-    </svg>
-  );
-}
-
-function ExternalIcon() {
-  return (
-    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 3h7v7M13 3L4 12" />
-    </svg>
-  );
-}
+/* ---- other states -------------------------------------------------------- */
 
 /** "Oct 16" for an archive stamp ("Oct 16, 2025" in another year), '' if unreadable. */
 function archivedOn(closedAt) {
@@ -768,52 +1117,103 @@ function hrsText(n) {
 }
 
 /* What a member sees on the link of a project the organizer archived: its
-   name from the copy saved on their application, when it closed, and the
-   hours they logged there (confirmed ones counted from the organizer's
-   assignment.confirmedHours). */
+   name from the copy saved on their application, when it closed, and their
+   hours there, counted the way Home and Profile count them: their own log
+   (confirmed values from the organizer's assignment.confirmedHours) plus the
+   shifts the organizer posted in Attendance, which count as confirmed. */
 function ArchivedProject({ app }) {
   const name = (app.listings && app.listings.name) || 'This project';
   const on = archivedOn(app.assignment.closedAt);
-  const log = (app.member_state && app.member_state.hoursLog) || [];
-  const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
-  const logged = log.reduce((a, h) => a + (Number(h.hrs) || 0), 0);
-  const ok = log.filter((h) => confirmed[h.id]).reduce((a, h) => a + (Number(h.hrs) || 0), 0);
+  const own = memberHourEntries(app);
+  const posted = (Array.isArray(app.assignment.attendanceHours) ? app.assignment.attendanceHours : [])
+    .filter((h) => h && h.id && Number(h.hrs) > 0);
+  const sum = (rows) => rows.reduce((a, h) => a + (Number(h.hrs) || 0), 0);
+  const total = sum(own) + sum(posted);
+  const ok = sum(own.filter((h) => h.confirmed)) + sum(posted);
   let hoursLine = "You didn't log hours there.";
-  if (logged > 0) {
-    if (ok <= 0) hoursLine = `You logged ${hrsText(logged)} there. They stay on your profile.`;
-    else if (ok >= logged) hoursLine = `You logged ${hrsText(logged)} there, all confirmed by the organizer. They stay on your profile.`;
-    else hoursLine = `You logged ${hrsText(logged)} there and the organizer confirmed ${hrsText(ok)}. They stay on your profile.`;
+  if (total > 0) {
+    if (ok <= 0) hoursLine = `You logged ${hrsText(total)} there. They stay on your profile.`;
+    else if (ok >= total) hoursLine = `You have ${hrsText(total)} there, all confirmed by the organizer. They stay on your profile.`;
+    else hoursLine = `You have ${hrsText(total)} there and the organizer confirmed ${hrsText(ok)}. They stay on your profile.`;
+  }
+  const closed = on ? `The organizer archived it on ${on}, so this link is closed.` : 'The organizer archived it, so this link is closed.';
+  return <Notice icon="folder" title={`${name} was archived`} body={`${closed} ${hoursLine}`} cta="See your projects" href="/crew" />;
+}
+
+/* A page-level state (old link, inactive link, archived project). */
+function Notice({ icon, title, body, cta, href, onAction, busy = false }) {
+  return (
+    <div style={S('max-width:480px;margin:0 auto;padding:72px 0 40px;text-align:center')}>
+      <span aria-hidden="true" style={S(`display:inline-grid;place-items:center;width:56px;height:56px;border-radius:50%;background:${C.mist};color:${C.ink2}`)}>
+        <Icon name={icon} size={24} />
+      </span>
+      <h1 className="vu-break" style={S(`margin:18px 0 0;font:650 28px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`)}>{title}</h1>
+      <p style={S(`margin:10px 0 0;font:400 15px/1.55 ${F.body};color:${C.ink2}`)}>{body}</p>
+      <div style={S('margin-top:22px')}>
+        {onAction ? (
+          <Button variant="primary" icon="refresh" onClick={onAction} disabled={busy} busy={busy}>{cta}</Button>
+        ) : (
+          <Button href={href} variant="primary">{cta}</Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---- page frame ---------------------------------------------------------- */
+
+/* Join-page rules the shared .vu-jl-* classes in globals.css don't cover:
+   option rows keep their divider on hover (the radio darkens instead), and
+   once the panel drops under the photo it is a plain section, not a box.
+   On tablets the panel leads; on phones with the action bar it follows the
+   about text, and the page leaves room at the bottom for the bar. */
+const JOIN_CSS = `
+.vu-jl-panel .vu-jl-option[data-on="false"]:hover { border-color:${C.line} !important; }
+@media (hover:hover) {
+  .vu-jl-option[data-on="false"]:hover .vu-jl-radio { border-color:${C.ink3} !important; }
+}
+@media (max-width:960px) {
+  .vu-jl-grid > .vu-jl-panel { order:-1; border:0; border-radius:0; padding:0 0 32px; background:transparent; border-bottom:1px solid ${C.line}; }
+  .vu-jl-grid { row-gap:32px; }
+}
+@media (max-width:720px) {
+  .vu-jl-grid > .vu-jl-panel { padding-bottom:28px; }
+  .vu-jl-grid { row-gap:28px; }
+  .vu-jl-grid.has-bar > .vu-jl-panel { order:2; padding:28px 0 0; border-bottom:0; border-top:1px solid ${C.line}; }
+  .vu-jl-page:has(.vu-jl-bar) { padding-bottom:calc(76px + env(safe-area-inset-bottom, 0px)); }
+  .vu-jl-bar[data-off], .vu-jl-page:has(.vu-jl-panel:focus-within) .vu-jl-bar { display:none; }
+}
+`;
+
+/* Signed out, the page wears the same header and footer as the landing and
+   the other public pages. Signed in, a slim bar with the way back to Discover.
+   While sign-in is still being checked, the stored session decides. */
+function Shell({ children, signedIn }) {
+  const { state } = useSnapshot();
+  const authed = signedIn === undefined ? !!(state && state.session && state.session.authed) : signedIn;
+  if (!authed) {
+    return (
+      <div className="vu-jl-page" style={S('min-height:100vh;background:#fff')}>
+        <style dangerouslySetInnerHTML={{ __html: JOIN_CSS }} />
+        <MarketingHeader />
+        <main id="vu-main" tabIndex={-1} className="vu-jl-wrap" style={S('padding-top:32px;outline:none')}>{children}</main>
+        <MarketingFooter />
+      </div>
+    );
   }
   return (
-    <div style={S('padding:48px 32px;text-align:center;border-radius:18px;border:1px solid #E8E1D9;background:#fff')}>
-      <h1 className="vu-break" style={S('margin:0;font:600 22px/1.2 Geist;letter-spacing:-0.03em')}>{name} was archived</h1>
-      <div style={S('margin-top:10px;font:450 14px/1.6 Geist;color:#6B635C')}>
-        {on ? `The organizer archived it on ${on}, so this link is closed.` : 'The organizer archived it, so this link is closed.'} {hoursLine}
+    <div className="vu-jl-page" style={S('min-height:100vh;background:#fff')}>
+      <style dangerouslySetInnerHTML={{ __html: JOIN_CSS }} />
+      <div style={S(`border-bottom:1px solid ${C.line}`)}>
+        <div className="vu-jl-wrap" style={S('height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
+          <Link href="/" aria-label="VolunteerU home" style={S('display:inline-flex;text-decoration:none')}>
+            <Wordmark size={30} />
+          </Link>
+          <Link href="/discover" className="vu-link-ul" style={S(`font:600 14px/1 ${F.body}`)}>Discover</Link>
+        </div>
       </div>
-      <Link href="/crew" className={H.press} style={S(`margin-top:18px;${PRIMARY_BTN};height:44px;font-size:14px`)}>See your projects</Link>
+      <main id="vu-main" className="vu-jl-wrap" style={S('padding-top:32px;padding-bottom:96px')}>{children}</main>
     </div>
   );
 }
 
-function Shell({ children }) {
-  return (
-    <div className="vu-join-shell" style={S('min-height:100vh;padding:32px 24px 80px')}>
-      <div style={S('max-width:720px;margin:0 auto')}>
-        <Link href="/" aria-label="VolunteerU home" style={S('display:inline-flex;align-items:center;gap:9px;text-decoration:none;margin-bottom:22px')}>
-          <Logo size={30} />
-          <span style={S('font:600 17px/1 Geist;letter-spacing:-0.02em;color:#1A1714')}>VolunteerU</span>
-        </Link>
-        <main>{children}</main>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, divided = false, children }) {
-  return (
-    <section style={S('margin-top:26px')}>
-      <h2 style={S('margin:0;font:600 15px/1.3 Geist;letter-spacing:-0.01em;color:#1A1714')}>{title}</h2>
-      <div style={S(divided ? 'margin-top:4px;display:flex;flex-direction:column' : 'margin-top:10px;display:flex;flex-direction:column;gap:10px')}>{children}</div>
-    </section>
-  );
-}

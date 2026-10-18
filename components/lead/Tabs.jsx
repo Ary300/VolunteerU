@@ -6,7 +6,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { S, s, cx, H } from '../../lib/style.js';
-import { Avatar, Pressable, EmptyState, Toggle, Field, Icon, SectionLabel } from '../ui.jsx';
+import { Avatar, Pressable, EmptyState, Toggle, Field, TextArea, Icon, Button, StatusText, IconButton } from '../ui.jsx';
+import { C, F, R, TONES } from '../../lib/tokens.js';
+import DateBlock from '../vu/DateBlock.jsx';
 import { openModal, confirmDialog, toast, menuFromEvent } from '../../lib/overlays.js';
 import { update } from '../../lib/store.js';
 import { shiftDates, isPastShift } from '../../lib/calendar.js';
@@ -15,31 +17,88 @@ import { ShareLink } from './CrossMembers.jsx';
 import MessageThread from '../MessageThread.jsx';
 import { formatShiftTime } from '../screens/JoinListing.jsx';
 import { supabase } from '../../lib/supabase.js';
-import { loadProjectMembers, confirmMemberHour, publishListing, myId } from '../../lib/listings.js';
+import { loadProjectMembers, confirmMemberHour, publishListing, myId, loadOwnerApplications, setMemberAssignment, postedShiftOnDate } from '../../lib/listings.js';
 import {
   attendanceFor, attendanceStats, setAttendance, postAttendance,
   decideApplication, reopenApplication,
   pendingHours, cleanHours, approveHours, adjustHours, validateHours,
   recomputeCompliance, resolveDispute, fileIncident, closeIncident, resolveEscalation,
-  sendMessage, readThread, toggleProjectSetting, archiveProject,
+  sendMessage, readThread, toggleProjectSetting, archiveProject, logAudit,
   updateProject, download, parseSessionDate, getProject, messageTemplateText, ATTEND_TONE, GRADE_TONE, tone,
 } from '../../lib/db.js';
 import { GRADE_SCALE, messageTemplates } from '../../lib/seed.js';
 
-const MONO = "'Geist Mono',monospace";
 const ATTEND_OPTIONS = ['Present', 'Late', 'Absent', 'Excused'];
 
-/* Shared button looks. Solid brand fill, no gradient. */
-const BTN = 'display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;flex:none;padding:0 14px;height:36px;border-radius:10px;font:600 13px/1 Geist;cursor:pointer;transition:background .16s ease, border-color .16s ease';
-const BTN_PRIMARY = `${BTN};border:1px solid #A8482A;background:#C2603C;color:#fff`;
-const BTN_BRAND = `${BTN};border:1px solid #E7C0AC;background:#fff;color:#C2603C`;
-const BTN_PLAIN = `${BTN};border:1px solid #E4DDD4;background:#fff;color:#57504A`;
-const BTN_DANGER = `${BTN};border:1px solid #EBD3C8;background:#fff;color:#A8482A`;
-const MODAL_CANCEL = 'display:inline-flex;align-items:center;justify-content:center;padding:0 16px;height:40px;border-radius:11px;border:1px solid #E4DDD4;background:#fff;font:600 14px/1 Geist;color:#1A1714;cursor:pointer';
-const MODAL_PRIMARY = 'display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 18px;height:40px;border-radius:11px;border:1px solid #A8482A;background:#C2603C;color:#fff;font:600 14px/1 Geist;cursor:pointer';
-const TABLE_HEAD = 'font:500 12px/1 Geist;color:#8A8179';
-const CARD = 'padding:20px;border-radius:14px;border:1px solid #E8E1D9;background:#fff';
+/* ---- type and layout atoms (photo-first system, same scale as Lead.jsx) ---- */
+
+/** Section heading (h2) in the main column. */
+export const H2 = `margin:0;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`;
+/** Rail heading. */
+export const H3 = `margin:0;font:600 18px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`;
+export const LABEL = `font:600 15px/1.3 ${F.body};color:${C.ink}`;
+export const META = `font:400 14px/1.4 ${F.body};color:${C.ink2}`;
+export const SMALL = `font:400 13px/1.45 ${F.body};color:${C.ink2}`;
+export const BODY = `font:400 15px/1.5 ${F.body};color:${C.ink}`;
+export const NUM = 'font-variant-numeric:tabular-nums';
+/** A row divided from the next by a 1px rule. */
+export const RULE = `border-bottom:1px solid ${C.line}`;
+/** Table column header. */
+export const TH = `font:600 13px/1.2 ${F.body};color:${C.ink2}`;
+/** Underlined ink text action. Links are never colored. */
+export const TEXT_LINK = `font:600 14px/1.2 ${F.body};color:${C.ink};text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;cursor:pointer;background:none;border:0;padding:0;white-space:nowrap`;
+/** Sections in the main column sit 48px apart. */
+const SEC_GAP = 'margin-top:48px';
 const DISABLED = 'opacity:.5;cursor:default';
+
+/** Text color for a status tone: the tone's own, or ink2 for mute. */
+function toneFg(tone) {
+  const t = TONES[tone];
+  return tone === 'mute' || !t ? C.ink2 : t.fg;
+}
+
+/** A status word that opens a menu (attendance, score): dot + word + chevron,
+    no fill. It reads like StatusText and gains a mist fill on hover. */
+function statusTrigger(tone, locked) {
+  return s(
+    'display:inline-flex;align-items:center;gap:6px;white-space:nowrap;width:max-content;height:32px;padding:0 8px;margin-left:-8px;border-radius:10px;transition:background .16s ease',
+    `color:${toneFg(tone)};font:600 13px/1 ${F.body}`,
+    `cursor:${locked ? 'default' : 'pointer'}`
+  );
+}
+
+/** The 7px dot that leads a status word. */
+function StatusDot({ tone }) {
+  return <i aria-hidden="true" style={S(`width:7px;height:7px;border-radius:50%;flex:none;background:${toneFg(tone)}`)} />;
+}
+
+const ATTEND_PILL = { Present: 'ok', Late: 'wait', Absent: 'bad', Excused: 'mute', Unmarked: 'mute' };
+const GRADE_PILL = { Exceptional: 'ok', Strong: 'ok', Solid: 'mute', 'Needs support': 'wait', 'Not scored': 'mute' };
+
+/** True under `max` px. Starts false so server and first client render agree. */
+export function useNarrow(max = 720) {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia(`(max-width: ${max}px)`);
+    const on = () => setNarrow(mq.matches);
+    on();
+    if (mq.addEventListener) mq.addEventListener('change', on);
+    else mq.addListener(on);
+    return () => (mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on));
+  }, [max]);
+  return narrow;
+}
+
+/** Dialog footer: cancel on the left of the confirm action, right aligned. */
+export function DialogActions({ children, left = null }) {
+  return (
+    <div style={S('margin-top:24px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap')}>
+      {left || <span />}
+      <div style={S('display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end')}>{children}</div>
+    </div>
+  );
+}
 
 function fmtHours(n) {
   const v = Math.round(Number(n || 0) * 10) / 10;
@@ -307,6 +366,7 @@ function ensureAttendanceSession(projectId, meta) {
 
 export function AttendanceTab({ p, params, setParam, goTab }) {
   const [now, setNow] = useState(() => new Date());
+  const narrow = useNarrow();
   const sessions = attendanceSessionList(p, now);
   const anyRunning = sessions.some((x) => {
     const end = !x.posted && shiftEnd(x, now);
@@ -331,7 +391,7 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
 
   if (!sessions.length) {
     return (
-      <div style={S('margin-top:22px')}>
+      <div style={S('margin-top:32px')}>
         <EmptyState
           icon="calendar"
           title="No shifts have started yet"
@@ -350,6 +410,8 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
   const rows = attendanceFor(p, sessionId);
   const stats = attendanceStats(rows);
   const unmarked = rows.filter((r) => r.st === 'Unmarked').length;
+  // Rates over a roster nobody has marked yet would read as 0%, so the rail waits.
+  const anyMarked = rows.length > 0 && unmarked < rows.length;
   const openEscalations = p.escalations.filter((e) => !e.resolved);
   const locked = !!meta.posted;
   const length = shiftLength(meta);
@@ -525,216 +587,263 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
     }
   }
 
-  const COLS = 'display:grid;grid-template-columns:1.7fr 1fr 1.3fr .6fr 1fr 1.5fr;gap:12px';
+  const COLS = 'display:grid;grid-template-columns:minmax(0,1.6fr) 128px 72px 156px minmax(0,1fr);gap:16px';
+  const shiftMeta = [meta.d, timeLabel, length ? fmtHours(length) : ''].filter(Boolean).join(', ');
+
+  const statusBtn = (a) => (
+    <Pressable
+      label={`${a.n} is ${a.st}. Change attendance.`}
+      aria-disabled={locked ? 'true' : undefined}
+      tabIndex={locked ? -1 : 0}
+      expanded={false}
+      onClick={(e) => (locked ? null : changeStatus(e, a))}
+      className={locked ? '' : cx(H.row, H.press)}
+      style={statusTrigger(ATTEND_PILL[a.st] || 'mute', locked)}
+    >
+      <StatusDot tone={ATTEND_PILL[a.st] || 'mute'} />
+      {a.st}
+      {locked ? null : <Icon name="chevron-down" size={14} />}
+    </Pressable>
+  );
+  const hoursBtn = (a) => (
+    <Pressable
+      label={`${fmtHours(a.hrs)} for ${a.n}. Change hours.`}
+      aria-disabled={locked ? 'true' : undefined}
+      tabIndex={locked ? -1 : 0}
+      onClick={() => (locked ? null : editHours(a))}
+      className={locked ? '' : 'vu-link'}
+      style={s(`font:600 15px/1 ${F.body};color:${C.ink};${NUM};width:max-content`, `cursor:${locked ? 'default' : 'pointer'}`, locked ? '' : `text-decoration:underline;text-decoration-color:${C.line2};text-underline-offset:4px`)}
+    >
+      {Math.round(Number(a.hrs) * 10) / 10}
+    </Pressable>
+  );
+  const gradeBtn = (a) => (
+    <Pressable
+      label={`Score for ${a.n} is ${a.grade}. Change score.`}
+      aria-disabled={locked ? 'true' : undefined}
+      tabIndex={locked ? -1 : 0}
+      expanded={false}
+      onClick={(e) => (locked ? null : changeGrade(e, a))}
+      className={locked ? '' : cx(H.row, H.press)}
+      style={statusTrigger(GRADE_PILL[a.grade] || 'mute', locked)}
+    >
+      <StatusDot tone={GRADE_PILL[a.grade] || 'mute'} />
+      {a.grade}
+      {locked ? null : <Icon name="chevron-down" size={14} />}
+    </Pressable>
+  );
+  const noteBtn = (a) => (
+    <Pressable
+      label={a.note ? `Edit note for ${a.n}` : `Add a note for ${a.n}`}
+      aria-disabled={locked ? 'true' : undefined}
+      tabIndex={locked ? -1 : 0}
+      onClick={() => (locked ? null : editNote(a))}
+      className={locked ? '' : H.toInk}
+      style={s(`font:${!a.note && !locked ? 600 : 400} 14px/1.4 ${F.body};min-width:0;transition:color .16s ease`, `color:${a.note ? C.ink2 : C.ink}`, `cursor:${locked ? 'default' : 'pointer'}`, !a.note && !locked ? 'text-decoration:underline;text-underline-offset:3px' : '')}
+    >
+      {a.note || (locked ? '' : 'Add a note')}
+    </Pressable>
+  );
+  const edited = (a) => (a.edited ? <span title="Changed by you" style={S(`font:600 13px/1.45 ${F.body};color:${C.waiting}`)}>Edited</span> : null);
+  const person = (a) => (
+    <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+      <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
+        <Avatar name={a.n} fs={13} />
+      </div>
+      <div style={S('min-width:0')}>
+        <div className="vu-trunc" style={S(LABEL)}>{a.n}</div>
+        <div className="vu-trunc" style={S(`margin-top:2px;${SMALL}`)}>
+          {a.role}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('display:flex;flex-direction:column;gap:16px;min-width:0')}>
-        <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-          <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-            <div className="vu-scroll-x" style={S('display:flex;gap:8px;min-width:0')}>
-              {sessions.map((x) => {
-                const on = x.id === sessionId;
-                // Keep the time on posted chips: two shifts on one day must stay tellable apart.
-                const time = sessionTime(p, x);
-                const sub = x.posted ? (
-                  <span style={S('display:inline-flex;align-items:center;gap:4px')}>
-                    <Icon name="check" size={10} />
-                    {time || 'Posted'}
-                  </span>
-                ) : time;
-                return (
-                  <Pressable
-                    key={x.id}
-                    label={`${x.d}${time ? `, ${time}` : ''}${x.posted ? ', posted' : ''}`}
-                    pressed={on}
-                    onClick={() => setParam({ session: x.id })}
-                    className={cx(on ? '' : H.chip, H.press)}
-                    style={s('flex:none;padding:9px 13px;border-radius:10px;cursor:pointer;white-space:nowrap;transition:background .16s ease, border-color .16s ease', `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`, `background:${on ? '#1F1B18' : '#FFFFFF'}`)}
-                  >
-                    <div style={s('font:500 13px/1 Geist', `color:${on ? '#FFFFFF' : '#332D28'}`)}>{x.d}</div>
-                    <div style={s(`margin-top:5px;font:450 10px/1 ${MONO}`, `color:${on ? '#CFC7BF' : '#8A8179'}`)}>{sub}</div>
-                  </Pressable>
-                );
-              })}
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0')}>
+        <section aria-labelledby="att-h">
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <div style={S('min-width:0')}>
+              <h2 id="att-h" style={S(H2)}>Attendance</h2>
+              <p style={S(`margin:6px 0 0;${META}`)}>{shiftMeta}</p>
             </div>
-            <div style={S('display:flex;gap:9px;flex:none')}>
-              <Pressable
-                label="Mark all present"
-                disabled={locked}
-                onClick={markAll}
-                className={cx(locked ? '' : H.secondary, H.press)}
-                style={s(BTN_BRAND, locked ? DISABLED : '')}
-              >
+            <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
+              <Button variant="outline" size="sm" icon="check" disabled={locked} aria-disabled={locked ? 'true' : undefined} onClick={markAll} aria-label="Mark all present">
                 Mark all present
-              </Pressable>
-              <Pressable
-                label={locked ? 'Attendance posted' : running ? `Post attendance after ${endLabel}` : 'Post attendance'}
-                disabled={locked || running}
-                onClick={post}
-                className={cx(locked || running ? '' : H.primary, H.press)}
-                style={s(BTN_PRIMARY, locked || running ? DISABLED : '')}
-              >
-                {locked ? <Icon name="check" size={14} /> : null}
-                {locked ? 'Posted' : running ? `Post after ${endLabel}` : 'Post attendance'}
-              </Pressable>
-            </div>
-          </div>
-
-          <div className="vu-table-wrap">
-            <div>
-              <div style={S(`${COLS};padding:12px 20px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;${TABLE_HEAD}`)}>
-                <div>Volunteer</div><div>Attendance</div><div>Time</div><div>Hours</div><div>Score</div><div>Note</div>
-              </div>
-              {rows.length ? (
-                rows.map((a) => {
-                  const st = tone(ATTEND_TONE, a.st);
-                  const g = GRADE_TONE[a.grade] || GRADE_TONE['Not scored'];
-                  return (
-                    <div key={a.personId} className={H.row} style={S(`${COLS};padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease`)}>
-                      <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
-                        <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-                          <Avatar name={a.n} fs={12} />
-                        </div>
-                        <div style={S('min-width:0')}>
-                          <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{a.n}</div>
-                          <div className="vu-trunc" style={S('margin-top:3px;font:450 11px/1.2 Geist;color:#8A8179')}>{a.role}</div>
-                        </div>
-                      </div>
-                      <div>
-                        <Pressable
-                          label={`${a.n} is ${a.st}. Change attendance.`}
-                          disabled={locked}
-                          expanded={false}
-                          onClick={(e) => changeStatus(e, a)}
-                          className={locked ? '' : H.link}
-                          style={s(`display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;background:${st.stBg};font:500 11px/1 ${MONO};color:${st.stColor}`, `cursor:${locked ? 'default' : 'pointer'}`)}
-                        >
-                          {a.st}
-                          {locked ? null : <Icon name="chevron-down" size={11} />}
-                        </Pressable>
-                      </div>
-                      <div style={S('font:450 12px/1.3 Geist;color:#57504A;display:flex;align-items:center;gap:6px;flex-wrap:wrap')}>
-                        <span>{a.st === 'Unmarked' ? 'Not marked' : a.inOut}</span>
-                        {a.edited ? <span title="Changed by you" style={S('padding:2px 6px;border-radius:5px;background:#FDF3E7;font:500 10px/1.2 Geist;color:#8A5A20')}>Edited</span> : null}
-                      </div>
-                      <Pressable
-                        label={`${fmtHours(a.hrs)} for ${a.n}. Change hours.`}
-                        disabled={locked}
-                        onClick={() => editHours(a)}
-                        className={locked ? '' : H.toBrand}
-                        style={s(`font:500 13px/1 ${MONO};width:max-content`, `cursor:${locked ? 'default' : 'pointer'}`, locked ? '' : 'text-decoration:underline;text-decoration-color:#E7C0AC;text-underline-offset:3px')}
-                      >
-                        {Math.round(Number(a.hrs) * 10) / 10}
-                      </Pressable>
-                      <div>
-                        <Pressable
-                          label={`Score for ${a.n} is ${a.grade}. Change score.`}
-                          disabled={locked}
-                          expanded={false}
-                          onClick={(e) => changeGrade(e, a)}
-                          className={locked ? '' : H.link}
-                          style={s(`display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;background:${g.gBg};font:500 11px/1 ${MONO};color:${g.gColor}`, `cursor:${locked ? 'default' : 'pointer'}`)}
-                        >
-                          {a.grade}
-                          {locked ? null : <Icon name="chevron-down" size={11} />}
-                        </Pressable>
-                      </div>
-                      <Pressable
-                        label={a.note ? `Edit note for ${a.n}` : `Add a note for ${a.n}`}
-                        disabled={locked}
-                        onClick={() => editNote(a)}
-                        className={locked ? '' : H.toInk}
-                        style={s('font:450 12px/1.4 Geist;color:#6B635C;transition:color .16s ease;min-width:0', `cursor:${locked ? 'default' : 'pointer'}`)}
-                      >
-                        {a.note || (locked ? '-' : 'Add a note')}
-                      </Pressable>
-                    </div>
-                  );
-                })
+              </Button>
+              {locked ? (
+                <Button
+                  size="sm"
+                  icon="check"
+                  aria-disabled="true"
+                  aria-label="Attendance posted"
+                  extra={`cursor:default;padding:0 4px;border-color:transparent;background:transparent;color:${C.confirmed}`}
+                >
+                  Posted
+                </Button>
               ) : (
-                <div style={S('padding:8px 20px 20px')}>
-                  <EmptyState compact icon="users" title="Nobody on this shift's roster" body="Accept volunteers and they show up here." cta="Open People" onCta={() => goTab('people')} />
-                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={running}
+                  aria-disabled={running ? 'true' : undefined}
+                  onClick={post}
+                  aria-label={running ? `Post attendance after ${endLabel}` : 'Post attendance'}
+                >
+                  {running ? `Post after ${endLabel}` : 'Post attendance'}
+                </Button>
               )}
             </div>
           </div>
 
-          <div className="vu-stack vu-stack-gap" style={S('padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:20px;font:450 12px/1.4 Geist;color:#8A8179')}>
+          <div role="group" aria-label="Pick a shift" className="vu-scroll-x" style={S('margin:20px -6px 0;padding:6px;display:flex;gap:6px')}>
+            {sessions.map((x) => {
+              const on = x.id === sessionId;
+              // Keep the time on posted shifts: two shifts on one day must stay tellable apart.
+              const time = sessionTime(p, x);
+              return (
+                <Pressable
+                  key={x.id}
+                  label={`${x.d}${time ? `, ${time}` : ''}${x.posted ? ', posted' : ''}`}
+                  pressed={on}
+                  onClick={() => setParam({ session: x.id })}
+                  className={cx(on ? '' : H.row, H.press)}
+                  style={s(
+                    'flex:none;width:84px;padding:8px 4px 10px;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px;transition:background .16s ease, box-shadow .16s ease',
+                    `box-shadow:inset 0 0 0 ${on ? `2px ${C.ink}` : '0 transparent'}`
+                  )}
+                >
+                  <DateBlock date={x.d} month tone={on ? 'white' : 'line'} />
+                  <span style={S(`display:inline-flex;align-items:center;gap:4px;font:600 12px/1.2 ${F.body};color:${x.posted ? C.confirmed : C.ink2};text-align:center`)}>
+                    {x.posted ? <Icon name="check" size={13} stroke={2} /> : null}
+                    {x.posted ? 'Posted' : time || 'Open'}
+                  </span>
+                </Pressable>
+              );
+            })}
+          </div>
+
+          {narrow ? (
+            rows.length ? (
+              <ul aria-label="Volunteers on this shift" style={S(`margin:20px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+                {rows.map((a) => (
+                  <li key={a.personId} style={S(`padding:16px 0;${RULE};display:flex;flex-direction:column;gap:12px`)}>
+                    {person(a)}
+                    <div style={S('display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-left:48px')}>
+                      {statusBtn(a)}
+                      {gradeBtn(a)}
+                      <span style={S(`display:inline-flex;align-items:center;gap:6px;${SMALL}`)}>
+                        {hoursBtn(a)}
+                        <span>{Number(a.hrs) === 1 ? 'hour' : 'hours'}</span>
+                        {edited(a)}
+                      </span>
+                    </div>
+                    <div style={S('padding-left:48px')}>{noteBtn(a)}</div>
+                  </li>
+                ))}
+              </ul>
+            ) : null
+          ) : (
+            <div role="table" aria-label="Volunteers on this shift" style={S('margin-top:20px')}>
+              <div role="row" style={S(`${COLS};align-items:center;padding:0 0 10px;border-bottom:1px solid ${C.line};${TH}`)}>
+                <div role="columnheader">Volunteer</div><div role="columnheader">Attendance</div><div role="columnheader">Hours</div><div role="columnheader">Score</div><div role="columnheader">Note</div>
+              </div>
+              {rows.map((a) => (
+                <div key={a.personId} role="row" className={H.row} style={S(`${COLS};padding:14px 0;${RULE};align-items:center;transition:background .16s ease`)}>
+                  <div role="cell" style={S('min-width:0')}>{person(a)}</div>
+                  <div role="cell">{statusBtn(a)}</div>
+                  <div role="cell" style={S('display:flex;flex-direction:column;gap:4px')}>{hoursBtn(a)}{edited(a)}</div>
+                  <div role="cell">{gradeBtn(a)}</div>
+                  <div role="cell" style={S('min-width:0')}>{noteBtn(a)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {rows.length ? null : (
+            <EmptyState compact icon="users" title="Nobody on this shift's roster" body="Accept volunteers and they show up here." cta="Open People" onCta={() => goTab('people')} />
+          )}
+
+          <div style={S(`margin-top:14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px 20px;flex-wrap:wrap;${SMALL}`)}>
             <div>
               {locked
                 ? 'Posted. This shift is locked.'
                 : `${running ? `Shift ends at ${endLabel}. ` : ''}${unmarked ? `${unmarked} still unmarked. ` : ''}Hour changes need a reason and go in the audit log.`}
             </div>
-            <Pressable label="Open the audit log" onClick={() => goTab('quality')} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer;white-space:nowrap')}>
+            <button type="button" aria-label="Open the audit log" onClick={() => goTab('quality')} className={cx('vu-link', H.press)} style={S(`${TEXT_LINK};font-size:13px`)}>
               Audit log
-            </Pressable>
+            </button>
           </div>
-        </div>
+        </section>
 
-        <div className="vu-2col" style={S('display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <SectionLabel>Debrief</SectionLabel>
-            <DebriefForm key={sessionId} p={p} sessionId={sessionId} />
-          </div>
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <SectionLabel>Scores</SectionLabel>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
-              {GRADE_SCALE.map((g) => (
-                <div key={g.t} style={S('display:flex;justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid #F1EBE4')}>
-                  <div style={S('font:500 13px/1.3 Geist')}>{g.t}</div>
-                  <div style={S('font:450 12px/1.3 Geist;color:#8A8179;text-align:right')}>{g.m}</div>
-                </div>
-              ))}
-            </div>
-            <div style={S('margin-top:12px;font:450 12px/1.5 Geist;color:#8A8179')}>
-              Only you see scores. Volunteers don't.
-            </div>
-          </div>
-        </div>
+        <section aria-labelledby="deb-h" style={S(SEC_GAP)}>
+          <h2 id="deb-h" style={S(H2)}>Debrief</h2>
+          <p style={S(`margin:6px 0 0;${META}`)}>What to keep and what to change after {meta.d}.</p>
+          <DebriefForm key={sessionId} p={p} sessionId={sessionId} />
+        </section>
       </div>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px')}>
-        <div style={S(CARD)}>
-          <SectionLabel>{meta.d}</SectionLabel>
-          {timeLabel ? <div style={S('margin-top:5px;font:450 12px/1.3 Geist;color:#8A8179')}>{timeLabel}{length ? `, ${fmtHours(length)}` : ''}</div> : null}
-          <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:11px')}>
-            {stats.map((x) => (
-              <div key={x.l} style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;font:450 13px/1 Geist;color:#57504A')}>
-                <span>{x.l === 'Hours this session' ? 'Hours this shift' : x.l}</span>
-                <span style={S('color:#1A1714;font-weight:500')}>{x.v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+      <aside aria-label="Shift summary" style={S('min-width:0;display:flex;flex-direction:column')}>
+        <section aria-labelledby="att-sum">
+          <h2 id="att-sum" style={S(H3)}>This shift</h2>
+          {anyMarked ? (
+            <dl style={S(`margin:10px 0 0;border-top:1px solid ${C.line}`)}>
+              {stats.map((x) => (
+                <div key={x.l} style={S(`padding:11px 0;${RULE};display:flex;align-items:baseline;justify-content:space-between;gap:10px;${META}`)}>
+                  <dt>{x.l === 'Hours this session' ? 'Hours this shift' : x.l}</dt>
+                  <dd style={S(`margin:0;font:600 15px/1 ${F.body};color:${C.ink};${NUM}`)}>{x.v}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p style={S(`margin:6px 0 0;${SMALL}`)}>
+              {rows.length ? 'Mark attendance to see the show rate.' : 'The show rate appears once someone is on the roster.'}
+            </p>
+          )}
+        </section>
+
         {openEscalations.length ? (
-          <div style={S('padding:20px;border-radius:14px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-            <SectionLabel>Follow-ups</SectionLabel>
-            <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:10px')}>
+          <section aria-labelledby="att-fu" style={S('margin-top:40px')}>
+            <h2 id="att-fu" style={S(H3)}>Follow-ups</h2>
+            <ul style={S(`margin:10px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
               {openEscalations.map((e) => (
-                <div key={e.id} style={S('padding:12px 14px;border-radius:11px;background:#fff;border:1px solid #EFE3DC')}>
-                  <div style={S('font:500 13px/1.2 Geist')}>{e.n}, {e.step}</div>
-                  <div style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#6B635C')}>{e.action}</div>
-                  <div style={S('margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-                    <div style={S('font:500 11px/1 Geist;color:#A8482A')}>Due {e.due}</div>
-                    <Pressable
-                      label={`Mark ${e.n} follow-up done`}
+                <li key={e.id} style={S(`padding:14px 0;${RULE}`)}>
+                  <div style={S(LABEL)}>{e.n}, {e.step}</div>
+                  <div style={S(`margin-top:4px;${SMALL}`)}>{e.action}</div>
+                  <div style={S('margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+                    <StatusText tone="wait">Due {e.due}</StatusText>
+                    <button
+                      type="button"
+                      aria-label={`Mark ${e.n} follow-up done`}
                       onClick={() => {
                         resolveEscalation(p.id, e.id);
                         toast({ title: 'Follow-up done', message: `${e.n}, ${e.step}`, tone: 'ok' });
                       }}
-                      className={H.link}
-                      style={S('font:500 11px/1 Geist;color:#C2603C;cursor:pointer')}
+                      className={cx('vu-link', H.press)}
+                      style={S(`${TEXT_LINK};font-size:13px`)}
                     >
                       Mark done
-                    </Pressable>
+                    </button>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
-          </div>
+            </ul>
+          </section>
         ) : null}
-      </div>
+
+        <section aria-labelledby="att-sc" style={S('margin-top:40px')}>
+          <h2 id="att-sc" style={S(H3)}>Scores</h2>
+          <dl style={S(`margin:10px 0 0;border-top:1px solid ${C.line}`)}>
+            {GRADE_SCALE.map((g) => (
+              <div key={g.t} style={S(`padding:11px 0;${RULE};display:flex;justify-content:space-between;align-items:baseline;gap:12px`)}>
+                <dt style={S(`font:600 14px/1.3 ${F.body};color:${C.ink}`)}>{g.t}</dt>
+                <dd style={S(`margin:0;${SMALL};text-align:right`)}>{g.m}</dd>
+              </div>
+            ))}
+          </dl>
+          <p style={S(`margin:10px 0 0;${SMALL}`)}>Only you see scores. Volunteers don't.</p>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -779,43 +888,37 @@ function DebriefForm({ p, sessionId }) {
     }, 500);
   };
 
-  const area = 'margin-top:7px;display:block;width:100%;padding:12px 14px;border-radius:11px;border:1px solid #E8E1D9;background:#FCFAF8;font:450 13px/1.5 Geist;color:#332D28;min-height:60px;transition:border-color .16s ease';
-
   return (
     <>
-      <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
-        <div>
-          <label htmlFor="deb-worked" style={S('font:500 12px/1 Geist;color:#57504A')}>What worked</label>
-          <textarea
-            id="deb-worked"
-            value={worked}
-            onChange={(e) => {
-              setWorked(e.target.value);
-              save({ worked: e.target.value });
-            }}
-            placeholder="e.g. Pairing new tutors with returning ones"
-            className={H.input}
-            style={S(area)}
-          />
-        </div>
-        <div>
-          <label htmlFor="deb-fix" style={S('font:500 12px/1 Geist;color:#57504A')}>Fix before next time</label>
-          <textarea
-            id="deb-fix"
-            value={fix}
-            onChange={(e) => {
-              setFix(e.target.value);
-              save({ fix: e.target.value });
-            }}
-            placeholder="e.g. Set out books before kids arrive"
-            className={H.input}
-            style={S(area)}
-          />
-        </div>
+      <div className="vu-2col" style={S('margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:16px')}>
+        <TextArea
+          id="deb-worked"
+          label="What worked"
+          value={worked}
+          minHeight={88}
+          onChange={(v) => {
+            setWorked(v);
+            save({ worked: v });
+          }}
+          placeholder="e.g. Pairing new tutors with returning ones"
+        />
+        <TextArea
+          id="deb-fix"
+          label="Fix before next time"
+          value={fix}
+          minHeight={88}
+          onChange={(v) => {
+            setFix(v);
+            save({ fix: v });
+          }}
+          placeholder="e.g. Set out books before kids arrive"
+        />
       </div>
-      <div style={S('margin-top:14px;display:flex;gap:8px;flex-wrap:wrap')}>
-        <Pressable
-          label="Save debrief"
+      <div style={S('margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap')}>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-label="Save debrief"
           onClick={() => {
             if (!worked.trim() && !fix.trim()) {
               toast({ title: 'Nothing to save yet', message: 'Write at least one line first.', tone: 'warn' });
@@ -826,11 +929,10 @@ function DebriefForm({ p, sessionId }) {
             saveShiftDebrief(p.id, sessionId, { worked, fix });
             toast({ title: 'Debrief saved', tone: 'ok', timeout: 2200 });
           }}
-          className={cx(H.secondary, H.press)}
-          style={S(BTN_BRAND)}
         >
           Save debrief
-        </Pressable>
+        </Button>
+        <span style={S(SMALL)}>Saves as you type. Only you see it.</span>
       </div>
     </>
   );
@@ -846,15 +948,16 @@ function HoursEditForm({ api, row, onSave }) {
         <Field label="Hours" value={hrs} onChange={(v) => setHrs(v.replace(/[^\d.]/g, '').slice(0, 5))} inputMode="decimal" error={err.hrs} />
         <Field label="Shift time" value={row.inOut || ''} readOnly />
       </div>
-      <div style={S('margin-top:14px')}>
+      <div style={S('margin-top:16px')}>
         <Field label="Reason for the change" value={reason} onChange={setReason} placeholder="e.g. Left early for the bus" maxLength={90} required error={err.reason} />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">
           Cancel
-        </Pressable>
-        <Pressable
-          label="Save hours"
+        </Button>
+        <Button
+          variant="primary"
+          aria-label="Save hours"
           onClick={() => {
             const e = {};
             const bad = validateHours(hrs, { allowZero: true });
@@ -873,12 +976,10 @@ function HoursEditForm({ api, row, onSave }) {
             api.close();
             toast({ title: 'Hours changed', message: `${row.n}, ${fmtHours(n)}. Saved to the audit log.`, tone: 'ok' });
           }}
-          className={cx(H.primary, H.press)}
-          style={S(MODAL_PRIMARY)}
         >
           Save hours
-        </Pressable>
-      </div>
+        </Button>
+      </DialogActions>
     </div>
   );
 }
@@ -887,32 +988,23 @@ function SimpleNoteForm({ api, initial, onSave }) {
   const [t, setT] = useState(initial || '');
   return (
     <div>
-      <textarea
-        value={t}
-        onChange={(e) => setT(e.target.value)}
-        maxLength={240}
-        aria-label="Note"
-        placeholder="e.g. Great with the younger readers"
-        className={H.input}
-        style={S('display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:100px;font:450 14px/1.55 Geist;color:#332D28')}
-      />
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>
+      <TextArea value={t} onChange={setT} maxLength={240} ariaLabel="Note" minHeight={110} placeholder="e.g. Great with the younger readers" />
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">
           Cancel
-        </Pressable>
-        <Pressable
-          label="Save note"
+        </Button>
+        <Button
+          variant="primary"
+          aria-label="Save note"
           onClick={() => {
             onSave(t.trim());
             api.close();
             toast({ title: t.trim() ? 'Note saved' : 'Note cleared', tone: 'ok', timeout: 2200 });
           }}
-          className={cx(H.primary, H.press)}
-          style={S(MODAL_PRIMARY)}
         >
           Save note
-        </Pressable>
-      </div>
+        </Button>
+      </DialogActions>
     </div>
   );
 }
@@ -921,32 +1013,9 @@ function SimpleNoteForm({ api, initial, onSave }) {
    Applications
    ========================================================================== */
 
-const APP_FILTERS = [
-  { k: 'pending', l: 'Waiting on you' },
-  { k: 'accepted', l: 'Accepted' },
-  { k: 'waitlisted', l: 'Waitlisted' },
-  { k: 'declined', l: 'Declined' },
-  { k: 'all', l: 'All' },
-];
-
-const APP_CHIP = {
-  accepted: { l: 'Accepted', bg: '#EAF3EC', color: '#3F6B4E' },
-  waitlisted: { l: 'Waitlisted', bg: '#F6F2EE', color: '#6B635C' },
-  declined: { l: 'Declined', bg: '#F5E7E0', color: '#A8482A' },
-};
-
 export function ApplicationsTab({ p, params, setParam, onCopyLink }) {
   const filter = params.get('astatus') || 'pending';
-  const all = p.applications;
-  const rows = filter === 'all' ? all : all.filter((a) => a.status === filter);
-
-  const counts = {
-    pending: all.filter((a) => a.status === 'pending').length,
-    accepted: all.filter((a) => a.status === 'accepted').length,
-    waitlisted: all.filter((a) => a.status === 'waitlisted').length,
-    declined: all.filter((a) => a.status === 'declined').length,
-    all: all.length,
-  };
+  const all = p.applications || [];
 
   async function decide(a, decision) {
     if (decision === 'declined') {
@@ -980,147 +1049,70 @@ export function ApplicationsTab({ p, params, setParam, onCopyLink }) {
       title: a.n,
       subtitle: `${a.s}, applied ${a.when}`,
       body: (
-        <div style={S('display:flex;flex-direction:column;gap:16px')}>
+        <div style={S('display:flex;flex-direction:column;gap:18px')}>
           {(p.screeningQuestions || []).map((q, i) => (
             <div key={q}>
-              <div style={S('font:500 13px/1.35 Geist;color:#57504A')}>
-                {i + 1}. {q}
-              </div>
-              <div className="vu-break" style={S('margin-top:7px;padding:12px 14px;border-radius:11px;background:#FCFAF8;border:1px solid #F1EBE4;font:450 14px/1.55 Geist;color:#332D28')}>
+              <div style={S(`font:600 14px/1.35 ${F.body};color:${C.ink}`)}>{q}</div>
+              <div className="vu-break" style={S(`margin-top:6px;${BODY};color:${a.answers && a.answers[i] ? C.ink : C.ink2}`)}>
                 {(a.answers && a.answers[i]) || 'No answer given.'}
               </div>
             </div>
           ))}
-          {a.note ? <div className="vu-break" style={S('font:450 14px/1.55 Geist;color:#332D28')}>{a.note}</div> : null}
+          {(a.flags || []).length ? (
+            <div style={S('display:flex;gap:8px 16px;flex-wrap:wrap')}>
+              {a.flags.map((f) => <StatusText key={f} tone="wait">{f}</StatusText>)}
+            </div>
+          ) : null}
+          {a.note ? (
+            <div>
+              <div style={S(`font:600 14px/1.35 ${F.body};color:${C.ink}`)}>Their note</div>
+              <div className="vu-break" style={S(`margin-top:6px;${BODY}`)}>{a.note}</div>
+            </div>
+          ) : null}
         </div>
       ),
       footer: (api) =>
         a.status === 'pending' ? (
           <>
-            <Pressable label={`Decline ${a.n}`} onClick={() => { api.close(); decide(a, 'declined'); }} className={cx(H.secondary, H.press)} style={S(`${MODAL_CANCEL};color:#8A8179`)}>
+            <Button variant="outline" aria-label={`Decline ${a.n}`} onClick={() => { api.close(); decide(a, 'declined'); }}>
               Decline
-            </Pressable>
-            <Pressable label={`Accept ${a.n}`} onClick={() => { api.close(); decide(a, 'accepted'); }} className={cx(H.primary, H.press)} style={S(MODAL_PRIMARY)}>
+            </Button>
+            <Button variant="primary" aria-label={`Accept ${a.n}`} onClick={() => { api.close(); decide(a, 'accepted'); }}>
               Accept
-            </Pressable>
+            </Button>
           </>
         ) : null,
     });
   }
 
   return (
-    <div style={S('margin-top:22px;display:flex;flex-direction:column;gap:14px;max-width:880px')}>
-      {/* Cross-user applications from the published listing come first. When
-          nothing is pending and there are no local ones, show an empty state. */}
+    <div style={S('margin-top:32px;max-width:880px')}>
+      {/* One list: join-link applications and the project's own ones share
+          the filter, the row pattern and the actions. */}
       <CrossApplications
         listingId={p.listingId}
-        emptyState={all.length ? null : (
-          <EmptyState
-            icon="inbox"
-            title="No applications waiting"
-            body="Share your join link. New applications show up here."
-            cta="Copy join link"
-            onCta={() => onCopyLink()}
-          />
-        )}
+        emptyState={<EmptyState icon="inbox" title="No applications waiting" body="Share your join link. New applications show up here." cta="Copy link" onCta={() => onCopyLink()} />}
+        local={{
+          items: all,
+          filter,
+          onFilter: (k) => setParam({ astatus: k === 'pending' ? null : k }),
+          onDecide: decide,
+          onUndo: (a) => {
+            reopenApplication(p.id, a.id);
+            toast({ title: 'Decision undone', message: `${a.n} is waiting on you again.`, tone: 'ok' });
+          },
+          onAnswers: (p.screeningQuestions || []).length ? answers : null,
+          renderEmpty: (f) => (
+            <EmptyState
+              compact
+              title={f === 'pending' ? 'Nothing waiting on you' : 'None with this status'}
+              body={f === 'pending' ? 'Every application has a decision. New ones show up here.' : 'Switch filters to see the rest.'}
+              cta={f === 'pending' ? 'Copy link' : 'Show all'}
+              onCta={() => (f === 'pending' ? onCopyLink() : setParam({ astatus: 'all' }))}
+            />
+          ),
+        }}
       />
-      {all.length ? (
-        <div className="vu-scroll-x" style={S('display:flex;gap:8px')}>
-          {APP_FILTERS.map((f) => {
-            const on = filter === f.k;
-            return (
-              <Pressable
-                key={f.k}
-                label={`${f.l}, ${counts[f.k]}`}
-                pressed={on}
-                onClick={() => setParam({ astatus: f.k === 'pending' ? null : f.k })}
-                className={cx(on ? '' : H.chip, H.press)}
-                style={s('flex:none;padding:8px 13px;border-radius:9px;font:500 13px/1 Geist;cursor:pointer;white-space:nowrap;transition:background .16s ease, border-color .16s ease, color .16s ease', `border:1px solid ${on ? '#1F1B18' : '#E8E1D9'}`, `background:${on ? '#1F1B18' : '#FFFFFF'}`, `color:${on ? '#FFFFFF' : '#57504A'}`)}
-              >
-                {f.l} <span style={S(`font:500 10px/1 ${MONO};opacity:.75`)}>{counts[f.k]}</span>
-              </Pressable>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {rows.length ? (
-        rows.map((a) => {
-          const chip = APP_CHIP[a.status];
-          return (
-            <div key={a.id} style={S(CARD)}>
-              <div className="vu-stack vu-stack-gap" style={S('display:flex;align-items:flex-start;justify-content:space-between;gap:20px')}>
-                <div style={S('display:flex;gap:13px;min-width:0')}>
-                  <div style={S('width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none')}>
-                    <Avatar name={a.n} fs={15} />
-                  </div>
-                  <div style={S('min-width:0')}>
-                    <div style={S('display:flex;align-items:center;gap:9px;flex-wrap:wrap')}>
-                      <div style={S('font:600 16px/1.2 Geist;letter-spacing:-0.02em')}>{a.n}</div>
-                      {chip ? (
-                        <span style={S(`padding:4px 8px;border-radius:6px;font:500 11px/1 Geist;background:${chip.bg};color:${chip.color}`)}>{chip.l}</span>
-                      ) : null}
-                    </div>
-                    <div style={S('margin-top:5px;font:450 12px/1.3 Geist;color:#8A8179')}>
-                      {a.s}, applied {a.when}
-                    </div>
-                    {a.note ? <div className="vu-break" style={S('margin-top:11px;font:450 14px/1.5 Geist;color:#332D28;max-width:520px')}>{a.note}</div> : null}
-                    <div style={S('margin-top:12px;display:flex;gap:6px;flex-wrap:wrap')}>
-                      <span style={S('padding:5px 9px;border-radius:7px;background:#F6F2EE;font:500 11px/1 Geist;color:#57504A')}>{a.role}</span>
-                      {(a.flags || []).map((f) => (
-                        <span key={f} style={S('padding:5px 9px;border-radius:7px;background:#FDF3E7;font:500 11px/1 Geist;color:#8A5A20')}>
-                          {f}
-                        </span>
-                      ))}
-                    </div>
-                    {(p.screeningQuestions || []).length && a.answers && a.answers.length ? (
-                      <Pressable label={`Read ${a.n}'s answers`} onClick={() => answers(a)} className={H.link} style={S('margin-top:12px;display:inline-flex;align-items:center;gap:5px;font:500 12px/1 Geist;color:#C2603C;cursor:pointer;width:max-content')}>
-                        Read their answers
-                        <Icon name="arrow-right" size={12} />
-                      </Pressable>
-                    ) : null}
-                  </div>
-                </div>
-                <div style={S('display:flex;flex-direction:column;gap:8px;flex:none')}>
-                  {a.status === 'pending' ? (
-                    <>
-                      <Pressable label={`Accept ${a.n}`} onClick={() => decide(a, 'accepted')} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-                        Accept
-                      </Pressable>
-                      <Pressable label={`Waitlist ${a.n}`} onClick={() => decide(a, 'waitlisted')} className={cx(H.secondary, H.press)} style={S(BTN_PLAIN)}>
-                        Waitlist
-                      </Pressable>
-                      <Pressable label={`Decline ${a.n}`} onClick={() => decide(a, 'declined')} className={cx(H.secondary, H.press)} style={S(`${BTN_PLAIN};color:#8A8179`)}>
-                        Decline
-                      </Pressable>
-                    </>
-                  ) : (
-                    <Pressable
-                      label={`Undo the decision for ${a.n}`}
-                      onClick={() => {
-                        reopenApplication(p.id, a.id);
-                        toast({ title: 'Decision undone', message: `${a.n} is waiting on you again.`, tone: 'ok' });
-                      }}
-                      className={cx(H.secondary, H.press)}
-                      style={S(BTN_PLAIN)}
-                    >
-                      Undo
-                    </Pressable>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })
-      ) : all.length ? (
-        <EmptyState
-          compact
-          title={filter === 'pending' ? 'Nothing waiting on you' : 'None with this status'}
-          body={filter === 'pending' ? 'Every application has a decision. New ones show up here.' : 'Switch filters to see the rest.'}
-          cta={filter === 'pending' ? 'Copy join link' : 'Show all'}
-          onCta={() => (filter === 'pending' ? onCopyLink() : setParam({ astatus: 'all' }))}
-        />
-      ) : null}
     </div>
   );
 }
@@ -1155,10 +1147,25 @@ function memberHourRows(members) {
     const log = (app.member_state && app.member_state.hoursLog) || [];
     const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
     for (const h of log) {
-      out.push({ app, h, confirmed: !!confirmed[h.id], name: app.applicant_name || 'Volunteer' });
+      const isConfirmed = !!confirmed[h.id];
+      // A waiting entry on a day the lead already posted from Attendance
+      // would count that shift twice, so it can't be confirmed.
+      const posted = isConfirmed ? null : postedShiftOnDate(app, h.date);
+      out.push({ app, h, confirmed: isConfirmed, posted, name: app.applicant_name || 'Volunteer' });
     }
   }
   return out;
+}
+
+/* "1 entry on a day Attendance already covered", "2 entries on days …" */
+function coveredEntries(n) {
+  return n === 1 ? '1 entry on a day Attendance already covered' : `${n} entries on days Attendance already covered`;
+}
+
+/* "Attendance for Oct 18 already gave Ravi Shah 3.6 hrs. Ask them to remove this entry." */
+function postedNote(r) {
+  const day = String(r.posted.date || '').replace(/^[A-Za-z]{3},\s*/, '');
+  return `Attendance for ${day} already gave ${r.name} ${shortHrs(r.posted.hrs)}. Ask them to remove this entry.`;
 }
 
 const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
@@ -1218,13 +1225,23 @@ export function HoursTab({ p }) {
   const waiting = memberRows.filter((r) => !r.confirmed);
   const done = memberRows.filter((r) => r.confirmed);
   const waitingHrs = waiting.reduce((a, r) => a + Number(r.h.hrs || 0), 0);
+  const blocked = waiting.filter((r) => r.posted);
+  const confirmable = waiting.filter((r) => !r.posted);
+  const confirmableHrs = confirmable.reduce((a, r) => a + Number(r.h.hrs || 0), 0);
+  // One total for the heading: People-tab shifts plus join-link shifts, the
+  // same sum the tab badge and "Needs you today" show.
+  const allCount = queue.length + waiting.length;
+  const allHrs = queue.reduce((a, q) => a + Number(q.hrs || 0), 0) + waitingHrs;
 
   async function confirmRow(r, value) {
     if (busy) return;
     setBusy(r.h.id);
-    const { ok } = await confirmMemberHour(r.app.id, r.h.id, value);
+    const { ok, error } = await confirmMemberHour(r.app.id, r.h.id, value);
     setBusy(null);
-    if (ok) {
+    if (!ok && error && error.code === 'ATTENDANCE_POSTED') {
+      toast({ title: 'Hours not confirmed', message: error.message, tone: 'warn' });
+      load();
+    } else if (ok) {
       toast(value
         ? { title: 'Hours confirmed', message: `${r.name}, ${fmtHours(r.h.hrs)} on ${r.h.date}.`, tone: 'ok' }
         : { title: 'Confirmation undone', message: `${r.name}'s ${fmtHours(r.h.hrs)} ${Number(r.h.hrs) === 1 ? 'is' : 'are'} waiting again.`, tone: 'ok' });
@@ -1235,42 +1252,53 @@ export function HoursTab({ p }) {
     }
   }
 
-  async function confirmAllMembers() {
+  // One Confirm all for the whole list: join-link entries plus People-tab
+  // entries that passed check-in. Flagged ones and days Attendance already
+  // covered stay for the lead to look at one by one.
+  const bulkTotal = confirmable.length + clean.length;
+  const cleanHrs = clean.reduce((a, q) => a + Number(q.hrs || 0), 0);
+  const flagged = queue.length - clean.length;
+
+  async function confirmAll() {
+    if (busy || !bulkTotal) return;
+    const left = [
+      blocked.length ? `${coveredEntries(blocked.length)} ${blocked.length === 1 ? 'stays' : 'stay'} unconfirmed.` : '',
+      flagged ? `${flagged === 1 ? '1 flagged entry stays' : `${flagged} flagged entries stay`} for you to check.` : '',
+    ].filter(Boolean).join(' ');
     const ok = await confirmDialog({
-      title: `Confirm ${plural(waiting.length, 'shift')}?`,
-      body: `${fmtHours(waitingHrs)} in total. Each volunteer sees them as confirmed.`,
+      title: `Confirm ${plural(bulkTotal, 'shift')}?`,
+      body: `${fmtHours(confirmableHrs + cleanHrs)} in total. Each one counts toward that volunteer's confirmed hours.${left ? ` ${left}` : ''}`,
       confirmLabel: 'Confirm all',
       cancelLabel: 'Go back',
       tone: 'brand',
     });
     if (!ok) return;
     setBusy('all');
+    let n = clean.length ? approveHours(p.id, clean.map((q) => q.id)) : 0;
+    let hrs = n ? cleanHrs : 0;
     // Shifts for one volunteer share a row, so write them one after another.
-    let n = 0;
-    for (const r of waiting) {
+    // Entries on a day Attendance already covered are skipped, not failed.
+    let skipped = 0;
+    let failedCount = 0;
+    let linked = 0;
+    for (const r of confirmable) {
       const res = await confirmMemberHour(r.app.id, r.h.id, true);
-      if (res.ok) n += 1;
+      if (res.ok) {
+        linked += 1;
+        hrs += Number(r.h.hrs || 0);
+      } else if (res.error && res.error.code === 'ATTENDANCE_POSTED') skipped += 1;
+      else failedCount += 1;
     }
+    n += linked;
+    skipped += blocked.length;
     setBusy(null);
-    load();
-    if (n > 0) window.dispatchEvent(new Event('vu:applications-changed'));
-    if (n === waiting.length) toast({ title: 'Hours confirmed', message: `${plural(n, 'shift')}, ${fmtHours(waitingHrs)}.`, tone: 'ok' });
-    else toast({ title: `Confirmed ${n} of ${waiting.length}`, message: 'Some didn\'t save. Check your connection and try again.', tone: 'warn' });
+    if (confirmable.length) load();
+    if (linked > 0) window.dispatchEvent(new Event('vu:applications-changed'));
+    const skipNote = skipped ? `Skipped ${coveredEntries(skipped)}.` : '';
+    if (failedCount) toast({ title: `Confirmed ${n} of ${n + failedCount}`, message: `Some didn't save. Check your connection and try again.${skipNote ? ` ${skipNote}` : ''}`, tone: 'warn' });
+    else if (skipped) toast({ title: n ? `Confirmed ${plural(n, 'shift')}` : 'Hours not confirmed', message: skipNote, tone: n ? 'ok' : 'warn' });
+    else toast({ title: 'Hours confirmed', message: `${plural(n, 'shift')} added to volunteers' totals, ${fmtHours(hrs)} in all.`, tone: 'ok' });
   }
-
-  async function approveAll() {
-    const ok = await confirmDialog({
-      title: `Approve ${plural(clean.length, 'shift')}?`,
-      body: "Each one is added to that person's total on your People tab.",
-      confirmLabel: 'Approve all',
-      cancelLabel: 'Go back',
-      tone: 'brand',
-    });
-    if (!ok) return;
-    const n = approveHours(p.id, clean.map((q) => q.id));
-    toast({ title: 'Hours approved', message: `${plural(n, 'shift')} added to your People tab.`, tone: 'ok' });
-  }
-
   function adjust(q) {
     openModal({
       title: `Change hours for ${q.n}`,
@@ -1282,129 +1310,157 @@ export function HoursTab({ p }) {
   }
 
   const loading = members === null;
+  const hrsCell = (n) => <span style={S(`font:600 15px/1 ${F.body};color:${C.ink};${NUM};white-space:nowrap`)}>{shortHrs(n)}</span>;
+  const sep = <span className="vu-sep"> · </span>;
+  // Rows that can't be edited keep an empty slot, so every hours number and
+  // Confirm button lines up down the list.
+  const noEdit = <span aria-hidden="true" style={S('width:36px;height:36px;flex:none')} />;
+  const hourRow = ({ key, name, meta, note, noteId, hrs, confirm, edit }) => (
+    <li key={key} className="vu-row">
+      <span className="vu-row-avatar">
+        <Avatar name={name} fs={13} />
+      </span>
+      <div style={S('min-width:0')}>
+        <span className="vu-row-t">{name}</span>
+        <span className="vu-row-m vu-row-m--wrap">{meta}</span>
+        {note ? (
+          <span id={noteId} style={S(`display:flex;align-items:flex-start;gap:6px;margin-top:6px;${SMALL};color:${TONES.wait.fg}`)}>
+            <Icon name="alert" size={14} style={{ flex: 'none', marginTop: 2 }} />
+            <span>{note}</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="vu-row-end">
+        {hrsCell(hrs)}
+        {confirm}
+        {edit || noEdit}
+      </div>
+    </li>
+  );
+  const linkRows = waiting.map((r) =>
+    hourRow({
+      key: `${r.app.id}:${r.h.id}`,
+      name: r.name,
+      meta: <>{r.h.date}{sep}{r.h.activity || 'Volunteering'}{sep}From your join link</>,
+      note: r.posted ? postedNote(r) : '',
+      noteId: `hrs-dup-${r.h.id}`,
+      hrs: r.h.hrs,
+      confirm: (
+        <Button variant="outline" size="sm" icon="check" busy={busy === r.h.id} disabled={!!busy} onClick={() => confirmRow(r, true)} aria-label={`Confirm ${fmtHours(r.h.hrs)} for ${r.name}`} aria-describedby={r.posted ? `hrs-dup-${r.h.id}` : undefined}>
+          {busy === r.h.id ? 'Confirming' : 'Confirm'}
+        </Button>
+      ),
+    })
+  );
+  const queueRows = queue.map((q) =>
+    hourRow({
+      key: q.id,
+      name: q.n,
+      meta: <>{q.d}{sep}<span style={S(q.ok ? '' : `color:${C.waiting};font-weight:600`)}>{q.src}</span>{sep}From your People tab</>,
+      hrs: q.hrs,
+      confirm: (
+        <Button
+          variant="outline"
+          size="sm"
+          icon="check"
+          disabled={!!busy}
+          aria-label={`Confirm ${fmtHours(q.hrs)} for ${q.n}`}
+          onClick={() => {
+            approveHours(p.id, [q.id]);
+            toast({ title: 'Hours confirmed', message: `${q.n}, ${fmtHours(q.hrs)}.`, tone: 'ok' });
+          }}
+        >
+          Confirm
+        </Button>
+      ),
+      edit: <IconButton icon="edit" label={`Change hours for ${q.n}`} disabled={!!busy} onClick={() => adjust(q)} />,
+    })
+  );
+  const anyLogged = memberRows.length > 0 || (p.hoursQueue || []).length > 0;
 
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('display:flex;flex-direction:column;gap:16px;min-width:0')}>
-        <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-          <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <div>
-              <h2 style={S('margin:0;font:600 16px/1.25 Geist;letter-spacing:-0.02em')}>
-                {loading ? 'Hours to confirm' : waiting.length ? `${fmtHours(waitingHrs)} to confirm` : 'Hours to confirm'}
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0')}>
+        <section aria-labelledby="hrs-h">
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <div style={S('min-width:0')}>
+              <h2 id="hrs-h" style={S(H2)}>
+                {!loading && allCount ? `${fmtHours(allHrs)} to confirm` : 'Hours to confirm'}
               </h2>
-              <div style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>Hours volunteers logged for {p.name}.</div>
+              <p style={S(`margin:6px 0 0;${META}`)}>
+                {!loading && allCount ? `${plural(allCount, 'shift')} logged for ${p.name}.` : `Hours volunteers logged for ${p.name}.`}
+              </p>
             </div>
-            {waiting.length > 1 ? (
-              <Pressable label={`Confirm all ${waiting.length}`} disabled={!!busy} onClick={confirmAllMembers} className={cx(busy ? '' : H.primary, H.press)} style={s(BTN_PRIMARY, busy ? DISABLED : '')}>
-                {busy === 'all' ? 'Confirming' : `Confirm all ${waiting.length}`}
-              </Pressable>
+            {bulkTotal > 1 ? (
+              <Button variant="primary" size="sm" icon="check" busy={busy === 'all'} disabled={!!busy} onClick={confirmAll} aria-label={`Confirm ${plural(bulkTotal, 'shift')}`}>
+                {busy === 'all' ? 'Confirming' : 'Confirm all'}
+              </Button>
+            ) : !bulkTotal && anyLogged ? (
+              <button type="button" aria-label="Nothing to confirm" aria-disabled="true" tabIndex={-1} className="vu-sr">Confirm all</button>
             ) : null}
           </div>
 
+          {failed ? (
+            <div role="alert" style={S(`margin-top:16px;padding:16px 0;border-top:1px solid ${C.line};${RULE};display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${META}`)}>
+              Couldn't load hours from your join link. Check your connection and try again.
+              <Button variant="outline" size="sm" icon="refresh" onClick={load} aria-label="Try again">Try again</Button>
+            </div>
+          ) : null}
+
+          {linkRows.length || queueRows.length ? (
+            <ul style={S(`margin:${failed ? 0 : 16}px 0 0;padding:0;list-style:none;${failed ? '' : `border-top:1px solid ${C.line}`}`)}>
+              {linkRows}
+              {queueRows}
+            </ul>
+          ) : null}
+
           {loading ? (
-            <div style={S('padding:20px;font:450 13px/1.5 Geist;color:#8A8179')}>Loading hours</div>
-          ) : failed ? (
-            <div role="alert" style={S('padding:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font:450 13px/1.5 Geist;color:#57504A')}>
-              Couldn't load logged hours. Check your connection and try again.
-              <Pressable label="Try again" onClick={load} className={cx(H.secondary, H.press)} style={S(BTN_PLAIN)}>Try again</Pressable>
-            </div>
-          ) : waiting.length ? (
-            waiting.map((r) => (
-              <div key={`${r.app.id}:${r.h.id}`} className={H.row} style={S('padding:14px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;transition:background .16s ease')}>
-                <div style={S('min-width:0;flex:1 1 200px')}>
-                  <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{r.name}</div>
-                  <div className="vu-trunc" style={S('margin-top:4px;font:450 12px/1.3 Geist;color:#8A8179')}>{r.h.activity || 'Volunteering'}, {r.h.date}</div>
-                </div>
-                <div style={S('display:flex;align-items:center;gap:12px;flex:none')}>
-                  <div style={S(`font:500 14px/1 ${MONO}`)}>{shortHrs(r.h.hrs)}</div>
-                  <Pressable label={`Confirm ${fmtHours(r.h.hrs)} for ${r.name}`} disabled={!!busy} onClick={() => confirmRow(r, true)} className={cx(busy ? '' : H.primary, H.press)} style={s(BTN_PRIMARY, busy ? DISABLED : '')}>
-                    {busy === r.h.id ? 'Confirming' : 'Confirm'}
-                  </Pressable>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div style={S('padding:8px 20px 20px')}>
-              <EmptyState
-                compact
-                icon="check-circle"
-                title={memberRows.length ? 'All logged hours are confirmed' : 'No hours logged yet'}
-                body={memberRows.length ? 'New hours show up here when a volunteer logs them.' : 'Volunteers log hours from their Home tab after each shift.'}
-              />
-            </div>
-          )}
+            <div role="status" style={S(`margin-top:16px;${SMALL}`)}>{queueRows.length ? 'Loading hours from your join link' : 'Loading hours'}</div>
+          ) : !failed && !linkRows.length && !queueRows.length ? (
+            <EmptyState
+              compact
+              icon="check-circle"
+              title={anyLogged ? 'Every shift is confirmed' : 'No hours logged yet'}
+              body={anyLogged ? 'New hours show up here when a volunteer logs them.' : 'Volunteers log hours from their Home tab after each shift.'}
+            />
+          ) : null}
 
           {done.length ? (
-            <details style={S('border-top:1px solid #F1EBE4')}>
-              <summary style={S('padding:14px 20px;cursor:pointer;font:500 13px/1 Geist;color:#57504A')}>Confirmed ({done.length})</summary>
-              {done.map((r) => (
-                <div key={`${r.app.id}:${r.h.id}`} style={S('padding:10px 20px;border-top:1px solid #F6F2EE;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-                  <div style={S('min-width:0;font:450 13px/1.4 Geist;color:#57504A')}>
-                    {r.name}, {r.h.activity || 'Volunteering'}, {r.h.date}
-                  </div>
-                  <div style={S('display:flex;align-items:center;gap:12px;flex:none')}>
-                    <span style={S('display:inline-flex;align-items:center;gap:5px;font:500 12px/1 Geist;color:#3F6B4E')}>
-                      <Icon name="check" size={12} />
-                      {shortHrs(r.h.hrs)}
-                    </span>
-                    <Pressable label={`Undo confirmation for ${r.name}, ${r.h.date}`} disabled={!!busy} onClick={() => confirmRow(r, false)} className={H.link} style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}>
-                      Undo
-                    </Pressable>
-                  </div>
-                </div>
-              ))}
+            <details className="vu-details" style={S('margin-top:20px')}>
+              <summary style={S(`display:inline-flex;align-items:center;gap:6px;cursor:pointer;list-style:none;${TEXT_LINK}`)}>
+                Confirmed ({done.length})
+                <Icon name="chevron-down" size={16} />
+              </summary>
+              <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+                {done.map((r) => (
+                  <li key={`${r.app.id}:${r.h.id}`} className="vu-row vu-row--nolead" style={S('padding:12px 0')}>
+                    <div style={S(`min-width:0;${META}`)}>
+                      <span style={S(`color:${C.ink};font-weight:600`)}>{r.name}</span>, {r.h.activity || 'Volunteering'}, {r.h.date}
+                    </div>
+                    <div className="vu-row-end" style={S('gap:16px')}>
+                      {hrsCell(r.h.hrs)}
+                      <StatusText tone="ok">Confirmed</StatusText>
+                      <button type="button" aria-label={`Undo confirmation for ${r.name}, ${r.h.date}`} disabled={!!busy} onClick={() => confirmRow(r, false)} className={cx('vu-link', H.press)} style={S(`${TEXT_LINK};font-size:13px`)}>
+                        Undo
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </details>
           ) : null}
-        </div>
-
-        {queue.length ? (
-          <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-            <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-              <SectionLabel>From your People tab</SectionLabel>
-              {clean.length ? (
-                <Pressable label={`Approve ${plural(clean.length, 'shift')}`} onClick={approveAll} className={cx(H.primary, H.press)} style={S(BTN_PRIMARY)}>
-                  Approve all
-                </Pressable>
-              ) : null}
-            </div>
-            {queue.map((q) => (
-              <div key={q.id} className={H.row} style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;transition:background .16s ease')}>
-                <div style={S('min-width:0')}>
-                  <div className="vu-trunc" style={S('font:500 14px/1.2 Geist')}>{q.n}</div>
-                  <div className="vu-trunc" style={s('margin-top:4px;font:450 12px/1.3 Geist', `color:${q.ok ? '#8A8179' : '#8A5A20'}`)}>
-                    {q.d}, {q.src}
-                  </div>
-                </div>
-                <div style={S('display:flex;align-items:center;gap:12px;flex:none')}>
-                  <div style={S(`font:500 14px/1 ${MONO}`)}>{shortHrs(q.hrs)}</div>
-                  <Pressable label={`Change hours for ${q.n}`} onClick={() => adjust(q)} className={cx(H.secondary, H.press)} style={S(BTN_BRAND)}>
-                    Change
-                  </Pressable>
-                  <Pressable
-                    label={`Approve ${fmtHours(q.hrs)} for ${q.n}`}
-                    onClick={() => {
-                      approveHours(p.id, [q.id]);
-                      toast({ title: 'Hours approved', message: `${q.n}, ${fmtHours(q.hrs)}.`, tone: 'ok' });
-                    }}
-                    className={cx(H.primary, H.press)}
-                    style={S(BTN_PRIMARY)}
-                  >
-                    Approve
-                  </Pressable>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        </section>
       </div>
-
-      <div style={S('display:flex;flex-direction:column;gap:14px')}>
-        <div style={S(CARD)}>
-          <SectionLabel>Export</SectionLabel>
-          <div style={S('margin-top:10px;font:450 13px/1.5 Geist;color:#6B635C')}>Everyone on your People tab and everyone who joined online, with their hours.</div>
-          <div style={S('margin-top:14px;display:flex;gap:8px;flex-wrap:wrap')}>
-            <Pressable
-              label="Download roster as CSV"
+      <aside aria-label="Export hours" style={S('min-width:0')}>
+        <section aria-labelledby="hrs-x">
+          <h2 id="hrs-x" style={S(H3)}>Export</h2>
+          <p style={S(`margin:6px 0 0;${SMALL}`)}>Everyone on your People tab and everyone who joined online, with their hours.</p>
+          <div style={S('margin-top:16px;display:flex;gap:8px;flex-wrap:wrap')}>
+            <Button
+              variant="outline"
+              size="sm"
+              icon="download"
+              aria-label="Download roster as CSV"
               onClick={() => {
                 if (loading) {
                   toast({ title: 'Hours still loading', message: 'Try again in a moment.', tone: 'warn' });
@@ -1415,27 +1471,24 @@ export function HoursTab({ p }) {
                   ? { title: 'Roster downloaded', message: "Volunteers who joined online aren't in it. Reload and try again.", tone: 'warn' }
                   : { title: 'Roster downloaded', message: 'Saved as a CSV file.', tone: 'ok' });
               }}
-              className={cx(H.secondary, H.press)}
-              style={S(BTN_BRAND)}
             >
-              <Icon name="download" size={14} />
               Download CSV
-            </Pressable>
-            <Pressable
-              label="Print this page"
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              icon="file"
+              aria-label="Print this page"
               onClick={() => {
                 toast({ title: 'Opening print', message: 'Choose "Save as PDF" to keep a copy.', tone: 'brand' });
                 setTimeout(() => window.print(), 400);
               }}
-              className={cx(H.secondary, H.press)}
-              style={S(BTN_BRAND)}
             >
-              <Icon name="file" size={14} />
               Print
-            </Pressable>
+            </Button>
           </div>
-        </div>
-      </div>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -1450,6 +1503,7 @@ const LIVE_COMPLIANCE = new Set(['cp1', 'cp2']);
 export function QualityTab({ p, params, setParam, goTab }) {
   const compliance = recomputeCompliance(p).filter((c) => LIVE_COMPLIANCE.has(c.id));
   const auditAll = params.get('audit') === 'all';
+  const narrow = useNarrow();
   const reliability = p.people
     .filter((x) => x.st === 'Active' || x.st === 'Onboarding' || x.st === 'Inactive')
     .slice(0, 5)
@@ -1465,190 +1519,217 @@ export function QualityTab({ p, params, setParam, goTab }) {
     });
   }
 
-  const RCOLS = 'display:grid;grid-template-columns:1.8fr .8fr .6fr 1.1fr 1fr;gap:12px';
+  const RCOLS = 'display:grid;grid-template-columns:minmax(0,1.8fr) 96px 64px minmax(0,1.1fr) minmax(0,1fr);gap:16px';
+  const sevTone = (st) => (st === 'Clear' ? 'ok' : 'wait');
 
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 330px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('display:flex;flex-direction:column;gap:16px;min-width:0')}>
-        <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-          <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4')}>
-            <SectionLabel>Reliability</SectionLabel>
-          </div>
-          <div className="vu-table-wrap">
-            <div>
-              <div style={S(`${RCOLS};padding:12px 20px;border-bottom:1px solid #F1EBE4;background:#FCFAF8;${TABLE_HEAD}`)}>
-                <div>Volunteer</div><div>Show rate</div><div>Late</div><div>Average score</div><div>Trend</div>
-              </div>
-              {reliability.length ? (
-                reliability.map((r) => (
-                  <div key={r.id || r.slug || r.n} className={H.row} style={S(`${RCOLS};padding:14px 20px;border-bottom:1px solid #F1EBE4;align-items:center;transition:background .16s ease`)}>
-                    <div style={S('display:flex;align-items:center;gap:11px;min-width:0')}>
-                      <div style={S('width:28px;height:28px;border-radius:50%;overflow:hidden;flex:none')}>
-                        <Avatar name={r.n} fs={11} />
-                      </div>
-                      <div className="vu-trunc" style={S('font:500 13px/1 Geist')}>{r.n}</div>
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0')}>
+        <section aria-labelledby="q-rel">
+          <h2 id="q-rel" style={S(H2)}>Reliability</h2>
+          <p style={S(`margin:6px 0 0;${META}`)}>From the attendance you've posted.</p>
+          {!reliability.length ? (
+            <div style={S(`margin-top:16px;padding:16px 0;border-top:1px solid ${C.line};${RULE};${META}`)}>Nobody on your roster yet. Reliability fills in after you post attendance.</div>
+          ) : narrow ? (
+            <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+              {reliability.map((r) => (
+                <li key={r.id || r.slug || r.n} style={S(`padding:14px 0;${RULE};display:flex;align-items:center;justify-content:space-between;gap:12px`)}>
+                  <div style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+                    <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
+                      <Avatar name={r.n} fs={13} />
                     </div>
-                    <div style={S(`font:500 13px/1 ${MONO}`)}>{r.show}</div>
-                    <div style={S('font:450 13px/1 Geist;color:#57504A')}>{r.late}</div>
-                    <div style={S('font:450 13px/1 Geist;color:#57504A')}>{r.score}</div>
-                    <div>
-                      <span style={S(`padding:5px 9px;border-radius:7px;background:${r.bg};font:500 11px/1 Geist;color:${r.color}`)}>{r.trend}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div style={S('padding:20px;font:450 13px/1.5 Geist;color:#8A8179')}>Nobody on your roster yet. Reliability fills in after you post attendance.</div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {compliance.length ? (
-          <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-            <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4')}>
-              <SectionLabel>Paperwork</SectionLabel>
-            </div>
-            {compliance.map((c) => (
-              <div key={c.id} className="vu-stack vu-stack-gap" style={S('padding:14px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-                <div style={S('font:450 14px/1.3 Geist;color:#332D28')}>{c.t}</div>
-                <div style={S('display:flex;align-items:center;gap:12px;flex:none')}>
-                  <div style={S(`font:500 12px/1 ${MONO};color:#8A8179`)}>{c.v}</div>
-                  <span style={S(`padding:5px 9px;border-radius:7px;background:${c.bg};font:500 11px/1 Geist;color:${c.color}`)}>{c.st}</span>
-                  {c.st !== 'Clear' ? (
-                    <Pressable
-                      label={`Fix ${c.t} in People`}
-                      onClick={() => {
-                        toast({ title: c.id === 'cp1' ? "Mark each parent's OK" : 'Mark training done', message: c.id === 'cp1' ? 'Open each person who is missing one.' : 'Open each tutor once they finish it.', tone: 'brand' });
-                        goTab && goTab('people');
-                      }}
-                      className={cx(H.secondary, H.press)}
-                      style={S('display:inline-flex;align-items:center;padding:6px 10px;border-radius:7px;border:1px solid #E8E1D9;background:#fff;font:500 12px/1 Geist;color:#57504A;cursor:pointer;transition:background .16s ease')}
-                    >
-                      Fix in People
-                    </Pressable>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        <div className="vu-2col" style={S(`display:grid;grid-template-columns:${p.disputes.length ? '1fr 1fr' : '1fr'};gap:16px`)}>
-          <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-            <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
-              <SectionLabel>Incident log</SectionLabel>
-              <Pressable label="File an incident" onClick={file} className={cx(H.secondary, H.press)} style={S(BTN_BRAND)}>
-                <Icon name="plus" size={14} />
-                File an incident
-              </Pressable>
-            </div>
-            <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
-              {p.incidents.length ? (
-                p.incidents.map((i) => (
-                  <div key={i.id} style={S('padding:14px;border-radius:12px;border:1px solid #F1EBE4;background:#FCFAF8')}>
-                    <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-                      <div style={S('font:500 13px/1.2 Geist')}>{i.t}</div>
-                      <span style={s('padding:4px 8px;border-radius:6px;font:500 11px/1 Geist;flex:none', `background:${i.st === 'Closed' ? '#EAF3EC' : '#FDF3E7'}`, `color:${i.st === 'Closed' ? '#3F6B4E' : '#8A5A20'}`)}>{i.st}</span>
-                    </div>
-                    <div className="vu-break" style={S('margin-top:7px;font:450 12px/1.45 Geist;color:#6B635C')}>{i.note}</div>
-                    <div style={S('margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-                      <div style={S('font:450 11px/1.3 Geist;color:#A19891')}>
-                        {i.d}, {i.who}
-                      </div>
-                      {i.st !== 'Closed' ? (
-                        <Pressable
-                          label={`Close incident: ${i.t}`}
-                          onClick={() => {
-                            closeIncident(p.id, i.id);
-                            toast({ title: 'Incident closed', tone: 'ok' });
-                          }}
-                          className={H.link}
-                          style={S('font:500 12px/1 Geist;color:#C2603C;cursor:pointer')}
-                        >
-                          Close
-                        </Pressable>
+                    <div style={S('min-width:0')}>
+                      <div className="vu-trunc" style={S(LABEL)}>{r.n}</div>
+                      {r.show ? (
+                        <div style={S(`margin-top:2px;${SMALL}`)}>{`${r.show} show rate, ${r.late} late`}{r.score && r.score !== 'Not scored' ? `, ${r.score.toLowerCase()}` : ''}</div>
                       ) : null}
                     </div>
                   </div>
-                ))
-              ) : (
-                <div style={S('font:450 13px/1.5 Geist;color:#8A8179')}>No incidents filed.</div>
-              )}
-            </div>
-          </div>
-
-          {p.disputes.length ? (
-            <div style={S('padding:22px;border-radius:16px;border:1px solid #E8E1D9;background:#fff')}>
-              <SectionLabel>Hour disputes</SectionLabel>
-              <div style={S('margin-top:14px;display:flex;flex-direction:column;gap:12px')}>
-                {p.disputes.map((d) => (
-                  <div key={d.id} style={S('padding:14px;border-radius:12px;border:1px solid #EFE3DC;background:#FAF6F3')}>
-                    <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-                      <div style={S('font:500 13px/1.2 Geist')}>{d.n}, {d.d}</div>
-                      <span style={s('padding:4px 8px;border-radius:6px;font:500 11px/1 Geist;flex:none', `background:${d.st === 'Open' ? '#F5E7E0' : '#EAF3EC'}`, `color:${d.st === 'Open' ? '#A8482A' : '#3F6B4E'}`)}>{d.st}</span>
+                  <StatusText tone={r.tone}>{r.trend}</StatusText>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div role="table" aria-label="Reliability" style={S('margin-top:16px')}>
+              <div role="row" style={S(`${RCOLS};align-items:center;padding:0 0 10px;border-bottom:1px solid ${C.line};${TH}`)}>
+                <div role="columnheader">Volunteer</div><div role="columnheader">Show rate</div><div role="columnheader">Late</div><div role="columnheader">Average score</div><div role="columnheader">Trend</div>
+              </div>
+              {reliability.map((r) => (
+                <div key={r.id || r.slug || r.n} role="row" className={H.row} style={S(`${RCOLS};padding:12px 0;${RULE};align-items:center;transition:background .16s ease`)}>
+                  <div role="cell" style={S('display:flex;align-items:center;gap:12px;min-width:0')}>
+                    <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
+                      <Avatar name={r.n} fs={13} />
                     </div>
-                    <div style={S('margin-top:7px;font:450 12px/1.45 Geist;color:#6B635C')}>{d.claim}</div>
-                    {d.st === 'Open' ? (
-                      <div style={S('margin-top:10px;display:flex;gap:8px')}>
-                        <Pressable
-                          label={`Uphold ${d.n}'s dispute`}
-                          onClick={() => {
-                            resolveDispute(p.id, d.id, 'upheld', 'Upheld. Hours to be corrected in Attendance.');
-                            toast({ title: 'Dispute upheld', message: `Change ${d.n}'s hours in Attendance.`, tone: 'ok' });
-                          }}
-                          className={cx(H.secondary, H.press)}
-                          style={S('display:inline-flex;align-items:center;padding:6px 10px;border-radius:8px;border:1px solid #E4DDD4;background:#fff;font:500 12px/1 Geist;color:#332D28;cursor:pointer')}
-                        >
-                          Uphold
-                        </Pressable>
-                        <Pressable
-                          label={`Decline ${d.n}'s dispute`}
-                          onClick={() => {
-                            resolveDispute(p.id, d.id, 'declined', 'Declined. The original hours stand.');
-                            toast({ title: 'Dispute declined', message: 'The original hours stand.', tone: 'brand' });
-                          }}
-                          className={cx(H.secondary, H.press)}
-                          style={S('display:inline-flex;align-items:center;padding:6px 10px;border-radius:8px;border:1px solid #E4DDD4;background:#fff;font:500 12px/1 Geist;color:#8A8179;cursor:pointer')}
-                        >
-                          Decline
-                        </Pressable>
-                      </div>
-                    ) : d.resolvedNote ? (
-                      <div style={S('margin-top:8px;font:450 12px/1.45 Geist;color:#8A8179')}>{d.resolvedNote}</div>
+                    <div className="vu-trunc" style={S(LABEL)}>{r.n}</div>
+                  </div>
+                  {r.show ? (
+                    <>
+                      <div role="cell" style={S(`font:600 15px/1 ${F.body};color:${C.ink};${NUM}`)}>{r.show}</div>
+                      <div role="cell" style={S(`${META};${NUM}`)}>{r.late}</div>
+                      <div role="cell" style={S(META)}>{r.score}</div>
+                      <div role="cell"><StatusText tone={r.tone}>{r.trend}</StatusText></div>
+                    </>
+                  ) : (
+                    // No posted shifts: one sentence across the metric columns, not three blank cells.
+                    <div role="cell" style={S('grid-column:2 / -1')}><StatusText tone={r.tone}>{r.trend}</StatusText></div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {compliance.length ? (
+          <section aria-labelledby="q-pw" style={S(SEC_GAP)}>
+            <h2 id="q-pw" style={S(H2)}>Paperwork</h2>
+            <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+              {compliance.map((c) => (
+                <li key={c.id} style={S(RULE)}>
+                  <div className="vu-stack vu-stack-gap" style={S('padding:14px 0;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
+                  <div style={S(`min-width:0;${LABEL}`)}>{c.t}</div>
+                  <div style={S('display:flex;align-items:center;gap:12px;flex:none;flex-wrap:wrap')}>
+                    <span style={S(`${META};${NUM}`)}>{c.v}</span>
+                    <StatusText tone={sevTone(c.st)}>{c.st}</StatusText>
+                    {c.st !== 'Clear' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Fix ${c.t} in People`}
+                        onClick={() => {
+                          toast({ title: c.id === 'cp1' ? 'Mark each guardian consent form' : 'Mark training done', message: c.id === 'cp1' ? 'Open each person who is missing one.' : 'Open each tutor once they finish it.', tone: 'brand' });
+                          goTab && goTab('people');
+                        }}
+                      >
+                        Fix in People
+                      </Button>
                     ) : null}
                   </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        <section aria-labelledby="q-inc" style={S(SEC_GAP)}>
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <h2 id="q-inc" style={S(H2)}>Incident log</h2>
+            <Button variant="outline" size="sm" icon="plus" onClick={file} aria-label="File an incident">
+              File an incident
+            </Button>
+          </div>
+          {p.incidents.length ? (
+            <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+              {p.incidents.map((i) => (
+                <li key={i.id} style={S(`padding:16px 0;${RULE}`)}>
+                  <div>
+                  <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+                    <h3 style={S(`margin:0;${LABEL}`)}>{i.t}</h3>
+                    <StatusText tone={i.st === 'Closed' ? 'ok' : 'wait'}>{i.st}</StatusText>
+                  </div>
+                  <p className="vu-break" style={S(`margin:6px 0 0;${META};max-width:600px`)}>{i.note}</p>
+                  <div style={S('margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+                    <div style={S(SMALL)}>{i.d}, {/^logged by /i.test(String(i.who || '')) ? String(i.who).replace(/^Logged/, 'logged') : `logged by ${i.who}`}</div>
+                    {i.st !== 'Closed' ? (
+                      <button
+                        type="button"
+                        aria-label={`Close incident: ${i.t}`}
+                        onClick={() => {
+                          closeIncident(p.id, i.id);
+                          toast({ title: 'Incident closed', tone: 'ok' });
+                        }}
+                        className={cx('vu-link', H.press)}
+                        style={S(`${TEXT_LINK};font-size:13px`)}
+                      >
+                        Close
+                      </button>
+                    ) : null}
+                  </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div style={S(`margin-top:16px;padding:16px 0;border-top:1px solid ${C.line};${RULE};${META}`)}>No incidents filed.</div>
+          )}
+        </section>
+
+        {p.disputes.length ? (
+          <section aria-labelledby="q-dis" style={S(SEC_GAP)}>
+            <h2 id="q-dis" style={S(H2)}>Hour disputes</h2>
+            <ul style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+              {p.disputes.map((d) => (
+                <li key={d.id} style={S(`padding:16px 0;${RULE}`)}>
+                  <div>
+                  <div style={S('display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap')}>
+                    <h3 style={S(`margin:0;${LABEL}`)}>{d.n}, {d.d}</h3>
+                    <StatusText tone={d.st === 'Open' ? 'wait' : 'ok'}>{String(d.st).replace(/\s*·\s*/g, ', ')}</StatusText>
+                  </div>
+                  <p className="vu-break" style={S(`margin:6px 0 0;${META};max-width:600px`)}>{d.claim}</p>
+                  {d.st === 'Open' ? (
+                    <div style={S('margin-top:12px;display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap')}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Uphold ${d.n}'s dispute`}
+                        onClick={() => {
+                          resolveDispute(p.id, d.id, 'upheld', 'Upheld. Hours to be corrected in Attendance.');
+                          toast({ title: 'Dispute upheld', message: `Change ${d.n}'s hours in Attendance.`, tone: 'ok' });
+                        }}
+                      >
+                        Uphold
+                      </Button>
+                      <button
+                        type="button"
+                        aria-label={`Decline ${d.n}'s dispute`}
+                        onClick={() => {
+                          resolveDispute(p.id, d.id, 'declined', 'Declined. The original hours stand.');
+                          toast({ title: 'Dispute declined', message: 'The original hours stand.', tone: 'brand' });
+                        }}
+                        className={cx('vu-link', H.press)}
+                        style={S(TEXT_LINK)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  ) : d.resolvedNote ? (
+                    <div style={S(`margin-top:8px;${SMALL}`)}>{d.resolvedNote}</div>
+                  ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px')}>
-        <div style={S(CARD)}>
-          <SectionLabel>Audit log</SectionLabel>
-          <div style={S('margin-top:12px;display:flex;flex-direction:column')}>
+      <aside aria-label="Audit log" style={S('min-width:0')}>
+        <section aria-labelledby="q-audit">
+          <h2 id="q-audit" style={S(H3)}>Audit log</h2>
+          <p style={S(`margin:6px 0 0;${SMALL}`)}>Every hour change and decision, newest first.</p>
+          <ol style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
             {p.auditLog.slice(0, auditAll ? 60 : 5).map((a) => (
-              <div key={a.id} style={S('padding:11px 0;border-bottom:1px solid #F1EBE4')}>
-                <div style={S('font:450 13px/1.4 Geist;color:#332D28')}>{a.t}</div>
-                <div style={S('margin-top:5px;font:450 11px/1.3 Geist;color:#A19891')}>
+              <li key={a.id} style={S(`padding:11px 0;${RULE}`)}>
+                <div className="vu-break" style={S(`font:400 14px/1.4 ${F.body};color:${C.ink}`)}>{a.t}</div>
+                <div style={S(`margin-top:3px;${SMALL}`)}>
                   {a.who}, {a.w}
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
           {p.auditLog.length > 5 ? (
-            <Pressable
-              label={auditAll ? 'Show fewer audit entries' : 'Show the full audit log'}
+            <button
+              type="button"
+              aria-label={auditAll ? 'Show fewer audit entries' : 'Show the full audit log'}
               onClick={() => setParam({ audit: auditAll ? null : 'all' })}
-              className={H.link}
-              style={S('margin-top:12px;font:500 12px/1 Geist;color:#C2603C;cursor:pointer;width:max-content')}
+              className={cx('vu-link', H.press)}
+              style={S(`margin-top:14px;${TEXT_LINK}`)}
             >
               {auditAll ? 'Show less' : `Show all ${p.auditLog.length}`}
-            </Pressable>
+            </button>
           ) : null}
-        </div>
-      </div>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -1671,18 +1752,19 @@ function reliabilityRow(p, person) {
   const avg = scores.length ? order[Math.round(scores.reduce((a, g) => a + Math.max(0, order.indexOf(g)), 0) / scores.length)] : 'Not scored';
   const show = total ? Math.round((attended / total) * 100) : 0;
   let trend = 'Steady';
-  let t = { bg: '#EAF3EC', color: '#3F6B4E' };
+  let t = 'ok';
   if (!total) {
-    trend = 'No shifts yet';
-    t = { bg: '#F6F2EE', color: '#6B635C' };
+    trend = 'No posted shifts yet';
+    t = 'mute';
   } else if (show < 70) {
     trend = `${total - attended} missed`;
-    t = { bg: '#F5E7E0', color: '#A8482A' };
+    t = 'bad';
   } else if (show < 100 || late > 1) {
     trend = 'Watch';
-    t = { bg: '#FDF3E7', color: '#8A5A20' };
+    t = 'wait';
   }
-  return { id: person.id, n: person.n, slug: person.slug, show: total ? `${show}%` : '-', late: String(late), score: avg, trend, bg: t.bg, color: t.color };
+  // With no posted shifts the number fields stay empty and the row shows the trend sentence alone.
+  return { id: person.id, n: person.n, slug: person.slug, show: total ? `${show}%` : '', late: total ? String(late) : '', score: total ? avg : '', trend, tone: t };
 }
 
 function IncidentForm({ api, project }) {
@@ -1692,28 +1774,29 @@ function IncidentForm({ api, project }) {
   return (
     <div>
       <Field label="What happened" value={f.t} onChange={(v) => setF((x) => ({ ...x, t: v }))} maxLength={90} required error={err.t} placeholder="e.g. Scraped knee at the supply table" />
-      <div style={S('margin-top:14px')}>
-        <label htmlFor="inc-note" style={S('font:500 12px/1 Geist;color:#57504A')}>What you did about it</label>
-        <textarea
+      <div style={S('margin-top:16px')}>
+        <TextArea
           id="inc-note"
+          label="What you did about it"
           value={f.note}
-          onChange={(e) => setF((x) => ({ ...x, note: e.target.value }))}
+          onChange={(v) => setF((x) => ({ ...x, note: v }))}
           maxLength={400}
+          minHeight={100}
+          error={err.note}
           placeholder="e.g. Cleaned and bandaged it, called a parent"
-          className={H.input}
-          style={S('margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;min-height:100px;font:450 14px/1.55 Geist;color:#332D28')}
         />
-        {err.note ? <div className="vu-err">{err.note}</div> : null}
       </div>
-      <div style={S('margin-top:14px;padding:12px 14px;border-radius:11px;background:#FDF3E7;border:1px solid #F3E3CD;font:450 12px/1.5 Geist;color:#8A5A20')}>
-        Nobody is notified from here. If someone got hurt or a parent was called, tell {contact} today.
+      <div style={S(`margin-top:16px;display:flex;gap:8px;align-items:flex-start;font:400 14px/1.45 ${F.body};color:${C.ink}`)}>
+        <span style={S(`flex:none;margin-top:2px;color:${C.waiting}`)}><Icon name="alert" size={16} /></span>
+        <span>Nobody is notified from here. If someone got hurt or a parent was called, tell {contact} today.</span>
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">
           Cancel
-        </Pressable>
-        <Pressable
-          label="File incident"
+        </Button>
+        <Button
+          variant="primary"
+          aria-label="File incident"
           onClick={() => {
             const e = {};
             if (!f.t.trim()) e.t = 'Enter what happened.';
@@ -1724,12 +1807,10 @@ function IncidentForm({ api, project }) {
             api.close();
             toast({ title: 'Incident filed', message: 'Saved to the incident log.', tone: 'ok' });
           }}
-          className={cx(H.primary, H.press)}
-          style={S(MODAL_PRIMARY)}
         >
           File incident
-        </Pressable>
-      </div>
+        </Button>
+      </DialogActions>
     </div>
   );
 }
@@ -1753,6 +1834,9 @@ function shortDay(iso) {
 function useVolunteerThreads(listingId) {
   const [threads, setThreads] = useState(null);
   const [failed, setFailed] = useState(false);
+  // False once the tab unmounts, so a read cut off by navigation is dropped
+  // instead of logged as a failure.
+  const alive = useRef(true);
   const load = useCallback(async () => {
     if (!supabase || !listingId) {
       setThreads([]);
@@ -1793,48 +1877,66 @@ function useVolunteerThreads(listingId) {
           return { id: `app-${a.id}`, app: a, last: t.last, fromThem: t.last.recipient_id === me, unread: t.unread };
         })
         .sort((x, y) => String(y.last.created_at || '').localeCompare(String(x.last.created_at || '')));
+      if (!alive.current) return;
       setThreads(out);
       setFailed(false);
     } catch (err) {
+      if (!alive.current) return;
       console.error('[lead] could not load volunteer messages', err);
       setFailed(true);
       setThreads((cur) => cur || []);
     }
   }, [listingId]);
   useEffect(() => {
+    alive.current = true;
     load();
     const timer = setInterval(load, THREAD_POLL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      alive.current = false;
+      clearInterval(timer);
+    };
   }, [load]);
   return { threads, failed, load };
 }
 
-const THREAD_ROW = 'display:block;width:100%;text-align:left;padding:14px 18px;border-bottom:1px solid #F1EBE4;cursor:pointer;transition:background .16s ease';
-const UNREAD_BADGE = 'min-width:16px;height:16px;padding:0 5px;border-radius:8px;background:#C2603C;color:#fff;font:600 9px/16px Geist;text-align:center';
+/* MessageThread keeps a fixed height so its composer stays put in dialogs. On one
+   column that left a tall gap under a short thread, so here the thread takes
+   its content's height (up to the same cap) and the composer follows it. */
+const MSG_FIT_CSS = '.vu-msgfit>div{height:auto!important;max-height:min(60vh,460px)}';
 
-function ThreadRow({ name, unread, when, preview, on, onClick }) {
+const UNREAD_BADGE = `min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:${C.ember};color:#fff;display:inline-grid;place-items:center;font:700 11px/1 ${F.body};${NUM}`;
+
+function ThreadRow({ name, unread, when, preview, on, onClick, avatar = true }) {
   return (
     <Pressable
       label={`${name}${unread ? `, ${unread} unread` : ''}`}
       current={on ? 'true' : undefined}
       onClick={onClick}
-      className={cx(H.row, H.press)}
-      style={s(THREAD_ROW, on ? 'background:#FAF6F3' : '')}
+      className={cx(on ? '' : H.row, H.press)}
+      style={s('display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px;border-radius:10px;cursor:pointer;transition:background .16s ease', on ? `background:${C.mist}` : '')}
     >
-      <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
-        <div className="vu-trunc" style={S('font:500 13px/1.2 Geist')}>{name}</div>
-        <div style={S('display:flex;align-items:center;gap:7px;flex:none')}>
-          {unread ? <span style={S(UNREAD_BADGE)}>{unread}</span> : null}
-          <div style={S('font:450 11px/1 Geist;color:#A19891')}>{when}</div>
+      {avatar ? (
+        <div style={S('width:36px;height:36px;border-radius:50%;overflow:hidden;flex:none')}>
+          <Avatar name={name} fs={13} />
         </div>
+      ) : null}
+      <div style={S('min-width:0;flex:1')}>
+        <div style={S('display:flex;align-items:center;justify-content:space-between;gap:10px')}>
+          <div className="vu-trunc" style={S(`font:${unread ? 700 : 600} 15px/1.25 ${F.body};color:${C.ink}`)}>{name}</div>
+          <div style={S('display:flex;align-items:center;gap:7px;flex:none')}>
+            {unread ? <span style={S(UNREAD_BADGE)}>{unread}</span> : null}
+            {when ? <div style={S(`${SMALL};${NUM};white-space:nowrap`)}>{when}</div> : null}
+          </div>
+        </div>
+        {preview ? <div className="vu-trunc" style={S(`margin-top:3px;${SMALL};color:${unread ? C.ink : C.ink2}`)}>{preview}</div> : null}
       </div>
-      <div className="vu-trunc" style={S('margin-top:6px;font:450 12px/1.4 Geist;color:#8A8179')}>{preview}</div>
     </Pressable>
   );
 }
 
 export function MessagesTab({ p, params, setParam }) {
   const { threads: vol, failed: volFailed, load: loadVol } = useVolunteerThreads(p.listingId);
+  const stacked = useNarrow(1179);
   const volThreads = vol || [];
   const threadParam = params.get('thread');
   const volPicked = volThreads.find((t) => t.id === threadParam);
@@ -1862,7 +1964,7 @@ export function MessagesTab({ p, params, setParam }) {
 
   if (vol !== null && !volFailed && !volThreads.length && !p.threads.length) {
     return (
-      <div style={S('margin-top:22px')}>
+      <div>
         <EmptyState icon="message" title="No messages yet" body="When a volunteer messages you, the thread shows up here." />
       </div>
     );
@@ -1876,7 +1978,7 @@ export function MessagesTab({ p, params, setParam }) {
     }
     sendMessage(p.id, th.id, body);
     setDraft('');
-    toast({ title: 'Saved', message: 'Members don\'t see this. Post on the board above to reach them.', tone: 'ok', timeout: 3200 });
+    toast({ title: 'Note saved', message: 'Only you see it.', tone: 'ok', timeout: 3200 });
   }
 
   function templates(e) {
@@ -1891,125 +1993,145 @@ export function MessagesTab({ p, params, setParam }) {
   }
 
   const volName = (t) => t.app.applicant_name || 'Volunteer';
+  // These threads are private notes. Older projects named the first one
+  // "Announcements" or "Crew announcements", which read like a post to members.
+  const noteName = (t) => (p.threads.length === 1 || /announce/i.test(t.n || '') ? 'Notes' : t.n || 'Notes');
+  const listHead = (id, text) => <h3 id={id} style={S(`margin:0 0 6px;padding:0 12px;${TH}`)}>{text}</h3>;
+  const paneStyle = stacked ? 'min-width:0;display:flex;flex-direction:column' : `min-width:0;display:flex;flex-direction:column;border-left:1px solid ${C.line};padding-left:32px;min-height:420px`;
 
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start')}>
-      <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden')}>
-        <div style={S('padding:14px 18px;border-bottom:1px solid #F1EBE4')}>
-          <SectionLabel>From volunteers</SectionLabel>
-        </div>
-        {vol === null ? (
-          <div role="status" style={S('padding:14px 18px;border-bottom:1px solid #F1EBE4;font:450 13px/1.4 Geist;color:#8A8179')}>Loading messages</div>
-        ) : volFailed && !volThreads.length ? (
-          <div role="alert" style={S('padding:14px 18px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font:450 13px/1.4 Geist;color:#57504A')}>
-            Couldn't load volunteer messages.
-            <Pressable label="Try again" onClick={loadVol} className={cx(H.secondary, H.press)} style={S(BTN_PLAIN)}>Try again</Pressable>
-          </div>
-        ) : !volThreads.length ? (
-          <div style={S('padding:14px 18px;border-bottom:1px solid #F1EBE4;font:450 13px/1.4 Geist;color:#8A8179')}>When a volunteer messages you, the thread shows up here.</div>
-        ) : (
-          volThreads.map((t) => {
-            const on = t.id === threadId;
-            return (
-              <ThreadRow
-                key={t.id}
-                name={volName(t)}
-                unread={on ? 0 : t.unread}
-                when={shortDay(t.last.created_at)}
-                preview={t.fromThem ? t.last.body : `You: ${t.last.body}`}
-                on={on}
-                onClick={() => setParam({ thread: t.id })}
-              />
-            );
-          })
-        )}
-        {p.threads.length ? (
-          <>
-            <div style={S('padding:14px 18px;border-bottom:1px solid #F1EBE4')}>
-              <SectionLabel>Your notes</SectionLabel>
-            </div>
-            {p.threads.map((t) => (
-              <ThreadRow
-                key={t.id}
-                name={t.n}
-                unread={t.unread}
-                when={t.when}
-                preview={t.messages.length ? t.p : 'Nothing saved yet'}
-                on={t.id === threadId}
-                onClick={() => setParam({ thread: t.id })}
-              />
-            ))}
-          </>
-        ) : null}
-      </div>
-
-      {volSel ? (
-        <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;display:flex;flex-direction:column;min-width:0')}>
-          <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;min-width:0')}>
-            <div className="vu-trunc" style={S('font:600 15px/1.2 Geist;letter-spacing:-0.02em')}>{volName(volSel)}</div>
-            <div style={S('margin-top:5px;font:450 12px/1.3 Geist;color:#8A8179')}>{APP_STATUS_LABEL[volSel.app.status] || 'Applied'}</div>
-          </div>
-          <div style={S('padding:16px 20px')}>
-            <MessageThread key={volSel.app.id} applicationId={volSel.app.id} recipientId={volSel.app.applicant_id} recipientName={volName(volSel)} />
-          </div>
-        </div>
-      ) : th ? (
-        <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;min-height:360px;display:flex;flex-direction:column;min-width:0')}>
-          <div className="vu-stack vu-stack-gap" style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:12px')}>
-            <div style={S('min-width:0')}>
-              <div className="vu-trunc" style={S('font:600 15px/1.2 Geist;letter-spacing:-0.02em')}>{th.n}</div>
-              <div style={S('margin-top:5px;font:450 12px/1.3 Geist;color:#8A8179')}>Only you see this thread.</div>
-            </div>
-            <Pressable label="Insert a message template" expanded={false} onClick={templates} className={cx(H.secondary, H.press)} style={S(BTN_BRAND)}>
-              Templates
-              <Icon name="chevron-down" size={13} />
-            </Pressable>
-          </div>
-
-          <div ref={scrollRef} style={S('padding:20px;display:flex;flex-direction:column;gap:14px;flex:1;max-height:440px;overflow-y:auto')}>
-            {th.messages.length ? (
-              th.messages.map((m) => (
-                <div key={m.id} style={S('max-width:460px;align-self:flex-start')}>
-                  {m.who !== 'me' ? <div style={S('margin-bottom:5px;font:500 11px/1 Geist;color:#A19891')}>{m.whoName || 'Them'}</div> : null}
-                  <div className="vu-break" style={s('padding:14px 16px;border-radius:12px;font:450 14px/1.55 Geist;color:#332D28', `background:${m.who === 'me' ? '#FCFAF8' : '#FAF6F3'}`, `border:1px solid ${m.who === 'me' ? '#F1EBE4' : '#EFE3DC'}`)}>
-                    {m.body}
-                  </div>
-                  <div style={S('margin-top:5px;font:450 11px/1 Geist;color:#A19891')}>{m.when}</div>
-                </div>
-              ))
+    <section aria-labelledby="msg-h">
+      <h2 id="msg-h" style={S(H2)}>Messages</h2>
+      <div style={S(`margin-top:20px;display:grid;grid-template-columns:${stacked ? 'minmax(0,1fr)' : '300px minmax(0,1fr)'};gap:${stacked ? 28 : 24}px;align-items:start`)}>
+        <nav aria-label="Conversations" style={S('min-width:0;margin:0 -12px;display:flex;flex-direction:column;gap:22px')}>
+          <div role="group" aria-labelledby="msg-vol">
+            {listHead('msg-vol', 'From volunteers')}
+            {vol === null ? (
+              <div role="status" style={S(`padding:8px 12px;${SMALL}`)}>Loading messages</div>
+            ) : volFailed && !volThreads.length ? (
+              <div role="alert" style={S(`padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;${SMALL}`)}>
+                Couldn't load volunteer messages.
+                <Button variant="outline" size="sm" icon="refresh" onClick={loadVol} aria-label="Try again">Try again</Button>
+              </div>
+            ) : !volThreads.length ? (
+              <div style={S(`padding:8px 12px;${SMALL}`)}>When a volunteer messages you, the thread shows up here.</div>
             ) : (
-              <div style={S('margin:auto;text-align:center;max-width:320px')}>
-                <div style={S('font:500 14px/1.3 Geist;color:#57504A')}>Nothing saved yet</div>
-                <div style={S('margin-top:7px;font:450 13px/1.5 Geist;color:#8A8179')}>Draft an announcement here, then post it on the board above.</div>
+              <div style={S('display:flex;flex-direction:column;gap:2px')}>
+                {volThreads.map((t) => {
+                  const on = t.id === threadId;
+                  return (
+                    <ThreadRow
+                      key={t.id}
+                      name={volName(t)}
+                      unread={on ? 0 : t.unread}
+                      when={shortDay(t.last.created_at)}
+                      preview={t.fromThem ? t.last.body : `You: ${t.last.body}`}
+                      on={on}
+                      onClick={() => setParam({ thread: t.id })}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>
+          {p.threads.length ? (
+            <div role="group" aria-labelledby="msg-notes">
+              {listHead('msg-notes', 'Your notes')}
+              <div style={S('display:flex;flex-direction:column;gap:2px')}>
+                {p.threads.map((t) => (
+                  <ThreadRow
+                    key={t.id}
+                    name={noteName(t)}
+                    avatar={false}
+                    unread={t.unread}
+                    when={t.messages.length ? t.when : ''}
+                    preview={t.messages.length ? t.p : ''}
+                    on={t.id === threadId}
+                    onClick={() => setParam({ thread: t.id })}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </nav>
 
-          <div style={S('padding:16px 20px;border-top:1px solid #F1EBE4;display:flex;align-items:center;gap:12px')}>
-            <input
-              type="text"
-              value={draft}
-              placeholder="e.g. We meet at the side door"
-              aria-label="Message"
-              maxLength={600}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') send();
-              }}
-              className={H.input}
-              style={S('flex:1;min-width:0;padding:12px 14px;border-radius:11px;border:1px solid #E8E1D9;background:#FCFAF8;font:450 14px/1.15 Geist;color:#1A1714;transition:border-color .16s ease')}
-            />
-            <Pressable label="Save message" onClick={send} className={cx(H.primary, H.press)} style={S(`${BTN_PRIMARY};height:40px;padding:0 16px;font-size:14px`)}>
-              Save
-            </Pressable>
+        {volSel ? (
+          <div style={S(paneStyle)}>
+            <div style={S(`padding-bottom:16px;${RULE};display:flex;align-items:center;gap:12px;min-width:0`)}>
+              <div style={S('width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none')}>
+                <Avatar name={volName(volSel)} fs={16} />
+              </div>
+              <div style={S('min-width:0')}>
+                <div className="vu-trunc" style={S(H3)}>{volName(volSel)}</div>
+                <div style={S('margin-top:6px')}>
+                  <StatusText tone={volSel.app.status === 'accepted' ? 'ok' : volSel.app.status === 'pending' ? 'wait' : volSel.app.status === 'declined' ? 'bad' : 'mute'}>
+                    {APP_STATUS_LABEL[volSel.app.status] || 'Applied'}
+                  </StatusText>
+                </div>
+              </div>
+            </div>
+            <div className={stacked ? 'vu-msgfit' : undefined} style={S('padding-top:16px')}>
+              {stacked ? <style>{MSG_FIT_CSS}</style> : null}
+              <MessageThread key={volSel.app.id} applicationId={volSel.app.id} recipientId={volSel.app.applicant_id} recipientName={volName(volSel)} />
+            </div>
           </div>
-        </div>
-      ) : (
-        <div role="status" style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;min-height:200px;display:flex;align-items:center;justify-content:center;font:450 13px/1.5 Geist;color:#8A8179')}>
-          Loading messages
-        </div>
-      )}
-    </div>
+        ) : th ? (
+          <div style={S(paneStyle)}>
+            <div className="vu-stack vu-stack-gap" style={S(`padding-bottom:16px;${RULE};display:flex;align-items:center;justify-content:space-between;gap:12px`)}>
+              <div style={S('min-width:0')}>
+                <div className="vu-trunc" style={S(H3)}>{noteName(th)}</div>
+                <div style={S(`margin-top:4px;${SMALL}`)}>Only you see these.</div>
+              </div>
+              <div style={S('flex:none')}>
+                <Button variant="outline" size="sm" aria-label="Insert a message template" aria-haspopup="menu" aria-expanded="false" onClick={templates}>
+                  Templates
+                  <Icon name="chevron-down" size={14} />
+                </Button>
+              </div>
+            </div>
+
+            <div ref={scrollRef} style={S('padding:20px 0;display:flex;flex-direction:column;gap:16px;flex:1;max-height:440px;overflow-y:auto')}>
+              {th.messages.length ? (
+                th.messages.map((m) => (
+                  <div key={m.id} style={S(`max-width:min(480px, 100%);align-self:${m.who === 'me' ? 'flex-end' : 'flex-start'}`)}>
+                    {m.who !== 'me' ? <div style={S(`margin-bottom:5px;font:600 13px/1.45 ${F.body};color:${C.ink2}`)}>{m.whoName || 'Them'}</div> : null}
+                    <div className="vu-break" style={s(`padding:12px 16px;border-radius:16px;${BODY}`, m.who === 'me' ? `background:${C.ink};color:#fff` : `background:${C.mist}`)}>
+                      {m.body}
+                    </div>
+                    <div style={S(`margin-top:5px;${SMALL};text-align:${m.who === 'me' ? 'right' : 'left'}`)}>{m.when}</div>
+                  </div>
+                ))
+              ) : (
+                <p style={S(`margin:0;${META}`)}>Jot notes for yourself here.</p>
+              )}
+            </div>
+
+            <div style={S(`padding-top:16px;border-top:1px solid ${C.line};display:flex;align-items:center;gap:10px`)}>
+              <input
+                type="text"
+                value={draft}
+                placeholder="e.g. Ask the park office for more trash bags"
+                aria-label="Note"
+                maxLength={600}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') send();
+                }}
+                className={cx('vu-input', H.input)}
+                style={S(`flex:1;min-width:0;height:44px;padding:0 14px;border-radius:${R.control};border:1px solid ${C.line2};background:#fff;font:400 15px/1.2 ${F.body};color:${C.ink};transition:border-color .16s ease`)}
+              />
+              <Button variant="dark" onClick={send} disabled={!draft.trim()} aria-disabled={draft.trim() ? undefined : 'true'} aria-label="Save note">
+                Save note
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div role="status" style={S(`${paneStyle};align-items:center;justify-content:center;min-height:200px;${SMALL}`)}>
+            Loading messages
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2039,8 +2161,26 @@ export async function syncListing(projectId) {
   }
 }
 
+/* Archiving stamped closedAt on each accepted or waiting application
+   (markProjectClosed), which members read as "closed this project". Clear
+   those stamps when the lead brings the project back. Best-effort per row;
+   returns how many rows couldn't be cleared. */
+async function clearClosedStamps(listingId) {
+  if (!listingId) return 0;
+  const apps = await loadOwnerApplications({ throwOnError: true });
+  const stamped = apps.filter((a) => a.listing_id === listingId && a.assignment && a.assignment.closedAt && ['accepted', 'pending'].includes(a.status));
+  const results = await Promise.all(stamped.map((a) => setMemberAssignment(a.id, { closedAt: null }).catch((error) => ({ ok: false, error }))));
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) console.error('[lead] could not clear the archived stamp on', failed.length, 'applications', failed[0].error);
+  if (stamped.length) window.dispatchEvent(new Event('vu:applications-changed'));
+  return failed.length;
+}
+
 export function SettingsTab({ p }) {
   const rows = (p.settings || []).filter((r) => LIVE_SETTINGS[r.id]);
+  // On one column the join link sits under Project settings, so Archive stays last.
+  const stacked = useNarrow(1179);
+  const joinLink = <ShareLink p={p} tone="soft" />;
 
   function editDetails() {
     openModal({
@@ -2055,7 +2195,7 @@ export function SettingsTab({ p }) {
   async function archive() {
     const ok = await confirmDialog({
       title: `Archive ${p.name}?`,
-      body: "It comes off Discover and stops taking applications. Hours volunteers already logged aren't touched.",
+      body: "It comes off Discover, its join link stops taking applications and members see it as closed. Hours volunteers already logged aren't touched. You can restore it from Settings later.",
       confirmLabel: 'Archive project',
       cancelLabel: 'Keep it',
       requireText: 'ARCHIVE',
@@ -2066,6 +2206,42 @@ export function SettingsTab({ p }) {
     toast(synced
       ? { title: 'Project archived', message: 'It no longer shows on Discover.', tone: 'ok' }
       : { title: 'Archived here only', message: "Discover didn't update. Check your connection and try again.", tone: 'warn' });
+  }
+
+  async function restore() {
+    const ok = await confirmDialog({
+      title: `Restore ${p.name}?`,
+      body: isPublic(p)
+        ? 'It goes back on Discover and its join link takes applications again.'
+        : "Its join link takes applications again. It stays off Discover until you turn on 'Show project on Discover'.",
+      confirmLabel: 'Restore project',
+      cancelLabel: 'Keep it archived',
+      tone: 'primary',
+    });
+    if (!ok) return;
+    update((st) => {
+      const proj = st.projects.find((x) => x.id === p.id);
+      if (proj) {
+        proj.archived = false;
+        proj.status = 'LIVE';
+      }
+    });
+    logAudit(p.id, 'Project restored');
+    const synced = await syncListing(p.id);
+    let stampsLeft = 0;
+    try {
+      stampsLeft = await clearClosedStamps(p.listingId);
+    } catch (err) {
+      console.error('[lead] could not load applications to reopen', err);
+      stampsLeft = 1;
+    }
+    if (!synced) {
+      toast({ title: 'Restored here only', message: "Discover didn't update. Check your connection and try again.", tone: 'warn' });
+    } else if (stampsLeft) {
+      toast({ title: 'Project restored', message: "Some members' project pages still say it closed. Check your connection.", tone: 'warn' });
+    } else {
+      toast({ title: 'Project restored', message: isPublic(p) ? 'It shows on Discover again.' : 'Your join link takes applications again.', tone: 'ok' });
+    }
   }
 
   async function toggle(r) {
@@ -2081,81 +2257,121 @@ export function SettingsTab({ p }) {
     toast({ title: row.on ? 'Showing on Discover' : 'Hidden from Discover', message: row.on ? 'Your join link works again.' : 'Your join link is paused until you turn this back on.', tone: 'ok', timeout: 3200 });
   }
 
+  const details = [
+    ['Project name', p.name],
+    ['Where it happens', p.site || (p.delivery === 'remote' ? 'Remote' : '')],
+    ['What volunteers do', p.mission],
+    ['Details', p.bio],
+  ];
+
   return (
-    <div className="vu-split" style={S('display:grid;grid-template-columns:1fr 320px;gap:20px;margin-top:22px;align-items:start')}>
-      <div style={S('border-radius:16px;border:1px solid #E8E1D9;background:#fff;overflow:hidden;min-width:0')}>
-        <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4')}>
-          <SectionLabel>Project settings</SectionLabel>
-        </div>
-        {p.archived ? (
-          <div style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;font:450 14px/1.4 Geist;color:#8A5A20;background:#FDF3E7')}>
-            Archived. This project doesn't show on Discover.
-          </div>
-        ) : (
-          rows.map((r) => (
-            <div key={r.id} style={S('padding:16px 20px;border-bottom:1px solid #F1EBE4;display:flex;align-items:center;justify-content:space-between;gap:16px')}>
-              <div style={S('min-width:0')}>
-                <div style={S('font:500 14px/1.3 Geist;color:#332D28')}>{LIVE_SETTINGS[r.id]}</div>
-                <div style={S('margin-top:4px;font:450 12px/1.4 Geist;color:#8A8179')}>{r.on ? 'Volunteers can find it by searching and open your join link.' : 'Hidden from Discover, and your join link is paused.'}</div>
+    <div className="vu-layout-rail" style={S('margin-top:32px')}>
+      <div style={S('min-width:0')}>
+        <section aria-labelledby="set-h">
+          <h2 id="set-h" style={S(H2)}>Project settings</h2>
+          <div style={S(`margin-top:16px;border-top:1px solid ${C.line}`)}>
+            {p.archived ? (
+              <div style={S(`padding:16px 0;${RULE};display:flex;align-items:center;gap:12px;flex-wrap:wrap;${META}`)}>
+                <StatusText tone="wait">Archived</StatusText>
+                This project doesn't show on Discover.
               </div>
-              <Toggle on={r.on} label={LIVE_SETTINGS[r.id]} onChange={() => toggle(r)} />
-            </div>
-          ))
-        )}
-        <div style={S('padding:18px 20px;display:flex;flex-wrap:wrap;gap:10px')}>
-          <Pressable label="Edit project details" onClick={editDetails} className={cx(H.secondary, H.press)} style={S(BTN_BRAND)}>
-            <Icon name="edit" size={14} />
-            Edit project details
-          </Pressable>
-          <Pressable
-            label={p.archived ? 'Project archived' : 'Archive project'}
-            disabled={p.archived}
-            onClick={archive}
-            className={cx(p.archived ? '' : H.danger, H.press)}
-            style={s(BTN_DANGER, p.archived ? DISABLED : '')}
-          >
-            {p.archived ? 'Archived' : 'Archive project'}
-          </Pressable>
-        </div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} style={S(`padding:16px 0;${RULE};display:flex;align-items:center;justify-content:space-between;gap:16px`)}>
+                  <div style={S('min-width:0')}>
+                    <div style={S(LABEL)}>{LIVE_SETTINGS[r.id]}</div>
+                    <div style={S(`margin-top:3px;${SMALL}`)}>{r.on ? 'Volunteers can find it by searching and open your join link.' : 'Hidden from Discover, and your join link is paused.'}</div>
+                  </div>
+                  <Toggle on={r.on} label={LIVE_SETTINGS[r.id]} onChange={() => toggle(r)} />
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        {stacked ? (
+          <section aria-label="Join link" style={S('margin-top:28px')}>
+            {joinLink}
+          </section>
+        ) : null}
+
+        <section aria-labelledby="set-det" style={S(SEC_GAP)}>
+          <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
+            <h2 id="set-det" style={S(H2)}>Project details</h2>
+            <Button variant="outline" size="sm" icon="edit" onClick={editDetails} aria-label="Edit project details">
+              Edit project details
+            </Button>
+          </div>
+          <dl style={S(`margin:16px 0 0;border-top:1px solid ${C.line}`)}>
+            {details.map(([k, v]) => (
+              <div key={k} className="vu-stack" style={S(`padding:14px 0;${RULE};display:flex;gap:6px 24px`)}>
+                <dt style={S(`flex:none;width:180px;${META}`)}>{k}</dt>
+                <dd className="vu-break" style={S(`margin:0;min-width:0;${BODY};color:${v ? C.ink : C.ink2}`)}>{v || 'Not added yet'}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section aria-labelledby="set-arc" style={S(SEC_GAP)}>
+          <h2 id="set-arc" style={S(H2)}>Archive</h2>
+          <p style={S(`margin:6px 0 0;${META};max-width:560px`)}>
+            {p.archived
+              ? "This project is archived. Hours volunteers already logged are kept. Restore it to take applications again."
+              : "Takes the project off Discover and stops new applications. Hours volunteers already logged aren't touched. You can restore it later."}
+          </p>
+          <div style={S('margin-top:16px')}>
+            {p.archived ? (
+              <Button variant="outline" size="sm" icon="refresh" onClick={restore} aria-label="Restore project">
+                Restore project
+              </Button>
+            ) : (
+              <Button variant="danger" size="sm" icon="folder" onClick={archive} aria-label="Archive project">
+                Archive project
+              </Button>
+            )}
+          </div>
+        </section>
       </div>
 
-      <div style={S('display:flex;flex-direction:column;gap:14px;min-width:0')}>
-        <ShareLink p={p} tone="card" />
-      </div>
+      {stacked ? null : (
+        <aside aria-label="Join link" style={S('min-width:0')}>
+          {joinLink}
+        </aside>
+      )}
     </div>
   );
 }
 
 function DetailsForm({ api, project }) {
-  const [f, setF] = useState({ name: project.name, site: project.site, mission: project.mission || '', bio: project.bio || '' });
+  // Same rule as /create: a remote project doesn't need a place.
+  const remote = project.delivery === 'remote';
+  const [f, setF] = useState({ name: project.name || '', site: project.site || '', mission: project.mission || '', bio: project.bio || '' });
   const [err, setErr] = useState({});
   const [busy, setBusy] = useState(false);
-  const area = 'margin-top:8px;display:block;width:100%;padding:14px;border-radius:12px;border:1px solid #E8E1D9;background:#FCFAF8;font:450 14px/1.55 Geist;color:#332D28';
   return (
     <div>
       <Field label="Project name" value={f.name} onChange={(v) => setF((x) => ({ ...x, name: v }))} maxLength={60} required error={err.name} />
-      <div style={S('margin-top:14px')}>
-        <Field label="Where it happens" value={f.site} onChange={(v) => setF((x) => ({ ...x, site: v }))} maxLength={90} required error={err.site} placeholder="e.g. Rivertown Public Library, Branch 4" />
+      <div style={S('margin-top:16px')}>
+        <Field label="Where it happens" value={f.site} onChange={(v) => setF((x) => ({ ...x, site: v }))} maxLength={90} required={!remote} error={err.site} placeholder={remote ? 'Optional for a remote project' : 'e.g. Carmel Clay Public Library'} />
       </div>
-      <div style={S('margin-top:14px')}>
-        <label htmlFor="pd-mission" style={S('font:500 12px/1 Geist;color:#57504A')}>What volunteers do</label>
-        <textarea id="pd-mission" value={f.mission} maxLength={240} onChange={(e) => setF((x) => ({ ...x, mission: e.target.value }))} className={H.input} style={S(`${area};min-height:84px`)} />
+      <div style={S('margin-top:16px')}>
+        <TextArea id="pd-mission" label="What volunteers do" value={f.mission} maxLength={240} minHeight={84} onChange={(v) => setF((x) => ({ ...x, mission: v }))} />
       </div>
-      <div style={S('margin-top:14px')}>
-        <label htmlFor="pd-bio" style={S('font:500 12px/1 Geist;color:#57504A')}>Details</label>
-        <textarea id="pd-bio" value={f.bio} maxLength={400} onChange={(e) => setF((x) => ({ ...x, bio: e.target.value }))} className={H.input} style={S(`${area};min-height:70px`)} />
+      <div style={S('margin-top:16px')}>
+        <TextArea id="pd-bio" label="Details" value={f.bio} maxLength={400} minHeight={70} onChange={(v) => setF((x) => ({ ...x, bio: v }))} />
       </div>
-      <div style={S('margin-top:18px;display:flex;justify-content:flex-end;gap:10px')}>
-        <Pressable label="Cancel" onClick={() => api.close()} className={cx(H.secondary, H.press)} style={S(MODAL_CANCEL)}>
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">
           Cancel
-        </Pressable>
-        <Pressable
-          label="Save details"
-          disabled={busy}
+        </Button>
+        <Button
+          variant="primary"
+          aria-label="Save details"
+          busy={busy}
           onClick={async () => {
             const e = {};
             if (!f.name.trim()) e.name = 'Enter a project name.';
-            if (!f.site.trim()) e.site = 'Enter where it happens.';
+            if (!remote && !f.site.trim()) e.site = 'Enter where it happens.';
             setErr(e);
             if (Object.keys(e).length) return;
             setBusy(true);
@@ -2167,12 +2383,10 @@ function DetailsForm({ api, project }) {
               ? { title: 'Details saved', message: 'Your join page shows the new details.', tone: 'ok' }
               : { title: 'Saved here only', message: "Your join page didn't update. Try again in a minute.", tone: 'warn' });
           }}
-          className={cx(H.primary, H.press)}
-          style={s(MODAL_PRIMARY, busy ? DISABLED : '')}
         >
           {busy ? 'Saving' : 'Save details'}
-        </Pressable>
-      </div>
+        </Button>
+      </DialogActions>
     </div>
   );
 }
