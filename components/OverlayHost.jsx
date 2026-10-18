@@ -5,7 +5,8 @@
    ========================================================================== */
 
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
-import { S, s, cx, GRAD, H } from '../lib/style.js';
+import { S, s, cx, H } from '../lib/style.js';
+import { C, F } from '../lib/tokens.js';
 import {
   useOverlays, dismissToast, holdToast, releaseToast, closeModal, closeMenu, closeTopOverlay,
 } from '../lib/overlays.js';
@@ -27,6 +28,11 @@ export default function OverlayHost() {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
+
+  // When a dialog closes, the second tap of a double tap (or the second
+  // click of a double click) on its button would land on whatever was under
+  // it, often the phone tab bar. Swallow that follow-up click for a moment.
+  useClickShield(modals.length);
 
   // Lock background scroll while a modal is open.
   useEffect(() => {
@@ -51,6 +57,40 @@ export default function OverlayHost() {
       </div>
     </>
   );
+}
+
+/* ---- click shield ---------------------------------------------------------
+   Only the continuation of a multi-click (event.detail >= 2: the browser
+   counts it as the same double click or double tap) is dropped, and only
+   outside an open dialog, for 600ms after a dialog closes. A separate,
+   deliberate click (detail 1) and keyboard activation (detail 0) always go
+   through.
+   ------------------------------------------------------------------------- */
+
+const SHIELD_MS = 600;
+
+function useClickShield(openCount) {
+  const prev = useRef(openCount);
+  const until = useRef(0);
+  useEffect(() => {
+    if (openCount < prev.current) until.current = Date.now() + SHIELD_MS;
+    prev.current = openCount;
+  }, [openCount]);
+  useEffect(() => {
+    const swallow = (e) => {
+      if (Date.now() > until.current || !(e.detail >= 2)) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('.vu-scrim')) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('click', swallow, true);
+    window.addEventListener('dblclick', swallow, true);
+    return () => {
+      window.removeEventListener('click', swallow, true);
+      window.removeEventListener('dblclick', swallow, true);
+    };
+  }, []);
 }
 
 /* ---- toast --------------------------------------------------------------- */
@@ -86,7 +126,7 @@ function Toast({ toast }) {
         ) : null}
       </div>
       <button type="button" className="vu-toast-x" aria-label="Dismiss" onClick={() => dismissToast(toast.id)}>
-        <Icon name="x" size={13} />
+        <Icon name="x" size={15} />
       </button>
     </div>
   );
@@ -160,13 +200,13 @@ function Modal({ entry }) {
         aria-labelledby={entry.title ? titleId : undefined}
       >
         {entry.title ? (
-          <div style={S('padding:22px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:16px')}>
-            <div style={S('min-width:0;overflow-wrap:anywhere')}>
-              <div id={titleId} style={S('font:600 19px/1.25 Geist;letter-spacing:-0.03em')}>
+          <div className="vu-dialog-head" style={S('padding:24px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:16px')}>
+            <div style={S('flex:1;min-width:0;overflow-wrap:anywhere')}>
+              <div id={titleId} style={S(`font:600 21px/1.2 ${F.display};letter-spacing:-0.015em;color:${C.ink}`)}>
                 {entry.title}
               </div>
               {entry.subtitle ? (
-                <div style={S('margin-top:7px;font:450 13px/1.5 Geist;color:#6B635C;text-wrap:pretty')}>{entry.subtitle}</div>
+                <div style={S(`margin-top:6px;font:400 14px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{entry.subtitle}</div>
               ) : null}
             </div>
             {entry.dismissable !== false ? (
@@ -176,9 +216,9 @@ function Modal({ entry }) {
                 aria-label="Close"
                 className={cx(H.icon, H.press)}
                 onClick={() => close('button')}
-                style={S('flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#8A8179;cursor:pointer;transition:background .16s ease, color .16s ease')}
+                style={S(`flex:none;width:36px;height:36px;margin:-6px -8px 0 0;border-radius:10px;display:grid;place-items:center;color:${C.ink2};cursor:pointer;transition:background .16s ease, color .16s ease`)}
               >
-                <Icon name="x" size={15} />
+                <Icon name="x" size={20} />
               </button>
             ) : null}
           </div>
@@ -187,13 +227,13 @@ function Modal({ entry }) {
         {entry.kind === 'confirm' ? (
           <Confirm entry={entry} padTop={entry.title ? '18px' : '24px'} />
         ) : (
-          <div style={S(`padding:${entry.title ? '18px' : '24px'} 24px ${footer ? '18px' : '24px'}`)}>
+          <div className="vu-dialog-body" style={S(`padding:${entry.title ? '18px' : '24px'} 24px ${footer ? '18px' : '24px'}`)}>
             {Body ? <Body api={api} /> : entry.body}
           </div>
         )}
 
         {entry.kind === 'confirm' ? null : footer ? (
-          <div style={S('padding:16px 24px;border-top:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:flex-end;gap:10px;border-radius:0 0 18px 18px')}>
+          <div className="vu-dialog-foot" style={S(`padding:16px 24px 22px;border-top:1px solid ${C.line};display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap`)}>
             {typeof footer === 'function' ? footer(api) : footer}
           </div>
         ) : null}
@@ -230,8 +270,8 @@ function Confirm({ entry, padTop }) {
 
   return (
     <>
-      <div style={S(`padding:${padTop} 24px 18px`)}>
-        {entry.body ? <div style={S('font:450 14px/1.6 Geist;color:#57504A;text-wrap:pretty')}>{entry.body}</div> : null}
+      <div className="vu-dialog-body" style={S(`padding:${padTop} 24px 18px`)}>
+        {entry.body ? <div style={S(`font:400 15px/1.55 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{entry.body}</div> : null}
         {need ? (
           <div style={S(entry.body ? 'margin-top:16px' : '')} id={`${entry.id}-require`}>
             <Field
@@ -250,23 +290,25 @@ function Confirm({ entry, padTop }) {
           </div>
         ) : null}
       </div>
-      <div className="vu-dialog-foot" style={S('padding:16px 24px;border-top:1px solid #F1EBE4;background:#FCFAF8;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;border-radius:0 0 18px 18px')}>
-        <SecondaryButton h={40} px={16} r={11} fs={14} onClick={() => finish(false)}>
+      <div className="vu-dialog-foot" style={S('padding:6px 24px 24px;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap')}>
+        <SecondaryButton onClick={() => finish(false)}>
           {entry.cancelLabel}
         </SecondaryButton>
         <button
           type="button"
           data-autofocus={need ? undefined : true}
           aria-describedby={need && !matches ? `${entry.id}-require` : undefined}
-          className={cx(H.press, entry.tone === 'danger' ? 'h-danger-solid' : H.primary, shake && 'vu-shake')}
+          className={cx('vu-btn', H.press, entry.tone === 'danger' ? 'vu-btn-destroy' : 'vu-btn-primary', shake && 'vu-shake')}
           onClick={tryConfirm}
           style={s(
             'display:inline-flex;align-items:center;gap:9px;white-space:nowrap;flex:none',
-            'padding:0 18px;height:40px;border-radius:11px',
-            'border:1px solid #A8482A',
-            `background:${entry.tone === 'danger' ? '#A8482A' : GRAD}`,
-            'color:#fff;font:600 14px/1 Geist;cursor:pointer',
-            matches ? '' : 'opacity:.55',
+            'padding:0 18px;height:44px;border-radius:10px',
+            // Until the typed text matches, it wears the shared disabled look
+            // (mist fill, ink-3 label) but stays clickable so it can shake.
+            matches
+              ? `border:1px solid ${entry.tone === 'danger' ? C.emberDeep : C.ember};background:${entry.tone === 'danger' ? C.emberDeep : C.ember};color:#fff`
+              : `border:1px solid ${C.mist};background:${C.mist};color:${C.ink3}`,
+            `font:600 15px/1 ${F.body};cursor:pointer`,
             'transition:background .16s ease, transform .16s ease, opacity .16s ease'
           )}
         >
@@ -278,6 +320,18 @@ function Confirm({ entry, padTop }) {
 }
 
 /* ---- anchored menu ------------------------------------------------------- */
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/** The next keyboard stop after `el` in document order, skipping hidden ones and open menus. */
+function nextFocusable(el) {
+  const all = Array.from(document.querySelectorAll(FOCUSABLE)).filter(
+    (n) => !n.closest('[role="menu"]') && n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden' && n.tabIndex >= 0
+  );
+  const after = all.find((n) => n !== el && !el.contains(n) && el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return after || null;
+}
 
 function Menu({ menu }) {
   const ref = useRef(null);
@@ -312,6 +366,17 @@ function Menu({ menu }) {
       if (ref.current && !ref.current.contains(e.target)) closeMenu();
     };
     const onKey = (e) => {
+      if (e.key === 'Tab') {
+        // Tab leaves the menu: close it and carry on from the control that
+        // opened it, the way a native select behaves.
+        if (!ref.current || !ref.current.contains(document.activeElement)) return;
+        e.preventDefault();
+        const trigger = menu.returnFocus && menu.returnFocus.isConnected ? menu.returnFocus : null;
+        const target = trigger ? (e.shiftKey ? trigger : nextFocusable(trigger) || trigger) : null;
+        closeMenu();
+        if (target) target.focus();
+        return;
+      }
       const items = ref.current ? Array.from(ref.current.querySelectorAll('[data-menu-item]:not([disabled])')) : [];
       if (!items.length) return;
       const i = items.indexOf(document.activeElement);
@@ -323,13 +388,37 @@ function Menu({ menu }) {
         items[(i - 1 + items.length) % items.length].focus();
       }
     };
+    // Focus moving anywhere outside the menu (a screen reader's virtual
+    // cursor, a script) closes it too, so no stale menu is left open to
+    // swallow the next Escape. Checked a tick later, because opening a menu
+    // can pass focus through its trigger on the way in.
+    let focusTimer = 0;
+    const onFocusIn = (e) => {
+      if (!ref.current || ref.current.contains(e.target)) return;
+      clearTimeout(focusTimer);
+      focusTimer = setTimeout(() => {
+        const a = document.activeElement;
+        if (ref.current && a && a !== document.body && !ref.current.contains(a)) closeMenu();
+      }, 0);
+    };
     document.addEventListener('mousedown', outside, true);
     document.addEventListener('keydown', onKey, true);
+    document.addEventListener('focusin', onFocusIn, true);
     return () => {
       document.removeEventListener('mousedown', outside, true);
       document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('focusin', onFocusIn, true);
+      clearTimeout(focusTimer);
     };
   }, [menu]);
+
+  // An icon earns its place only when it tells an item apart. One that
+  // repeats on several items (a flag on every project, a clipboard on every
+  // template) is decoration, so it's left out; unique ones (the + on "New
+  // project", the account menu's icons) stay.
+  const iconCount = {};
+  for (const it of menu.items) if (!it.sep && typeof it.icon === 'string') iconCount[it.icon] = (iconCount[it.icon] || 0) + 1;
+  const iconFor = (it) => (typeof it.icon === 'string' && iconCount[it.icon] > 1 ? null : it.icon);
 
   return (
     <div ref={ref} className="vu-menu" role="menu" style={s(`left:${pos.left}px`, `top:${pos.top}px`)}>
@@ -350,14 +439,14 @@ function Menu({ menu }) {
               menu.onPick && menu.onPick(it.key, it);
             }}
           >
-            {renderIcon(it.icon, 15) ? (
-              <span aria-hidden="true" style={S('display:grid;place-items:center;width:16px;opacity:.7')}>
-                {renderIcon(it.icon, 15)}
+            {renderIcon(iconFor(it), 18) ? (
+              <span aria-hidden="true" style={S('display:grid;place-items:center;width:18px;color:inherit;opacity:.8')}>
+                {renderIcon(iconFor(it), 18)}
               </span>
             ) : null}
             <span style={S('flex:1')}>{it.label}</span>
             {it.checked ? (
-              <span style={S('color:#C2603C')}>
+              <span style={S(`color:${C.ink}`)}>
                 <Icon name="check" size={14} label="Selected" />
               </span>
             ) : null}

@@ -7,6 +7,7 @@
 
 import { useLayoutEffect, useRef } from 'react';
 import { S } from '../lib/style.js';
+import { C, F } from '../lib/tokens.js';
 import { useSnapshot, storageAvailable } from '../lib/store.js';
 
 /* Publishes the banner's height as --vu-banner-h on <html>, so the mobile bar,
@@ -55,7 +56,7 @@ export default function OfflineBanner() {
       role="status"
       className="vu-noprint"
       style={S(
-        'position:fixed;z-index:90;top:0;left:0;right:0;padding:9px 16px;text-align:center;background:#1F1B18;color:#F1EBE4;font:500 12px/1.4 Geist;letter-spacing:-0.01em'
+        `position:fixed;z-index:90;top:0;left:0;right:0;padding:10px 16px;text-align:center;background:${C.ink};color:#fff;font:500 13px/1.4 ${F.body}`
       )}
     >
       {text}

@@ -1,17 +1,25 @@
 'use client';
 
 /* ==========================================================================
-   AppShell.jsx, the app chrome (design: the `inApp` two-column grid)
+   AppShell.jsx, the app chrome.
+
+   >= 1180px: a 248px white sidebar (sections, your projects, Saved and
+   Notifications, the account button). Below that: a top bar (logo, Saved,
+   Notifications, menu), a bottom tab bar with the five sections, and the
+   sidebar as a drawer opened from the menu button. Layout lives in the
+   .vu-app-shell / .vu-sidebar / .vu-mobilebar / .vu-tabbar classes in
+   globals.css.
 
    Signed out (Discover is public), the sidebar keeps the same layout but
    drops the account's own links and offers Sign in / Create account, both
    carrying ?next= back to the page the visitor is on.
    ========================================================================== */
 
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../lib/style.js';
+import { C, F, CAUSE } from '../lib/tokens.js';
 import { Avatar, Icon } from './ui.jsx';
 import { useSnapshot, useHydrated, updateEphemeral, eph } from '../lib/store.js';
 import { sameSitePath } from '../lib/safePath.js';
@@ -28,10 +36,11 @@ function WeeksInARow({ weeks }) {
   return (
     <Link
       href="/profile"
-      className={H.nav}
-      style={S('display:flex;align-items:center;gap:10px;padding:10px;border-radius:9px;color:#6B635C;font:450 13px/1.2 Geist;transition:background .16s ease')}
+      aria-label={`${weeks} ${weeks === 1 ? 'week' : 'weeks'} in a row, volunteering streak`}
+      className="vu-proj-item"
+      style={S(`gap:10px;font:500 13px/1.2 ${F.body}`)}
     >
-      <Icon name="calendar" size={15} />
+      <Icon name="calendar" size={16} />
       <span>
         {weeks} {weeks === 1 ? 'week' : 'weeks'} in a row
       </span>
@@ -41,7 +50,7 @@ function WeeksInARow({ weeks }) {
 
 const SIDE_NAV = [
   { k: 'home', label: 'Home', icon: 'home', href: '/app' },
-  { k: 'discover', label: 'Discover', icon: 'search', href: '/discover' },
+  { k: 'discover', label: 'Discover', icon: 'compass', href: '/discover' },
   { k: 'crew', label: 'My crew', icon: 'users', href: '/crew' },
   { k: 'lead', label: 'Lead a project', icon: 'flag', href: '/lead' },
   { k: 'profile', label: 'Profile', icon: 'user', href: '/profile' },
@@ -50,8 +59,11 @@ const SIDE_NAV = [
 /* What a visitor who isn't signed in sees: the public pages only. */
 const SIDE_NAV_SIGNED_OUT = [
   { k: 'home', label: 'Home', icon: 'home', href: '/' },
-  { k: 'discover', label: 'Discover', icon: 'search', href: '/discover' },
+  { k: 'discover', label: 'Discover', icon: 'compass', href: '/discover' },
 ];
+
+/* Bottom tab bar labels on phones ("Lead a project" is too long for a tab). */
+const TAB_LABEL = { lead: 'Lead' };
 
 /** `?next=` pointing back at this page, so signing in returns the visitor here. */
 function nextQuery(pathname, search) {
@@ -65,8 +77,8 @@ function AuthLinks({ pathname, search, compact }) {
     return (
       <Link
         href={`/signin${q}`}
-        className={cx(H.secondary, H.press)}
-        style={S('margin-left:auto;display:inline-flex;align-items:center;height:36px;padding:0 14px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;font:600 13px/1 Geist;color:#1A1714;white-space:nowrap')}
+        className={cx('vu-btn', 'vu-btn-outline', H.press)}
+        style={S(`display:inline-flex;align-items:center;height:38px;padding:0 14px;border-radius:10px;border:1px solid ${C.line2};background:#fff;font:600 14px/1 ${F.body};color:${C.ink};white-space:nowrap`)}
       >
         Sign in
       </Link>
@@ -74,18 +86,18 @@ function AuthLinks({ pathname, search, compact }) {
   }
   return (
     <div style={S('display:flex;flex-direction:column;gap:8px;padding:0 4px')}>
-      <p style={S('margin:0 0 4px;padding:0 6px;font:450 13px/1.4 Geist;color:#6B635C')}>Sign in to apply and save opportunities.</p>
+      <p style={S(`margin:0 0 4px;padding:0 6px;font:400 13px/1.45 ${F.body};color:${C.ink2}`)}>Sign in to apply. Anything you save now moves to your account when you do.</p>
       <Link
         href={`/signup${q}`}
-        className={cx(H.primary, H.press)}
-        style={S('display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;background:#C2603C;color:#fff;font:600 14px/1 Geist')}
+        className={cx('vu-btn', 'vu-btn-primary', H.press)}
+        style={S(`display:flex;align-items:center;justify-content:center;height:44px;border-radius:10px;background:${C.ember};color:#fff;font:600 15px/1 ${F.body}`)}
       >
         Create account
       </Link>
       <Link
         href={`/signin${q}`}
-        className={cx(H.secondary, H.press)}
-        style={S('display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;color:#1A1714;font:600 14px/1 Geist')}
+        className={cx('vu-btn', 'vu-btn-outline', H.press)}
+        style={S(`display:flex;align-items:center;justify-content:center;height:44px;border-radius:10px;border:1px solid ${C.line2};background:#fff;color:${C.ink};font:600 15px/1 ${F.body}`)}
       >
         Sign in
       </Link>
@@ -108,30 +120,20 @@ function SignedOutLinks({ pathname, compact }) {
   );
 }
 
-const navItemStyle = (on) =>
-  s(
-    'display:flex;align-items:center;gap:10px;padding:10px 10px;border-radius:9px;cursor:pointer',
-    `background:${on ? '#F2ECE5' : 'transparent'}`,
-    `color:${on ? '#1A1714' : '#6B635C'}`,
-    'font-family:Geist;font-size:14px;line-height:1',
-    `font-weight:${on ? '600' : '450'}`,
-    'transition:background .16s ease'
-  );
-
-const groupLabel = S('padding:0 10px;font:500 12px/1 Geist;color:#8A8179');
-
 function CountPill({ n, tone }) {
   if (!n) return null;
+  return <span className={tone === 'brand' ? 'vu-badge vu-badge--ember' : 'vu-badge'}>{n}</span>;
+}
+
+function NavItem({ href, on, icon, children, label, badge }) {
   return (
-    <span
-      style={s(
-        'margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;display:inline-grid;place-items:center',
-        "font:500 11px/1 'Geist Mono',monospace",
-        tone === 'brand' ? 'background:#C2603C;color:#fff' : 'background:#F2ECE5;color:#57504A'
-      )}
-    >
-      {n}
-    </span>
+    <Link href={href} aria-current={on ? 'page' : undefined} aria-label={label} className="vu-nav-item">
+      <span aria-hidden="true" className="vu-nav-ic">
+        <Icon name={icon} size={20} />
+      </span>
+      {children}
+      {badge}
+    </Link>
   );
 }
 
@@ -140,7 +142,9 @@ export function navKeyFor(pathname) {
   if (/^\/crew/.test(pathname)) return 'crew';
   if (/^\/(discover|volunteers|opportunity|apply|friends|projects)/.test(pathname)) return 'discover';
   if (/^\/(lead|create)/.test(pathname)) return 'lead';
-  if (/^\/(profile|settings)/.test(pathname)) return 'profile';
+  // Settings is reached from the account menu and has no section of its own,
+  // so nothing lights up there (CARDS 5). Profile stays for /profile only.
+  if (/^\/profile/.test(pathname)) return 'profile';
   return '';
 }
 
@@ -165,12 +169,67 @@ export default function AppShell({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // Escape closes the open drawer. Menus and dialogs take Escape first and
-  // stop it, so closing one of those leaves the drawer open.
+  const toggleRef = useRef(null);
+
+  // Below 1180px the sidebar is an off-screen drawer. While it is closed it
+  // is inert: no Tab stops and nothing for a screen reader on a panel nobody
+  // can see.
+  const [drawerMode, setDrawerMode] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia('(max-width: 1179px)');
+    const on = () => setDrawerMode(mq.matches);
+    on();
+    if (mq.addEventListener) mq.addEventListener('change', on);
+    else mq.addListener(on);
+    return () => (mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on));
+  }, []);
+
+  // The closed drawer leaves the name and grade out of its account button, so
+  // the off-screen copy of the user's name never shadows the one the page
+  // itself shows. They stay for the slide-out (--vu-dur-3 is 240ms).
+  const [drawerAccount, setDrawerAccount] = useState(false);
+  useEffect(() => {
+    if (ephemeral.sidebarOpen) {
+      setDrawerAccount(true);
+      return undefined;
+    }
+    const t = setTimeout(() => setDrawerAccount(false), 260);
+    return () => clearTimeout(t);
+  }, [ephemeral.sidebarOpen]);
+  const showAccount = !drawerMode || ephemeral.sidebarOpen || drawerAccount;
+
+  // While the drawer is open (phones and tablets), Tab cycles between the
+  // menu button and the drawer, so focus never lands on the page under the
+  // scrim. Escape closes the drawer and puts focus back on the menu button.
+  // Menus and dialogs take Escape first and stop it, so closing one of
+  // those leaves the drawer open.
   useEffect(() => {
     if (!ephemeral.sidebarOpen) return undefined;
+    const isDrawer = () => typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 1179px)').matches;
+    const stops = () => {
+      const side = document.getElementById('vu-sidebar');
+      const inside = side
+        ? Array.from(side.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(
+            (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+          )
+        : [];
+      return toggleRef.current ? [toggleRef.current, ...inside] : inside;
+    };
     const onKey = (e) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && !hasOverlay()) updateEphemeral((x) => { x.sidebarOpen = false; });
+      if (e.defaultPrevented || hasOverlay()) return;
+      if (e.key === 'Escape') {
+        updateEphemeral((x) => { x.sidebarOpen = false; });
+        if (toggleRef.current) toggleRef.current.focus({ preventScroll: true });
+        return;
+      }
+      if (e.key !== 'Tab' || !isDrawer()) return;
+      const list = stops();
+      if (!list.length) return;
+      const i = list.indexOf(document.activeElement);
+      e.preventDefault();
+      const next = i === -1 ? (e.shiftKey ? list[list.length - 1] : list[0]) : list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length];
+      next.focus();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -243,95 +302,83 @@ export default function AppShell({ children }) {
     );
   };
 
+  const savedCount = (state.saved || []).length;
+  const tabItems = navItems;
+
   return (
-    <div className="vu-app-shell vu-fixed-width" onClickCapture={onLinkClickCapture} style={S('display:grid;grid-template-columns:236px 1fr;min-height:100vh;min-width:1180px;background:#FAF8F5')}>
-      {/* mobile bar (hidden at >= 1180px, so the design is untouched) */}
+    <div className="vu-app-shell" onClickCapture={onLinkClickCapture}>
+      {/* phone and tablet top bar (hidden at >= 1180px) */}
       <div className="vu-mobilebar vu-noprint">
+        <Link href={homeHref} aria-label="VolunteerU home" className="vu-brand">
+          <Logo size={24} title="" />
+          <span>VolunteerU</span>
+        </Link>
+        {signedOut ? (
+          <SignedOutLinks pathname={pathname} compact />
+        ) : authed ? (
+          <>
+            <Link
+              href="/saved"
+              aria-label={savedCount ? `Saved, ${savedCount}` : 'Saved'}
+              aria-current={pathname.startsWith('/saved') ? 'page' : undefined}
+              className="vu-iconbtn"
+            >
+              <Icon name="bookmark" size={22} />
+            </Link>
+            <Link
+              href="/notifications"
+              aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
+              aria-current={pathname.startsWith('/notifications') ? 'page' : undefined}
+              className="vu-iconbtn"
+            >
+              <Icon name="bell" size={22} />
+              {unread ? (
+                <span aria-hidden="true" className="vu-iconbtn-dot">
+                  {unread}
+                </span>
+              ) : null}
+            </Link>
+          </>
+        ) : null}
         <button
+          ref={toggleRef}
           type="button"
-          className="vu-burger"
+          className="vu-iconbtn"
           aria-label={ephemeral.sidebarOpen ? 'Close navigation' : 'Open navigation'}
           aria-expanded={ephemeral.sidebarOpen ? 'true' : 'false'}
           aria-controls="vu-sidebar"
           onClick={() => updateEphemeral((e) => { e.sidebarOpen = !e.sidebarOpen; })}
         >
-          <Icon name={ephemeral.sidebarOpen ? 'x' : 'menu'} size={18} />
+          <Icon name={ephemeral.sidebarOpen ? 'x' : 'menu'} size={22} />
         </button>
-        <Link href={homeHref} aria-label="VolunteerU home" style={S('display:flex;align-items:center;gap:8px;color:#1A1714')}>
-          <Logo size={22} title="" />
-          <span style={S('font:600 15px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</span>
-        </Link>
-        {signedOut ? (
-          <SignedOutLinks pathname={pathname} compact />
-        ) : authed ? (
-          <Link
-            href="/notifications"
-            aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
-            aria-current={pathname.startsWith('/notifications') ? 'page' : undefined}
-            style={S('margin-left:auto;position:relative;width:36px;height:36px;border-radius:10px;border:1px solid #E4DDD4;background:#fff;display:grid;place-items:center;color:#57504A')}
-          >
-            <Icon name="bell" size={17} />
-            {unread ? (
-              <span aria-hidden="true" style={S('position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#C2603C;color:#fff;font:600 9px/16px Geist;text-align:center')}>{unread}</span>
-            ) : null}
-          </Link>
-        ) : null}
       </div>
 
-      <div
-        id="vu-sidebar"
-        className="vu-sidebar"
-        data-open={ephemeral.sidebarOpen ? 'true' : 'false'}
-        style={S('position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid #E8E1D9;background:#fff;padding:24px 16px;display:flex;flex-direction:column;justify-content:space-between;gap:18px')}
-      >
+      <div id="vu-sidebar" className="vu-sidebar" data-open={ephemeral.sidebarOpen ? 'true' : 'false'} inert={drawerMode && !ephemeral.sidebarOpen ? true : undefined}>
         <div>
-          <Link href={homeHref} aria-label="VolunteerU home" className="vu-hide-mobile" style={S('display:flex;align-items:center;gap:9px;padding:0 8px 22px;cursor:pointer;color:inherit')}>
-            <Logo size={24} title="" />
-            <div style={S('font:600 16px/1 Geist;letter-spacing:-0.03em')}>VolunteerU</div>
+          <Link href={homeHref} aria-label="VolunteerU home" className="vu-brand vu-hide-mobile">
+            <Logo size={28} title="" />
+            <span>VolunteerU</span>
           </Link>
           <nav aria-label="Sections" style={S('display:flex;flex-direction:column;gap:2px')}>
-            {navItems.map((n) => {
-              const on = activeKey === n.k;
-              return (
-                <Link
-                  key={n.k}
-                  href={n.href}
-                  aria-current={on ? 'page' : undefined}
-                  className={on ? undefined : H.nav}
-                  style={navItemStyle(on)}
-                >
-                  <span aria-hidden="true" style={s('display:grid;place-items:center', on ? 'color:#C2603C' : 'opacity:.75')}>
-                    <Icon name={n.icon} size={16} />
-                  </span>
-                  {n.label}
-                </Link>
-              );
-            })}
+            {navItems.map((n) => (
+              <NavItem key={n.k} href={n.href} on={activeKey === n.k} icon={n.icon}>
+                {n.label}
+              </NavItem>
+            ))}
           </nav>
 
           {(() => {
             const mine = authed ? state.projects.filter((p) => !p.archived) : [];
             if (!mine.length) return null;
             return (
-              <div style={S('margin-top:18px')}>
-                <div style={groupLabel}>Your projects</div>
-                <div style={S('margin-top:10px;display:flex;flex-direction:column;gap:2px')}>
+              <div style={S('margin-top:22px')}>
+                <div className="vu-nav-group">Your projects</div>
+                <div style={S('margin-top:8px;display:flex;flex-direction:column;gap:2px')}>
                   {mine.map((p) => {
                     const on = pathname.startsWith(`/lead/${p.id}`);
                     return (
-                      <Link
-                        key={p.id}
-                        href={`/lead/${p.id}/overview`}
-                        aria-current={on ? 'page' : undefined}
-                        className={on ? undefined : H.nav}
-                        style={s(
-                          'display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer;color:inherit;transition:background .16s ease',
-                          `background:${on ? '#F2ECE5' : 'transparent'}`,
-                          `font:${on ? '600' : '450'} 13px/1.2 Geist`,
-                          `color:${on ? '#1A1714' : '#6B635C'}`
-                        )}
-                      >
-                        <span aria-hidden="true" style={s('width:7px;height:7px;border-radius:50%;flex:none', `background:${p.orgType === 'team' ? '#5B6BB0' : '#C2603C'}`)} />
+                      <Link key={p.id} href={`/lead/${p.id}/overview`} aria-current={on ? 'page' : undefined} className="vu-proj-item">
+                        <span aria-hidden="true" style={s('width:8px;height:8px;border-radius:50%;flex:none', `background:${p.orgType === 'team' ? CAUSE.civic.fg : C.confirmed}`)} />
                         <span className="vu-trunc" style={S('min-width:0')}>{p.name}</span>
                       </Link>
                     );
@@ -341,85 +388,83 @@ export default function AppShell({ children }) {
             );
           })()}
 
-          {authed ? (<>
-          <div style={S('height:1px;background:#EFE9E2;margin:18px 8px')} />
-          <div style={S('display:flex;flex-direction:column;gap:2px')}>
-            {(() => {
-              const on = pathname.startsWith('/saved');
-              return (
-                <Link href="/saved" aria-current={on ? 'page' : undefined} className={on ? undefined : H.nav} style={navItemStyle(on)}>
-                  <span aria-hidden="true" style={s('display:grid;place-items:center', on ? 'color:#C2603C' : 'opacity:.75')}>
-                    <Icon name="bookmark" size={16} />
-                  </span>
+          {authed ? (
+            <>
+              <div className="vu-nav-sep" />
+              <div style={S('display:flex;flex-direction:column;gap:2px')}>
+                <NavItem href="/saved" on={pathname.startsWith('/saved')} icon="bookmark" badge={<CountPill n={savedCount} />}>
                   Saved
-                  <CountPill n={state.saved.length} />
-                </Link>
-              );
-            })()}
-            {(() => {
-              const on = pathname.startsWith('/notifications');
-              return (
-                <Link
+                </NavItem>
+                <NavItem
                   href="/notifications"
-                  aria-current={on ? 'page' : undefined}
-                  aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
-                  className={on ? undefined : H.nav}
-                  style={navItemStyle(on)}
+                  on={pathname.startsWith('/notifications')}
+                  icon="bell"
+                  label={`Notifications${unread ? `, ${unread} unread` : ''}`}
+                  badge={<CountPill n={unread} tone="brand" />}
                 >
-                  <span aria-hidden="true" style={s('display:grid;place-items:center', on ? 'color:#C2603C' : 'opacity:.75')}>
-                    <Icon name="bell" size={16} />
-                  </span>
                   Notifications
-                  <CountPill n={unread} tone="brand" />
-                </Link>
-              );
-            })()}
-          </div>
-          </>) : null}
+                </NavItem>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {signedOut ? (
           <SignedOutLinks pathname={pathname} />
         ) : authed ? (
-        <div>
-          <WeeksInARow weeks={streak} />
-          <button
-            type="button"
-            aria-label="Account menu"
-            aria-haspopup="menu"
-            className={cx(H.nav, H.press)}
-            onClick={openAccountMenu}
-            style={S('margin-top:8px;display:flex;width:100%;align-items:center;gap:10px;padding:8px;border-radius:10px;cursor:pointer;transition:background .16s ease')}
-          >
-            <div style={S('width:30px;height:30px;border-radius:50%;overflow:hidden;flex:none')}>
-              <Avatar name={state.account.name} src={state.account.avatar} fs={12} />
-            </div>
-            <div style={S('min-width:0;flex:1;text-align:left')}>
-              <div className="vu-trunc" style={S('font:600 13px/1.2 Geist')}>{state.account.name || 'Your account'}</div>
-              <div className="vu-trunc" style={S('font:450 11px/1.2 Geist;color:#8A8179;margin-top:2px')}>
-                {[state.account.grade ? `Grade ${state.account.grade}` : null, String(state.account.city || '').split(',')[0] || null].filter(Boolean).join(', ') || 'Set up your profile'}
+          <div>
+            <WeeksInARow weeks={streak} />
+            <button type="button" aria-label="Account menu" aria-haspopup="menu" className={cx('vu-me', H.press)} onClick={openAccountMenu} style={S('margin-top:6px')}>
+              <div style={S('width:38px;height:38px;border-radius:50%;overflow:hidden;flex:none')}>
+                <Avatar name={state.account.name} src={state.account.avatar} fs={14} />
               </div>
-            </div>
-            <span aria-hidden="true" style={S('color:#A9A097')}>
-              <Icon name="more" size={16} stroke={2.5} />
-            </span>
-          </button>
-        </div>
+              <div style={S('min-width:0;flex:1')}>
+                {showAccount ? (
+                  <>
+                    <div className="vu-trunc" style={S(`font:600 14px/1.2 ${F.body};color:${C.ink}`)}>{state.account.name || 'Your account'}</div>
+                    <div className="vu-trunc" style={S(`margin-top:3px;font:400 12.5px/1.2 ${F.body};color:${C.ink2}`)}>
+                      {[state.account.grade ? `Grade ${state.account.grade}` : null, String(state.account.city || '').split(',')[0] || null].filter(Boolean).join(', ') || 'Set up your profile'}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              <span aria-hidden="true" style={S(`color:${C.ink3}`)}>
+                <Icon name="more" size={18} stroke={2.25} />
+              </span>
+            </button>
+          </div>
         ) : null}
       </div>
 
       {ephemeral.sidebarOpen ? (
         <div
           aria-hidden="true"
-          onClick={closeDrawer}
+          onClick={() => {
+            closeDrawer();
+            if (toggleRef.current) toggleRef.current.focus({ preventScroll: true });
+          }}
           className="vu-drawer-scrim"
-          style={S('position:fixed;inset:0;z-index:199;background:rgba(31,27,24,.3)')}
-        />
+          style={S(`position:fixed;inset:0;z-index:199;background:${C.scrim}`)} />
       ) : null}
 
       <div id="vu-main" className="vu-main-pad">
         {children}
       </div>
+
+      {/* phone and tablet tab bar (hidden at >= 1180px) */}
+      {hydrated ? (
+        <nav aria-label="Main" className="vu-tabbar vu-noprint" style={{ '--vu-tabs': tabItems.length }}>
+          {tabItems.map((n) => {
+            const on = activeKey === n.k;
+            return (
+              <Link key={n.k} href={n.href} aria-current={on ? 'page' : undefined} className="vu-tab-item">
+                <Icon name={n.icon} size={24} stroke={on ? 1.75 : 1.5} />
+                <span>{TAB_LABEL[n.k] || n.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      ) : null}
       <Tutorial />
       <FounderTutorial />
     </div>
