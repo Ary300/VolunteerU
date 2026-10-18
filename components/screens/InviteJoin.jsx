@@ -72,13 +72,15 @@ export default function InviteJoin({ token }) {
   const valid = TOKEN_RX.test(String(token || ''));
   const back = `/invite/${valid ? token : ''}`;
   const nextQ = `?next=${encodeURIComponent(back)}`;
-  // loading | signed-out | joining | problem
+  // loading | signed-out | ready | joining | problem
   const [phase, setPhase] = useState('loading');
   const [preview, setPreview] = useState(null);
   const [problem, setProblem] = useState(null);
   const [nonce, setNonce] = useState(0);
   const started = useRef(false);
 
+  // Opening the link only shows the invite. Joining waits for a click, so a
+  // link someone sends can't put a signed-in visitor on a team unasked.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -86,30 +88,29 @@ export default function InviteJoin({ token }) {
       const [me, pv] = await Promise.all([myId().catch(() => null), previewInvite(token)]);
       if (!alive) return;
       setPreview(pv.preview);
-      if (!me) {
-        if (pv.failed) { setProblem('failed'); setPhase('problem'); return; }
-        if (!pv.preview) { setProblem('invalid'); setPhase('problem'); return; }
-        setPhase('signed-out');
-        return;
-      }
-      if (started.current) return;
-      started.current = true;
-      setPhase('joining');
-      const res = await claimInvite(token);
-      if (!alive) return;
-      started.current = false;
-      if (res.ok) {
-        const name = pv.preview ? pv.preview.listingName : 'the project';
-        toast({ title: `Joined ${name}`, message: 'You’re on the team. Sign up for the shifts you can make.', tone: 'ok' });
-        router.replace(`/join/${res.listingId}`);
-        return;
-      }
-      if (res.reason === 'signed_out') { setPhase(pv.preview ? 'signed-out' : 'problem'); if (!pv.preview) setProblem('invalid'); return; }
-      setProblem(res.reason in PROBLEMS ? res.reason : 'failed');
-      setPhase('problem');
+      if (pv.failed) { setProblem('failed'); setPhase('problem'); return; }
+      if (!pv.preview) { setProblem('invalid'); setPhase('problem'); return; }
+      setPhase(me ? 'ready' : 'signed-out');
     })();
     return () => { alive = false; };
-  }, [token, valid, nonce, router]);
+  }, [token, valid, nonce]);
+
+  async function join() {
+    if (started.current) return;
+    started.current = true;
+    setPhase('joining');
+    const res = await claimInvite(token);
+    started.current = false;
+    if (res.ok) {
+      const name = preview ? preview.listingName : 'the project';
+      toast({ title: `Joined ${name}`, message: 'You’re on the team. Sign up for the shifts you can make.', tone: 'ok' });
+      router.replace(`/join/${res.listingId}`);
+      return;
+    }
+    if (res.reason === 'signed_out') { setPhase('signed-out'); return; }
+    setProblem(res.reason in PROBLEMS ? res.reason : 'failed');
+    setPhase('problem');
+  }
 
   if (phase === 'loading' || phase === 'joining') {
     return (
@@ -118,6 +119,25 @@ export default function InviteJoin({ token }) {
           <h1 style={S(H1)}>{phase === 'joining' && preview ? `Joining ${preview.listingName}` : 'Opening your invite'}</h1>
           <p style={S(BODY)}>{phase === 'joining' ? 'Adding you to the team.' : 'Checking the link.'}</p>
         </div>
+      </Page>
+    );
+  }
+
+  if (phase === 'ready' && preview) {
+    const who = preview.inviterFirstName;
+    return (
+      <Page>
+        <h1 style={S(H1)}>
+          {who ? `${who} added you to ${preview.listingName}` : `You're invited to ${preview.listingName}`}
+        </h1>
+        {preview.orgName ? <p style={S(`margin:10px 0 0;font:600 15px/1.4 ${F.body};color:${C.ink}`)}>{preview.orgName}</p> : null}
+        <p style={S(BODY)}>
+          Join with the account you're signed in to. You'll see the shifts, get messages from {who || 'the lead'} and have your hours tracked on your profile.
+        </p>
+        <Actions>
+          <Button variant="primary" size="lg" onClick={join}>Join the team</Button>
+          <Button href="/" variant="outline" size="lg">Not now</Button>
+        </Actions>
       </Page>
     );
   }
@@ -139,7 +159,7 @@ export default function InviteJoin({ token }) {
           <Button href={`/signin${nextQ}`} variant="outline" size="lg">Sign in</Button>
         </Actions>
         <p style={S(`margin:20px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
-          Already have an account? Sign in and you'll join with it.
+          Already have an account? Sign in, then join with it.
         </p>
       </Page>
     );
