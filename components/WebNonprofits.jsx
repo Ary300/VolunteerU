@@ -533,6 +533,10 @@ export default function WebNonprofits({ q = '', near = '', causes = [], kind = '
   const pickFrom = preview && !term ? (nearSort ? ordered : ordered.slice(0, PREVIEW_POOL)).filter(isVolunteerPlace) : ordered;
   const rows = pickFrom.slice(0, preview || limit);
   const rowsKey = rows.map((o) => o.ein).join(',');
+  // The map gets every nonprofit the search loaded, even when the list
+  // under it is a short preview, so each one in the area is a dot.
+  const mapRows = preview ? pickFrom : rows;
+  const mapKey = mapRows.map((o) => o.ein).join(',');
   // A nearest-first list waits (briefly) for the addresses before it shows an order.
   const [holdOver, setHoldOver] = useState(false);
   useEffect(() => {
@@ -575,10 +579,10 @@ export default function WebNonprofits({ q = '', near = '', causes = [], kind = '
 
   useEffect(() => {
     if (!onResults) return;
-    onResults(hidden || result.status !== 'done' ? [] : rows);
-    // rowsKey stands in for rows (a new order is a new key).
+    onResults(hidden || result.status !== 'done' ? [] : mapRows);
+    // mapKey stands in for mapRows (a new order is a new key).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result.status, rowsKey, hidden]);
+  }, [result.status, mapKey, hidden]);
 
   function leaving() {
     if (typeof window === 'undefined') return;
