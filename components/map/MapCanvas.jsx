@@ -15,6 +15,10 @@
    The links in an org's popup (volunteer page, website, phone) start loading
    for the dots in view a moment after they land, so a tap rarely waits.
 
+   With `national`, every US nonprofit on the IRS master file draws under
+   all of that as its own layer (nationalLayer.js): count bubbles from the
+   country view in, then dots, opening the same popups.
+
    Controls (top right): zoom in and out, Near me (browser location, a blue
    dot), and Expand when the caller passes onExpand. The scroll wheel zooms
    only once the map has been clicked or focused, so the page never gets
@@ -26,8 +30,9 @@ import { S } from '../../lib/style.js';
 import { C, F, R, SH } from '../../lib/tokens.js';
 import { directionsHref, distanceMiles } from '../../lib/geo.js';
 import { Icon } from '../ui.jsx';
-import { MapPopup, MapListPopup, MapOrgPopup, MapOrgListPopup, pinHtml, dotHtml, dotStyle, warmOrgLinks, NP_RING } from '../vu/MapPins.jsx';
+import { MapPopup, MapListPopup, MapOrgPopup, MapOrgListPopup, MapOrgStackPopup, pinHtml, dotHtml, dotStyle, warmOrgLinks, NP_RING } from '../vu/MapPins.jsx';
 import { loadLeaflet, createBaseMap, INDIANAPOLIS, DEFAULT_ZOOM, FIT_MAX_ZOOM, useReducedMotion } from './leaflet.js';
+import { useNationalLayer, nationalPick, isNationalKey } from './nationalLayer.js';
 
 const POP_GAP = 22; // popup bottom to the pin's center (MapPopup's own offset)
 const POP_EDGE = 10; // room kept between a popup and the map's edge
@@ -76,8 +81,9 @@ const NEAR_ME_ERRORS = {
  * @param {number} [props.notOnMap] listings that couldn't be placed
  * @param {string} [props.ariaLabel]
  * @param {boolean} [props.autoFocus] focus the map once it's drawn (the full-screen map)
+ * @param {boolean} [props.national] draw every US nonprofit under the page's own pins and dots
  */
-export default function MapCanvas({ pins, dots = [], photos, highlight = null, hoverDot = null, picked, onPick, center = null, here = null, onHere, wheel = 'focus', onExpand, notOnMap = 0, ariaLabel = 'Map', autoFocus = false, className, style }) {
+export default function MapCanvas({ pins, dots = [], photos, highlight = null, hoverDot = null, picked, onPick, center = null, here = null, onHere, wheel = 'focus', onExpand, notOnMap = 0, ariaLabel = 'Map', autoFocus = false, national = false, className, style }) {
   const reduced = useReducedMotion();
   const wrapRef = useRef(null);
   const elRef = useRef(null);
@@ -361,6 +367,24 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, dotsKey]);
 
+  /* ---- every nonprofit -------------------------------------------------------- */
+  // The orgs drawn above as the page's own dots stay out of the national layer.
+  const ownEins = useMemo(() => dots.flatMap((d) => (d.orgs && d.orgs.length ? d.orgs : [d]).map((o) => String(o.ein))), [dots]);
+  const nat = useNationalLayer({
+    ready,
+    mapRef,
+    LRef,
+    enabled: national,
+    exclude: ownEins,
+    picked,
+    pickRef,
+    keyboardPick,
+    reduced,
+    onUserMove: () => {
+      userMoved.current = true;
+    },
+  });
+
   /* ---- you are here ---------------------------------------------------------- */
   const hereKey = here ? `${here.lat.toFixed(5)},${here.lng.toFixed(5)}` : '';
   useEffect(() => {
@@ -456,8 +480,9 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
   /* ---- popup ---------------------------------------------------------------- */
   const map = mapRef.current;
   const pickedPin = picked ? pins.find((p) => p.key === picked) || null : null;
-  const pickedDot = picked && !pickedPin ? shown.find((d) => d.key === picked) || dots.find((d) => d.key === picked) || groups.get(picked) || null : null;
-  const target = pickedPin || pickedDot;
+  const pickedNat = picked && !pickedPin && isNationalKey(picked) ? nationalPick(picked) : null;
+  const pickedDot = picked && !pickedPin && !pickedNat ? shown.find((d) => d.key === picked) || dots.find((d) => d.key === picked) || groups.get(picked) || null : null;
+  const target = pickedPin || pickedDot || pickedNat;
 
   // Pan so the open popup sits inside the map, then move keyboard focus into
   // it when a key opened it.
@@ -492,12 +517,45 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
     const size = map.getSize();
     const W = Math.max(1, size.x);
     const H = Math.max(1, size.y);
-    const popW = pickedPin && pickedPin.items.length > 1 ? Math.min(272, W - 2 * POP_EDGE) : Math.min(248, W - 2 * POP_EDGE);
+    const wide = (pickedPin && pickedPin.items.length > 1) || (pickedNat && pickedNat.kind === 'stack');
+    const popW = wide ? Math.min(272, W - 2 * POP_EDGE) : Math.min(248, W - 2 * POP_EDGE);
     const half = popW / 2 + POP_EDGE;
     const x = (Math.min(W - half, Math.max(half, pt.x)) / W) * 100;
     const y = (pt.y / H) * 100;
     const directions = directionsHref(target.point.lat, target.point.lng);
-    if (pickedPin && pickedPin.items.length > 1) {
+    if (pickedNat && pickedNat.kind === 'stack') {
+      const canZoom = !pickedNat.same && map.getZoom() < map.getMaxZoom();
+      popup = (
+        <MapOrgStackPopup
+          key={picked}
+          x={x}
+          y={y}
+          width={popW}
+          listMax={Math.max(120, Math.min(260, H - 150))}
+          n={pickedNat.n}
+          eins={pickedNat.eins}
+          same={pickedNat.same}
+          miles={here ? distanceMiles(here, pickedNat.point) : NaN}
+          directions={pickedNat.same ? directions : ''}
+          onZoom={canZoom ? () => zoomToBox(pickedNat.box) : null}
+        />
+      );
+    } else if (pickedNat) {
+      popup = (
+        <MapOrgPopup
+          key={pickedNat.ein}
+          x={x}
+          y={y}
+          width={popW}
+          ein={pickedNat.ein}
+          name=""
+          cause={pickedNat.cause}
+          miles={here ? distanceMiles(here, pickedNat.point) : NaN}
+          href={`/nonprofits/${pickedNat.ein}`}
+          directions={directions}
+        />
+      );
+    } else if (pickedPin && pickedPin.items.length > 1) {
       const first = pickedPin.items[0];
       popup = (
         <MapListPopup
@@ -578,6 +636,16 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
     map.setView(b.getCenter(), want, { animate: !reduced });
   }
 
+  /** Zoom in on a national bubble's box, as far as the map goes. */
+  function zoomToBox(box) {
+    const L = LRef.current;
+    if (!map || !L || !box) return;
+    userMoved.current = true;
+    pickRef.current(null);
+    const b = L.latLngBounds([box[0], box[1]], [box[2], box[3]]);
+    map.setView(b.getCenter(), Math.min(map.getMaxZoom(), Math.max(map.getZoom() + 1, map.getBoundsZoom(b.pad(0.5)))), { animate: !reduced });
+  }
+
   function zoomBy(d) {
     if (!map) return;
     userMoved.current = true;
@@ -651,7 +719,7 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
       </div>
 
       <div ref={keyRef} style={S('position:absolute;left:12px;top:12px;right:64px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;pointer-events:none;z-index:3')}>
-        <MapKey pins={pins.length > 0 || !dots.length} dots={dots.length > 0 || !pins.length} />
+        <MapKey pins={pins.length > 0 || !(dots.length || nat.active)} dots={dots.length > 0 || !pins.length || nat.active} />
         {notOnMap > 0 ? (
           <span className="vu-map-note" style={S(`max-width:100%;background:#fff;border-radius:${R.pill};box-shadow:${SH.float};padding:7px 12px;font:500 13px/1.25 ${F.body};color:${C.ink2}`)}>
             {notOnMap} {notOnMap === 1 ? "listing isn't" : "listings aren't"} on the map

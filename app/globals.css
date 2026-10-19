@@ -537,7 +537,7 @@ img { border-style:none; }
 /* The small address map: a slimmer credit. The big map lifts its credit above
    any part of the box that's still below the fold (--vu-map-hidden, MapCanvas). */
 .vu-addrmap .leaflet-control-attribution { margin:0 6px 6px 0; padding:2px 7px; font-size:10px; }
-.vu-dmap .leaflet-control-attribution { margin-bottom:calc(8px + var(--vu-map-hidden, 0px)); }
+.vu-dmap .leaflet-control-attribution { margin-bottom:calc(8px + var(--vu-map-hidden, 0px)); max-width:calc(100% - 16px); border-radius:12px; }
 .vu-dmap .leaflet-control-attribution a, .vu-addrmap .leaflet-control-attribution a { color:var(--ink-2); text-decoration:underline; text-underline-offset:2px; }
 .vu-dmap .leaflet-control-attribution a:focus-visible, .vu-addrmap .leaflet-control-attribution a:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
 

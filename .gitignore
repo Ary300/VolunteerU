@@ -40,3 +40,6 @@ CLAUDE.md
 
 # supabase CLI local state
 /supabase/.temp/
+
+# IRS nonprofit names per state, a build input for public/np-points; too big to ship
+public/np-points/names/

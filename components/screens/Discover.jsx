@@ -711,6 +711,9 @@ export default function Discover() {
     nonprofits: view === 'opp' && kind === 'student' ? [] : orgs,
     town: listNear,
     here,
+    // Every US nonprofit as a background layer, until a search narrows the
+    // list; then the map shows only what matched, as before.
+    national: !q && !causes.length && !savedOnly && !(view === 'opp' && kind === 'student'),
   };
 
   // Phones and tablets: the floating Map pill opens the full-screen map.

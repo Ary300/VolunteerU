@@ -22,6 +22,7 @@ import { splitWhen } from '../../lib/format.js';
 import DateBlock from './DateBlock.jsx';
 import { whenParts, Sep } from './ListingCard.jsx';
 import { Icon } from '../ui.jsx';
+import { causeFromNtee } from '../../lib/propublica.js';
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -119,6 +120,36 @@ export function dotHtml(n = 1) {
   const style = dotStyle(n, false);
   const dot = `<span class="${n > 1 ? 'vu-np-dot vu-np-many' : 'vu-np-dot'}"${style ? ` style="${escHtml(style)}"` : ''}>${n > 1 ? escHtml(n > 99 ? '99+' : String(n)) : ''}</span>`;
   return `<span style="position:absolute;left:50%;top:50%">${dot}</span>`;
+}
+
+/** "48", "1.2k", "25k": a count short enough for a bubble. The exact count goes in its label. */
+export function countShort(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  if (v < 1000) return String(v);
+  if (v < 9950) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return `${Math.round(v / 1000)}k`;
+}
+
+/**
+ * The every-nonprofit layer's count bubble (MapCanvas, components/map/nationalLayer.js):
+ * the numbered dot, widened to fit "1.2k" or "135k". `big` is a whole state's
+ * bubble, a size up. Returns { html, size } for a Leaflet divIcon.
+ */
+export function bubbleIcon(n, { big = false, on = false } = {}) {
+  const text = countShort(n);
+  const { style, size } = bubbleStyle(n, { big, on });
+  const html = `<span style="position:absolute;left:50%;top:50%"><span class="vu-np-dot vu-np-many${on ? ' is-on' : ''}" style="${escHtml(style)}">${escHtml(text)}</span></span>`;
+  return { html, size };
+}
+
+/** The bubble's inline style and box, for drawing it or restyling it when picked. */
+export function bubbleStyle(n, { big = false, on = false } = {}) {
+  const text = countShort(n);
+  const h = big ? 30 : 24;
+  const w = Math.max(h, Math.round(text.length * (big ? 8 : 7.2) + 14));
+  const grow = on ? 4 : 0;
+  const style = `${dotStyle(2, on)};width:${w + grow}px;height:${h + grow}px;padding:0;border-radius:999px${big ? `;font-size:13px;border-color:${C.ink}` : ''}`;
+  return { style, size: [w, h] };
 }
 
 /* The ring a nonprofit draws as, here and in the map keys (.vu-np-dot in globals.css). */
@@ -265,6 +296,97 @@ function loadDetail(ein) {
   return details.get(id);
 }
 
+const basics = new Map(); // ein -> Promise<organization|null>
+
+/**
+ * The org's IRS record alone (/api/nonprofits?ein=, no links): its name,
+ * address and cause, for a dot that came with only an EIN (the
+ * every-nonprofit layer). Quicker than loadDetail and not rate limited.
+ * Fetched once per page; a failure is asked again next time.
+ */
+function loadBasic(ein) {
+  const id = String(ein || '');
+  if (!basics.has(id)) {
+    const p = fetch(`/api/nonprofits?ein=${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => (b && b.organization) || null)
+      .catch(() => null)
+      .then((o) => {
+        if (!o && basics.get(id) === p) basics.delete(id);
+        return o;
+      });
+    basics.set(id, p);
+  }
+  return basics.get(id);
+}
+
+/** "3001 N WHITE RIVER PKWY" -> "3001 N White River Pkwy" (the places route's rule). */
+const DIRS = new Set(['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'PO']);
+function streetCase(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[a-z0-9]+/gi, (w) => {
+      const up = w.toUpperCase();
+      if (DIRS.has(up)) return up;
+      if (/^\d+(st|nd|rd|th)$/i.test(w)) return w.toLowerCase();
+      if (/\d/.test(w)) return up;
+      return w[0].toUpperCase() + w.slice(1);
+    });
+}
+
+/** "4550 Central Ave, Indianapolis, IN" from an IRS record, or ''. */
+export function recordAddress(o) {
+  if (!o) return '';
+  return [streetCase(o.address), streetCase(o.city), String(o.state || '').toUpperCase()].filter(Boolean).join(', ');
+}
+
+/** The cause an NTEE major (1 = A .. 26 = Z, 0 unknown) stands for, or ''. */
+export function causeFromMajor(major) {
+  const m = Number(major);
+  return m >= 1 && m <= 26 ? causeFromNtee(String.fromCharCode(64 + m)) : '';
+}
+
+/** One org's IRS record by EIN; `ein` '' skips the lookup. */
+export function useOrgRecord(ein) {
+  const [state, setState] = useState({ ein: null, org: null });
+  useEffect(() => {
+    let live = true;
+    if (!ein) return undefined;
+    loadBasic(ein).then((org) => {
+      if (live) setState({ ein, org });
+    });
+    return () => {
+      live = false;
+    };
+  }, [ein]);
+  return { org: state.ein === ein ? state.org : null, loading: Boolean(ein) && state.ein !== ein };
+}
+
+/** Records for several EINs, `atOnce` at a time: Map<ein, organization|null> as they land. */
+export function useOrgRecords(eins, atOnce = 4) {
+  const key = (eins || []).map(String).join(',');
+  const [got, setGot] = useState(() => new Map());
+  useEffect(() => {
+    let live = true;
+    const todo = key ? key.split(',') : [];
+    let next = 0;
+    const worker = () => {
+      if (!live || next >= todo.length) return undefined;
+      const ein = todo[next];
+      next += 1;
+      return loadBasic(ein).then((o) => {
+        if (live) setGot((m) => new Map(m).set(ein, o));
+        return worker();
+      });
+    };
+    for (let i = 0; i < Math.min(atOnce, todo.length); i += 1) worker();
+    return () => {
+      live = false;
+    };
+  }, [key, atOnce]);
+  return got;
+}
+
 /**
  * Starts loading the links for these orgs ahead of a tap, `atOnce` at a
  * time; orgs already loaded or loading are skipped. Fire and forget.
@@ -338,14 +460,26 @@ const primaryLink = S(`display:inline-flex;align-items:center;gap:6px;min-height
  */
 export function MapOrgPopup({ x, y, ein, name, cause, address, miles, href, directions, width = 248 }) {
   const links = useOrgLinks(ein);
+  // A dot from the every-nonprofit layer comes with only its EIN; its name,
+  // address and cause come from its IRS record.
+  const record = useOrgRecord(name ? '' : ein);
+  const title = name || (record.org && record.org.name) || '';
+  const kind = (record.org && record.org.cause) || cause;
+  const place = address || recordAddress(record.org);
   const out = links.volunteer || links.website;
-  const meta = [cause && !/^nonprofit$/i.test(cause) ? cause : '', milesAway(miles)].filter(Boolean);
+  const meta = [kind && !/^nonprofit$/i.test(kind) ? kind : '', milesAway(miles)].filter(Boolean);
   return (
     <div className="vu-mappop" data-ein={ein} style={popBox(x, y, width)}>
       <div style={S('position:relative;padding:12px 14px 10px')}>
-        <Link href={href} className="vu-card-link" style={S(`display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font:600 15px/20px ${F.body};color:${C.ink}`)}>
-          {name}
-        </Link>
+        {title || !record.loading ? (
+          <Link href={href} className="vu-card-link" style={S(`display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font:600 15px/20px ${F.body};color:${C.ink}`)}>
+            {title || 'This nonprofit'}
+          </Link>
+        ) : (
+          <span role="status" style={S(`display:block;font:400 14px/20px ${F.body};color:${C.ink2}`)}>
+            Looking up their IRS record
+          </span>
+        )}
         {meta.length ? (
           <div style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>
             {meta.map((m, i) => (
@@ -356,7 +490,7 @@ export function MapOrgPopup({ x, y, ein, name, cause, address, miles, href, dire
             ))}
           </div>
         ) : null}
-        <PlaceLine place={address} />
+        <PlaceLine place={place} />
       </div>
       <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;column-gap:14px;row-gap:2px;padding:6px 14px 6px;border-top:1px solid ${C.line}`)}>
         {links.loading ? (
@@ -402,14 +536,15 @@ export function MapOrgPopup({ x, y, ein, name, cause, address, miles, href, dire
  * don't. `onZoom`, when given, adds Zoom in, which pulls the dots apart.
  * @param {{ orgs: Array<{ein:string,name:string,cause?:string,address?:string}>, address?:string, miles?:number, directions?:string, together?:boolean, onZoom?:(()=>void)|null }} props
  */
-export function MapOrgListPopup({ x, y, orgs = [], address, miles, directions, together = false, onZoom = null, width = 272, listMax = 260 }) {
+export function MapOrgListPopup({ x, y, orgs = [], total = 0, address, miles, directions, together = false, onZoom = null, width = 272, listMax = 260 }) {
   const meta = [address, milesAway(miles)].filter(Boolean).join(', ');
   const ownAddress = together && !address;
+  const count = Math.max(total, orgs.length);
   return (
-    <div className="vu-mappop" data-group={together ? String(orgs.length) : undefined} style={popBox(x, y, width, 4)}>
+    <div className="vu-mappop" data-group={together ? String(count) : undefined} style={popBox(x, y, width, 4)}>
       <div style={S(`position:relative;padding:12px 14px 10px;border-bottom:1px solid ${C.line}`)}>
         <div style={S(`font:600 14px/18px ${F.body};color:${C.ink}`)}>
-          {orgs.length} nonprofits {ownAddress ? 'close together' : 'here'}
+          {count.toLocaleString('en-US')} nonprofits {ownAddress ? 'close together' : 'here'}
         </div>
         {meta ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{meta}</div> : null}
       </div>
@@ -423,6 +558,11 @@ export function MapOrgListPopup({ x, y, orgs = [], address, miles, directions, t
             {ownAddress && o.address ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{o.address}</div> : null}
           </li>
         ))}
+        {count > orgs.length ? (
+          <li style={S(`padding:8px 14px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>
+            and {(count - orgs.length).toLocaleString('en-US')} more {address || !together ? 'at this address' : 'close by'}
+          </li>
+        ) : null}
       </ul>
       {onZoom ? (
         <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;column-gap:18px;padding:0 14px;border-top:1px solid ${C.line}`)}>
@@ -440,6 +580,38 @@ export function MapOrgListPopup({ x, y, orgs = [], address, miles, directions, t
         <PopupLinks directions={directions} />
       )}
     </div>
+  );
+}
+
+/**
+ * MapOrgListPopup for a bubble from the every-nonprofit layer, which knows
+ * only its orgs' EINs (up to 20) and its count. Each row's name and the
+ * shared address come from the orgs' IRS records as they load.
+ * @param {{ n:number, eins:Array<number|string>, same?:boolean, miles?:number, directions?:string, onZoom?:(()=>void)|null }} props
+ */
+export function MapOrgStackPopup({ x, y, n, eins = [], same = true, miles, directions, onZoom = null, width = 272, listMax = 260 }) {
+  const ids = eins.map(String);
+  const got = useOrgRecords(ids);
+  const orgs = ids.map((ein) => {
+    const o = got.get(ein);
+    if (got.has(ein) && !o) return { ein, name: `EIN ${ein.padStart(9, '0').replace(/^(\d{2})/, '$1-')}`, address: '' };
+    return { ein, name: o ? o.name : 'Loading…', cause: o ? o.cause : '', address: recordAddress(o) };
+  });
+  const first = orgs.find((o) => o.address);
+  return (
+    <MapOrgListPopup
+      x={x}
+      y={y}
+      width={width}
+      listMax={listMax}
+      orgs={orgs}
+      total={n}
+      address={same && first ? first.address : ''}
+      miles={miles}
+      directions={directions}
+      together={!same}
+      onZoom={onZoom}
+    />
   );
 }
 

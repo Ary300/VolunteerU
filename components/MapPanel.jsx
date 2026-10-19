@@ -9,7 +9,9 @@
                  directions, a hollow dot at the IRS street address of every
                  nonprofit the page lists (placed in one batch through
                  /api/nonprofits/places, lib/nonprofitPlaces.js), zoom, Near me
-                 and Expand (a full-screen map).
+                 and Expand (a full-screen map). With `national`, every US
+                 nonprofit from the IRS master file draws underneath
+                 (components/map/nationalLayer.js).
    AddressMap    one listing's address on a small map, with Directions and
                  Open in Maps links (the listing page).
 
@@ -29,6 +31,7 @@ import { geocode, cachedGeocode, storedPoint, addressKey, directionsHref, search
 import { useNonprofitPlaces, canonEin, useMapHover, setMapPick, useRowHoverLink } from '../lib/nonprofitPlaces.js';
 import { pinLabel, pinHtml } from './vu/MapPins.jsx';
 import MapCanvas from './map/MapCanvas.jsx';
+import { isNationalKey } from './map/nationalLayer.js';
 import MapOverlay from './map/MapOverlay.jsx';
 import { loadLeaflet, createBaseMap } from './map/leaflet.js';
 
@@ -205,9 +208,10 @@ function useTownCenter(town) {
  * @param {boolean} [props.inline] draw the map in place (default). false draws only the full-screen map, while `expanded`
  * @param {boolean} [props.expanded] the full-screen map is open (controlled); leave undefined to let Expand manage it
  * @param {(open:boolean)=>void} [props.onExpandedChange]
+ * @param {boolean} [props.national] draw every US nonprofit under the page's own pins and dots
  */
 // eslint-disable-next-line no-unused-vars
-export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight = null, onPick, onOpenNonprofit, town = '', here: givenHere = null, onNonprofitPlaces, inline = true, expanded, onExpandedChange, className, style }) {
+export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight = null, onPick, onOpenNonprofit, town = '', here: givenHere = null, onNonprofitPlaces, inline = true, expanded, onExpandedChange, national = false, className, style }) {
   const placed = usePlacedGroups(listings);
   const pins = useMemo(() => pinsFrom(placed), [placed]);
   const { dots, missing } = useNonprofitDots(nonprofits);
@@ -263,14 +267,20 @@ export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight 
   useEffect(() => {
     if (!picked) return;
     const hasDot = (k) => dots.some((d) => d.key === k);
-    const ok = picked.startsWith('npg:') ? picked.slice(4).split('+').every((spot) => hasDot(`np:${spot}`)) : pins.some((p) => p.key === picked) || hasDot(picked);
+    // A dot from the national layer stays open while that layer is on; the
+    // layer itself leaves out any org the page lists.
+    const ok = isNationalKey(picked)
+      ? national
+      : picked.startsWith('npg:')
+        ? picked.slice(4).split('+').every((spot) => hasDot(`np:${spot}`))
+        : pins.some((p) => p.key === picked) || hasDot(picked);
     if (!ok) pickRef.current(null);
-  }, [pins, dots, picked]);
+  }, [pins, dots, picked, national]);
 
   // The open dot no longer counts as picked once this map goes away.
   useEffect(() => () => setMapPick(null), []);
 
-  const shared = { pins, dots, photos, highlight, hoverDot, picked, onPick: pick, center, here, onHere: setNearHere, notOnMap, ariaLabel: label };
+  const shared = { pins, dots, photos, highlight, hoverDot, picked, onPick: pick, center, here, onHere: setNearHere, notOnMap, ariaLabel: label, national };
 
   return (
     <>
