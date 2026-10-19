@@ -33,6 +33,8 @@ export const WHEN_OPTIONS = [
  * @param {Array<{v:string,l:string}>} [props.whenOptions]
  * @param {Array<'what'|'where'|'when'>} [props.fields]
  * @param {'bar'|'stacked'|'collapsed'} [props.variant]
+ * @param {string} [props.idPrefix] fixed field ids ("lp-search" -> "lp-search-what"),
+ *   for a bar whose ids must not depend on where it sits in the tree
  */
 export default function SearchBar({
   what = '',
@@ -61,8 +63,10 @@ export default function SearchBar({
   filtersLabel = 'Filters',
   summary,
   className,
+  idPrefix = '',
 }) {
-  const uid = useId();
+  const auto = useId();
+  const uid = idPrefix || auto;
   const whenText = (whenOptions.find((o) => o.v === when) || {}).l || '';
 
   if (variant === 'collapsed') {

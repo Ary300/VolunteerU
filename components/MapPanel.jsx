@@ -289,10 +289,11 @@ export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight 
 /**
  * One address on a small map with Directions and Open in Maps. The map stays
  * still (no drag, no scroll zoom) until it's clicked, so the page scrolls past
- * it. Without a point it's just the address and the links.
- * @param {{ address?: string, lat?: number|null, lng?: number|null }} props
+ * it. Without a point it's just the address and the links. `directions:
+ * false` leaves Directions out, for a page that already has it.
+ * @param {{ address?: string, lat?: number|null, lng?: number|null, directions?: boolean }} props
  */
-export function AddressMap({ address, lat = null, lng = null }) {
+export function AddressMap({ address, lat = null, lng = null, directions = true }) {
   const text = String(address || '').trim();
   const stored = storedPoint({ lat, lng });
   // Stored coordinates only on the first render, so the server and the
@@ -326,11 +327,13 @@ export function AddressMap({ address, lat = null, lng = null }) {
       {point ? <StillMap point={point} label={`Map of ${text}`} /> : null}
       <p className="vu-break" style={S(`margin:${point ? 12 : 8}px 0 0;font:400 15px/1.5 ${F.body};color:${C.ink}`)}>{text}</p>
       <div style={S('display:flex;flex-wrap:wrap;column-gap:20px;row-gap:6px;margin-top:8px')}>
-        <a href={point ? directionsHref(point.lat, point.lng) : directionsHref(text)} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={link}>
-          Directions
-          <Icon name="external" size={14} />
-          <span className="vu-sr">(opens Google Maps in a new tab)</span>
-        </a>
+        {directions ? (
+          <a href={point ? directionsHref(point.lat, point.lng) : directionsHref(text)} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={link}>
+            Directions
+            <Icon name="external" size={14} />
+            <span className="vu-sr">(opens Google Maps in a new tab)</span>
+          </a>
+        ) : null}
         <a href={mapsHref(text)} target="_blank" rel="noopener noreferrer" className="vu-link-ul" style={link}>
           Open in Maps
           <Icon name="external" size={14} />

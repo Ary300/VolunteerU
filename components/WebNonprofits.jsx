@@ -24,12 +24,13 @@
    already loaded and the scroll position.
 
    Near the visitor (an `origin` point from lib/location.js), each row says
-   how far away it is and the list runs nearest first. ProPublica can't
-   search by distance, so a town list loads a bigger first pool (up to 100
-   records) and, when the visitor is in that town, also searches the names
-   of the neighborhoods around them ("Broad Ripple"), then orders the pool by
-   the distance to each street address (lib/nonprofitPlaces.js). Rows already
-   on screen keep their place when "Show more" adds the next ones.
+   how far away it is and the list runs nearest first, a name search too.
+   ProPublica can't search by distance, so a town list with no name loads a
+   bigger first pool (up to 100 records) and, when the visitor is in that
+   town, also searches the names of the neighborhoods around them ("Broad
+   Ripple"), then orders the pool by the distance to each street address
+   (lib/nonprofitPlaces.js). Rows already on screen keep their place when
+   "Show more" adds the next ones.
    ========================================================================== */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -148,7 +149,9 @@ export function cityOf(near) {
 /* ---- near the visitor ----------------------------------------------------------- */
 
 /* Neighborhood names around a point, from /api/nonprofits?around=, kept for
-   the tab's session per rounded point. */
+   the tab's session per rounded point. When the lookup is refused (429, the
+   per-IP limit, or 503, a busy queue) or fails, the list goes ahead with the
+   town alone and the next search asks again. */
 const AREAS = new Map(); // "39.87,-86.14" -> { city, areas } | Promise
 const AREAS_WAIT_MS = 2500;
 
@@ -167,7 +170,8 @@ function loadAreas(key) {
         city: d && typeof d.city === 'string' ? d.city : '',
         areas: d && Array.isArray(d.areas) ? d.areas.filter((a) => typeof a === 'string' && cityOf(a)).slice(0, 2) : [],
       };
-      AREAS.set(key, v);
+      if (d) AREAS.set(key, v);
+      else AREAS.delete(key);
       return v;
     });
   AREAS.set(key, p);
@@ -396,17 +400,20 @@ export default function WebNonprofits({ q = '', near = '', causes = [], kind = '
   const useArea = !term && !typedCity && !homeState && area && area.city && area.state;
   const city = useArea ? String(area.city) : typedCity;
   const state = allStates ? '' : useArea ? String(area.state) : homeState;
-  // Nearest first: only with the visitor's point and no name typed (a name
-  // search keeps ProPublica's best matches first, each with its distance).
+  // Nearest first whenever the visitor's point is known, a typed name
+  // included: the rows say how far each one is, so they run in that order.
+  // Only a list with no name typed also loads the bigger town pool and the
+  // neighborhood searches, since a name search is already narrow.
   const oLat = origin ? Number(origin.lat) : NaN;
   const oLng = origin ? Number(origin.lng) : NaN;
   const hasOrigin = Number.isFinite(oLat) && Number.isFinite(oLng);
-  const nearSort = hasOrigin && !term;
-  const around = useAreasAround(nearSort && city ? pointKey(oLat, oLng) : '');
+  const nearSort = hasOrigin;
+  const nearPool = hasOrigin && !term;
+  const around = useAreasAround(nearPool && city ? pointKey(oLat, oLng) : '');
   const areas = around && around.city && city && around.city.toLowerCase() === city.toLowerCase() ? around.areas : [];
-  const queries = around === null ? [] : buildQueries({ q: term, causes, state, city, areas: nearSort ? areas : [] });
+  const queries = around === null ? [] : buildQueries({ q: term, causes, state, city, areas: nearPool ? areas : [] });
   const waitingAreas = around === null;
-  const poolPages = nearSort && city ? NEAR_POOL_PAGES : 1;
+  const poolPages = nearPool && city ? NEAR_POOL_PAGES : 1;
   const queryKey = JSON.stringify({ queries, preview, poolPages });
 
   const cached = CACHE.get(queryKey);

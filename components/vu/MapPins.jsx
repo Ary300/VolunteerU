@@ -97,15 +97,15 @@ export function pinHtml(label, selected = false) {
   return text ? `<span class="vu-pin${on}">${escHtml(text)}</span>` : `<span class="vu-pin-dot${on}"></span>`;
 }
 
-const DOT_ON = `border:3px solid ${C.ink};box-shadow:0 0 0 2px #fff, 0 1px 4px rgba(30,36,33,.35)`;
+const DOT_ON = `border:4px solid ${C.ink};box-shadow:0 0 0 2px #fff, 0 1px 4px rgba(30,36,33,.4)`;
 
 /**
- * Inline style for a nonprofit dot: '' for the plain 12px dot, the grown ink
+ * Inline style for a nonprofit dot: '' for the plain 14px ring, the grown ink
  * ring when `on`, and the numbered 24px dot when it stands for `n` > 1 orgs
  * (one address, or several close together).
  */
 export function dotStyle(n = 1, on = false) {
-  if (n <= 1) return on ? `width:16px;height:16px;${DOT_ON}` : '';
+  if (n <= 1) return on ? `width:18px;height:18px;${DOT_ON}` : '';
   const base = `width:24px;height:24px;display:grid;place-items:center;font:600 12px/1 ${F.body};color:${C.ink};font-variant-numeric:tabular-nums;border-color:${C.ink2}`;
   return on ? `${base};width:28px;height:28px;${DOT_ON}` : base;
 }
@@ -121,9 +121,12 @@ export function dotHtml(n = 1) {
   return `<span style="position:absolute;left:50%;top:50%">${dot}</span>`;
 }
 
+/* The ring a nonprofit draws as, here and in the map keys (.vu-np-dot in globals.css). */
+export const NP_RING = `border-radius:50%;background:#fff;border:3px solid ${C.ink2};box-shadow:0 0 0 1.5px #fff, 0 1px 3px rgba(30,36,33,.35)`;
+
 /** Hollow dot for a registered nonprofit that hasn't posted on VolunteerU. */
 export function MapDot({ x, y, title, onClick }) {
-  const style = S(`${at(x, y)};width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid ${C.ink3};padding:0`);
+  const style = S(`${at(x, y)};width:14px;height:14px;${NP_RING};padding:0`);
   return onClick ? <button type="button" aria-label={title} title={title} onClick={onClick} style={style} /> : <span title={title} aria-hidden="true" style={style} />;
 }
 
@@ -235,16 +238,26 @@ const telHref = (phone) => {
 /**
  * The org's record with its links (/api/nonprofits?ein=&links=1, which reads
  * its IRS return and website for a volunteer page), fetched once per page and
- * only when its popup opens. Null when it can't be loaded.
+ * only when its popup opens. Null when it can't be loaded. Only a full answer
+ * stays cached: a refusal (429), an upstream error (502), a dropped
+ * connection or an answer whose sources failed (lookupFailed) is asked
+ * again the next time the popup opens.
  */
 function loadDetail(ein) {
   const id = String(ein || '');
   if (!details.has(id)) {
+    const forget = () => {
+      if (details.get(id) === p) details.delete(id);
+    };
     const p = fetch(`/api/nonprofits?ein=${encodeURIComponent(id)}&links=1`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((b) => (b && b.organization) || null)
+      .then((b) => {
+        const o = (b && b.organization) || null;
+        if (!o || o.lookupFailed) forget();
+        return o;
+      })
       .catch(() => {
-        details.delete(id); // a dropped connection can be tried again next open
+        forget();
         return null;
       });
     details.set(id, p);
@@ -490,7 +503,7 @@ export function MapLegend() {
         Opportunity
       </span>
       <span style={S('display:inline-flex;align-items:center;gap:7px;white-space:nowrap')}>
-        <i aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.ink3}`, display: 'block', background: '#fff' }} />
+        <i aria-hidden="true" style={S(`display:block;width:12px;height:12px;${NP_RING}`)} />
         Nonprofit, not on VolunteerU
       </span>
     </div>

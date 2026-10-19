@@ -1085,7 +1085,10 @@ export default function Landing() {
             </div>
           </div>
           <div className="lp-hero-search">
+            {/* Fixed ids: the hero's fields are the same on the server and in
+                the browser whatever else the page draws around them. */}
             <SearchBar
+              idPrefix="lp-search"
               what={what}
               onWhat={(v) => { setWhat(v); if (hint) setHint(''); }}
               where={where}

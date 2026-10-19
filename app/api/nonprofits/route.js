@@ -12,10 +12,19 @@
                                       nonprofit page asks for this; map dots and
                                       saved rows use the plain, faster ?ein=.
 
+   GET ?ein=&links=1&fresh=1          the same, looking again when the last
+                                      lookup failed (lookupFailed: true says so).
+
    GET ?around=<lat>,<lng>            the neighborhood names around a point
                                       (OpenStreetMap), returns { city, areas },
                                       so a list can also search "Broad Ripple"
                                       for a visitor standing there.
+
+   links=1 and around= reach slow upstreams (IRS filings, websites,
+   Nominatim), so lookups that aren't already cached count toward a per-IP
+   limit (lib/rateLimit.js). Over it, the answer is a 429 with
+   { error: 'rate_limited' } and Retry-After; the pages carry on without
+   the links or the neighborhood names.
 
    `city` turns the search into required terms ("+food +carmel"), which
    ProPublica matches against the name and the city, so a town's own
@@ -29,20 +38,33 @@
    ========================================================================== */
 
 import { UPSTREAM, PAGE_SIZE, MAX_PAGE, MAX_RESULTS, composeQuery, searchRow, fetchOrganization } from '../../../lib/propublica.js';
-import { nonprofitLinks } from '../../../lib/nonprofitLinks.js';
+import { nonprofitLinks, peekLinks } from '../../../lib/nonprofitLinks.js';
 import { nominatimReverse } from '../../../lib/geocoders.js';
+import { rateLimiter, clientIp } from '../../../lib/rateLimit.js';
 
 export const runtime = 'nodejs';
 
 const HEADERS = { 'User-Agent': 'VolunteerU/1.0 (https://www.volunteeruapp.com)' };
 const CITY_RX = /^[A-Za-z][A-Za-z .'-]{0,59}$/;
 
-function fail(error, status) {
-  return Response.json({ error }, { status });
+function fail(error, status, headers = {}) {
+  return Response.json({ error }, { status, headers });
 }
 
-/* A day at the edge: IRS records and websites change rarely. */
+/* Uncached lookups per IP per minute. A map view warms the links for up to
+   16 dots and a page opens a few more; neighborhood names are asked once per
+   spot. */
+const linksOverLimit = rateLimiter({ max: 60 });
+const areasOverLimit = rateLimiter({ max: 20 });
+const RETRY_AFTER_S = '30';
+const limited = () => fail('rate_limited', 429, { 'Retry-After': RETRY_AFTER_S });
+// The longest a neighborhood lookup waits for its turn in the Nominatim queue.
+const AREA_QUEUE_MS = 2500;
+
+/* A day at the edge: IRS records and websites change rarely. An answer a
+   failed source left incomplete keeps only as long as the server's own cache. */
 const DETAIL_CACHE = 'public, s-maxage=86400, stale-while-revalidate=604800';
+const FAILED_CACHE = 'public, s-maxage=120';
 
 /** The fields the browser gets; the e-file ids stay on the server. */
 function publicOrg(o) {
@@ -50,14 +72,16 @@ function publicOrg(o) {
   return rest;
 }
 
-async function orgDetail(ein, withLinks) {
+async function orgDetail(ein, { withLinks = false, fresh = false, ip = '' } = {}) {
+  // Only a lookup that would go out to the IRS filing and the website counts.
+  if (withLinks && !peekLinks(ein, { fresh }) && linksOverLimit(ip)) return limited();
   const r = await fetchOrganization(ein);
   if (r.status === 'not_found') return fail('not_found', 404);
   if (r.status !== 'ok') return fail(r.error || 'upstream', 502);
   if (!withLinks) return Response.json({ organization: publicOrg(r.organization) }, { headers: { 'Cache-Control': DETAIL_CACHE } });
-  const links = await nonprofitLinks(r.organization);
+  const links = await nonprofitLinks(r.organization, { fresh });
   const organization = { ...publicOrg(r.organization), ...links };
-  return Response.json({ organization }, { headers: { 'Cache-Control': DETAIL_CACHE } });
+  return Response.json({ organization }, { headers: { 'Cache-Control': links.lookupFailed ? FAILED_CACHE : DETAIL_CACHE } });
 }
 
 async function search({ q, city, state, ntee, page }) {
@@ -102,7 +126,7 @@ const AREA_CACHE_MAX = 500;
 const AREA_KEEP_MS = 7 * 24 * 3600 * 1000;
 const AREA_NAME_RX = /^[A-Za-z][A-Za-z .'-]{1,40}$/;
 
-async function areasAround(raw) {
+async function areasAround(raw, ip) {
   const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(raw);
   const lat = m ? Number(m[1]) : NaN;
   const lng = m ? Number(m[2]) : NaN;
@@ -113,10 +137,13 @@ async function areasAround(raw) {
   const key = `${rlat},${rlng}`;
   const hit = AREA_CACHE.get(key);
   if (hit && Date.now() - hit.at < AREA_KEEP_MS) return Response.json(hit.v, { headers: { 'Cache-Control': DETAIL_CACHE } });
+  if (areasOverLimit(ip)) return limited();
   let r;
   try {
-    r = await nominatimReverse(rlat, rlng);
+    // A busy queue (geocoding for everyone) skips this rather than holding the request.
+    r = await nominatimReverse(rlat, rlng, { deadline: Date.now() + AREA_QUEUE_MS });
   } catch (err) {
+    if (err && err.skipped) return fail('busy', 503, { 'Retry-After': '5' });
     console.error('[api/nonprofits] reverse lookup failed', key, err && err.message);
     return fail('upstream', 502);
   }
@@ -138,13 +165,13 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
 
   const around = searchParams.get('around');
-  if (around !== null) return areasAround(around.slice(0, 60));
+  if (around !== null) return areasAround(around.slice(0, 60), clientIp(request));
 
   const einRaw = searchParams.get('ein');
   if (einRaw !== null) {
     const ein = einRaw.trim().replace(/\D/g, '');
     if (!/^\d{6,9}$/.test(ein)) return fail('bad_ein', 400);
-    return orgDetail(ein, searchParams.get('links') === '1');
+    return orgDetail(ein, { withLinks: searchParams.get('links') === '1', fresh: searchParams.get('fresh') === '1', ip: clientIp(request) });
   }
 
   const q = (searchParams.get('q') || '').trim().slice(0, 120);

@@ -20,11 +20,11 @@
    ========================================================================== */
 
 import { nominatim, census } from '../../../lib/geocoders.js';
+import { rateLimiter, clientIp } from '../../../lib/rateLimit.js';
 
 export const runtime = 'nodejs';
 
 const CACHE_MAX = 500;
-const RATE_WINDOW_MS = 60_000;
 // Lookups that reach an upstream, per IP per minute. The Nominatim queue
 // already caps real upstream traffic at one a second; this only stops one
 // client from filling that queue for everyone. Nonprofit dots no longer come
@@ -58,25 +58,9 @@ function cachePut(key, value) {
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
 }
 
-/* ---- per-IP limit ----------------------------------------------------------- */
+/* ---- per-IP limit (lib/rateLimit.js) ------------------------------------------ */
 
-const hits = new Map(); // ip -> timestamps in the current window
-
-function clientIp(request) {
-  const fwd = request.headers.get('x-forwarded-for') || '';
-  return fwd.split(',')[0].trim() || request.headers.get('x-real-ip') || 'local';
-}
-
-function overLimit(ip, now = Date.now()) {
-  const recent = (hits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_MAX) {
-    hits.set(ip, recent);
-    return true;
-  }
-  hits.set(ip, [...recent, now]);
-  if (hits.size > 5000) hits.delete(hits.keys().next().value);
-  return false;
-}
+const overLimit = rateLimiter({ max: RATE_MAX });
 
 /** "Carmel Clay Public Library, 425 E Main St, Carmel, IN" -> "425 E Main St, Carmel, IN"; '' when there's no leading name. */
 function withoutPlaceName(q) {

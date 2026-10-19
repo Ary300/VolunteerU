@@ -26,7 +26,7 @@ import { S } from '../../lib/style.js';
 import { C, F, R, SH } from '../../lib/tokens.js';
 import { directionsHref, distanceMiles } from '../../lib/geo.js';
 import { Icon } from '../ui.jsx';
-import { MapPopup, MapListPopup, MapOrgPopup, MapOrgListPopup, pinHtml, dotHtml, dotStyle, warmOrgLinks } from '../vu/MapPins.jsx';
+import { MapPopup, MapListPopup, MapOrgPopup, MapOrgListPopup, pinHtml, dotHtml, dotStyle, warmOrgLinks, NP_RING } from '../vu/MapPins.jsx';
 import { loadLeaflet, createBaseMap, INDIANAPOLIS, DEFAULT_ZOOM, FIT_MAX_ZOOM, useReducedMotion } from './leaflet.js';
 
 const POP_GAP = 22; // popup bottom to the pin's center (MapPopup's own offset)
@@ -393,13 +393,30 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
   useEffect(() => {
     userMoved.current = false; // a new location is a fresh look
   }, [hereKey, nearTick]);
+  // Places that landed while a popup was open, so the fit runs once it closes.
+  const fitPending = useRef(false);
+  const [fitTick, setFitTick] = useState(0);
+  const popupOpen = Boolean(picked);
+  useEffect(() => {
+    if (!popupOpen && fitPending.current) {
+      fitPending.current = false;
+      setFitTick((t) => t + 1);
+    }
+  }, [popupOpen]);
   useEffect(() => {
     const L = LRef.current;
     const map = mapRef.current;
     if (!ready || !L || !map) return undefined;
     const t = setTimeout(() => {
-      // A place that lands while a popup is open doesn't yank the map out from under it.
-      if (!mapRef.current || pickedRef.current) return;
+      if (!mapRef.current) return;
+      // A place that lands while a popup is open doesn't yank the map out
+      // from under it; the fit waits until the popup closes. Moving the map
+      // in the meantime still counts, so a visitor who panned keeps their view.
+      if (pickedRef.current) {
+        fitPending.current = true;
+        return;
+      }
+      fitPending.current = false;
       const now = spotsRef.current;
       const keys = new Set(now.map((p) => p.key));
       const overlap = [...fittedKeys.current].some((k) => keys.has(k));
@@ -426,7 +443,7 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, h
     return () => clearTimeout(t);
     // placesKey, centerKey and hereKey stand in for the places, center and here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, placesKey, centerKey, hereKey, nearTick, allTick]);
+  }, [ready, placesKey, centerKey, hereKey, nearTick, allTick, fitTick]);
 
   // "Zoom out to see 3 more": fit every place, the far ones too, until the places change.
   function showAll() {
@@ -853,7 +870,7 @@ function MapKey({ pins = true, dots = true }) {
       ) : null}
       {dots ? (
         <span style={S('display:inline-flex;align-items:center;gap:6px;white-space:nowrap')}>
-          <i aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.ink3}`, display: 'block', background: '#fff' }} />
+          <i aria-hidden="true" style={S(`display:block;width:12px;height:12px;${NP_RING}`)} />
           Nonprofit, not on VolunteerU
         </span>
       ) : null}

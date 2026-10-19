@@ -7,8 +7,8 @@
    501(c) type, the year it became tax-exempt, its latest filed return), the
    website and phone from their latest IRS e-filed return (or Wikidata), the
    volunteer page their own homepage links to (lib/nonprofitLinks.js), a map
-   of the street address, and VolunteerU listings that name this
-   organization. No mission sentence or number is made up. A field no source
+   of the street address, and VolunteerU listings it posted (by EIN) or
+   that name it. No mission sentence or number is made up. A field no source
    has is left out, and when there's no way to reach them the page says so.
 
    Actions, in the order a volunteer needs them: Volunteer with them (their
@@ -36,7 +36,7 @@ import { useNonprofitPlace } from '../../lib/nonprofitPlaces.js';
 import { useSnapshot } from '../../lib/store.js';
 import { toggleSaved, copyText } from '../../lib/db.js';
 import { toast } from '../../lib/overlays.js';
-import { searchListings } from '../../lib/listings.js';
+import { searchListings, listingsForNonprofit } from '../../lib/listings.js';
 import { usePhotoPicker } from '../../lib/photos.js';
 import { partnerHref } from '../../lib/partnerPrefill.js';
 import { liveCardProps } from './Misc.jsx';
@@ -141,34 +141,44 @@ function useOrganization(ein, initial) {
   return [st, () => setNonce((n) => n + 1)];
 }
 
-/** VolunteerU listings whose name or site names this nonprofit. */
-function useShiftsHere(name) {
+/**
+ * VolunteerU listings with this nonprofit: the ones it posted under its EIN
+ * (nonprofit_ein), and the ones whose own name, site or address names it.
+ * Both lists are merged, posted ones first, each listing once.
+ */
+function useShiftsHere(name, ein) {
   const [st, setSt] = useState({ status: 'loading', rows: [] });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let alive = true;
     const key = norm(name);
-    if (key.length < 4) {
+    const byName = key.length >= 4;
+    if (!byName && !ein) {
       setSt({ status: 'done', rows: [] });
       return undefined;
     }
     setSt({ status: 'loading', rows: [] });
-    searchListings({ q: name })
-      .then((rows) => {
-        if (!alive) return;
-        // The search also reads missions and bios; only a listing whose own
-        // name, site or address names the organization counts as theirs.
-        const mine = (rows || []).filter((l) => [l.name, l.site, l.location].some((f) => norm(f).includes(key)));
-        setSt({ status: 'done', rows: mine });
-      })
-      .catch((err) => {
-        console.error('[nonprofit] listings failed', name, err);
-        if (alive) setSt({ status: 'error', rows: [] });
-      });
+    Promise.allSettled([
+      ein ? listingsForNonprofit(ein) : Promise.resolve([]),
+      // The search also reads missions and bios; only a listing whose own
+      // name, site or address names the organization counts as theirs.
+      byName ? searchListings({ q: name }).then((rows) => (rows || []).filter((l) => [l.name, l.site, l.location].some((f) => norm(f).includes(key)))) : Promise.resolve([]),
+    ]).then(([posted, named]) => {
+      if (!alive) return;
+      if (posted.status === 'rejected' && named.status === 'rejected') {
+        console.error('[nonprofit] listings failed', name, posted.reason, named.reason);
+        setSt({ status: 'error', rows: [] });
+        return;
+      }
+      [posted, named].forEach((r) => r.status === 'rejected' && console.error('[nonprofit] listings failed', name, r.reason));
+      const seen = new Set();
+      const rows = [...(posted.value || []), ...(named.value || [])].filter((l) => l && l.id && !seen.has(l.id) && seen.add(l.id));
+      setSt({ status: 'done', rows });
+    });
     return () => {
       alive = false;
     };
-  }, [name, nonce]);
+  }, [name, ein, nonce]);
   return [st, () => setNonce((n) => n + 1)];
 }
 
@@ -200,14 +210,23 @@ export default function Nonprofit({ ein, initial = null }) {
 const LINK_KEYS = ['website', 'volunteerUrl', 'phone', 'phoneTel', 'linkSource'];
 const hasLinks = (o) => Boolean(o) && 'volunteerUrl' in o;
 
+/* A lookup whose sources failed and found nothing reads as an error with
+   Try again, never as "they have no website". */
+const failedEmpty = (o) => Boolean(o && o.lookupFailed) && !o.website && !o.phoneTel;
+
 /**
  * Website, volunteer page and phone (/api/nonprofits?ein=&links=1). The
  * server sends them with the page when it already knows them; otherwise
- * they load here while the rest of the page is already up.
+ * they load here while the rest of the page is already up. Try again asks
+ * with fresh=1, so a failure the server cached for a minute or two is
+ * looked up again. A 429 (too many lookups from this connection) is an
+ * error with its own line; the rest of the page works without the links.
  */
 function useLinks(org) {
   const ready = hasLinks(org);
-  const [st, setSt] = useState(() => (ready ? { status: 'done', links: pick(org) } : { status: 'loading', links: null }));
+  const [st, setSt] = useState(() =>
+    ready ? (failedEmpty(org) ? { status: 'error', links: null, why: 'failed' } : { status: 'done', links: pick(org) }) : { status: 'loading', links: null }
+  );
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     if (ready && nonce === 0) return undefined;
@@ -216,15 +235,17 @@ function useLinks(org) {
     setSt({ status: 'loading', links: null });
     (async () => {
       try {
-        const res = await fetch(`/api/nonprofits?ein=${encodeURIComponent(org.ein)}&links=1`, { signal: ctrl.signal });
+        const res = await fetch(`/api/nonprofits?ein=${encodeURIComponent(org.ein)}&links=1${nonce ? '&fresh=1' : ''}`, { signal: ctrl.signal });
         const data = await res.json().catch(() => null);
         if (!alive) return;
+        if (res.status === 429) return setSt({ status: 'error', links: null, why: 'busy' });
         if (!res.ok || !data || !data.organization) throw new Error((data && data.error) || `status ${res.status}`);
+        if (failedEmpty(data.organization)) return setSt({ status: 'error', links: null, why: 'failed' });
         setSt({ status: 'done', links: pick(data.organization) });
       } catch (err) {
         if (!alive || (err && err.name === 'AbortError')) return;
         console.error('[nonprofit] links failed', org.ein, err);
-        setSt({ status: 'error', links: null });
+        setSt({ status: 'error', links: null, why: 'failed' });
       }
     })();
     return () => {
@@ -280,7 +301,7 @@ function NonprofitBody({ org: o }) {
   const saved = (state.saved || []).includes(savedId);
   const [copied, setCopied] = useState(false);
   const findName = matchName(o.name);
-  const [shifts, retryShifts] = useShiftsHere(findName);
+  const [shifts, retryShifts] = useShiftsHere(findName, o.ein);
   const photos = usePhotoPicker(shifts.rows);
   const [linkSt, retryLinks] = useLinks(o);
   const links = linkSt.links || {};
@@ -433,7 +454,7 @@ function NonprofitBody({ org: o }) {
           ) : null}
           {nothing ? (
             <p className="np-reach">
-              No website or phone for {name} is on file, in their IRS filings or on Wikidata.{' '}
+              We couldn&apos;t find a website or phone number for {name}.{' '}
               <a href={siteSearchUrl(o)} target="_blank" rel="noopener noreferrer" className="vu-link-ul">
                 Find their website
                 <span className="vu-sr"> (web search, opens in a new tab)</span>
@@ -442,7 +463,7 @@ function NonprofitBody({ org: o }) {
           ) : null}
           {linkSt.status === 'error' ? (
             <p className="np-reach" role="alert">
-              Their website and phone didn&apos;t load.{' '}
+              {linkSt.why === 'busy' ? "Too many lookups from this connection just now, so their website and phone didn't load." : "Their website and phone didn't load."}{' '}
               <button type="button" onClick={retryLinks} className="vu-link-ul" style={S(`background:none;border:0;padding:0;cursor:pointer;font:600 14px/1.5 ${F.body};color:${C.ink}`)}>
                 Try again
               </button>
@@ -501,9 +522,9 @@ function NonprofitBody({ org: o }) {
                 {poBox ? 'Mailing address' : 'Where they are'}
               </h2>
               {mappable ? (
-                // The map shows the address under it with Directions and Open in Maps.
+                // Directions is in the actions at the top, so the map keeps only Open in Maps.
                 <div className="np-map">
-                  <AddressMap address={full} lat={spotPt ? spotPt.lat : null} lng={spotPt ? spotPt.lng : null} />
+                  <AddressMap address={full} lat={spotPt ? spotPt.lat : null} lng={spotPt ? spotPt.lng : null} directions={false} />
                 </div>
               ) : full ? (
                 <>
