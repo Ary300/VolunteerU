@@ -18,15 +18,16 @@ import CrossApplications from '../CrossApplications.jsx';
 import { ShareLink } from './CrossMembers.jsx';
 import MessageThread from '../MessageThread.jsx';
 import { formatShiftTime } from '../screens/JoinListing.jsx';
+import { SignupLinkFields, NonprofitEinField, signupLinkError, einError } from '../ListingLinks.jsx';
 import { supabase } from '../../lib/supabase.js';
-import { loadProjectMembers, confirmMemberHour, publishListing, myId, loadOwnerApplications, setMemberAssignment, postedShiftOnDate, confirmedSelfLogOnDate } from '../../lib/listings.js';
+import { loadProjectMembers, confirmMemberHour, publishListing, myId, loadOwnerApplications, setMemberAssignment, postedShiftOnDate, confirmedSelfLogOnDate, memberHourEntries } from '../../lib/listings.js';
 import {
   attendanceFor, attendanceStats, setAttendance, postAttendance,
   decideApplication, reopenApplication,
   pendingHours, cleanHours, approveHours, adjustHours, validateHours,
   recomputeCompliance, resolveDispute, fileIncident, closeIncident, resolveEscalation,
   sendMessage, readThread, toggleProjectSetting, archiveProject, logAudit,
-  updateProject, download, parseSessionDate, getProject, messageTemplateOptions, ATTEND_TONE, GRADE_TONE, tone,
+  updateProject, download, parseSessionDate, getProject, messageTemplateOptions, isTeam, ATTEND_TONE, GRADE_TONE, tone,
 } from '../../lib/db.js';
 import { GRADE_SCALE, CAUSES } from '../../lib/seed.js';
 
@@ -166,9 +167,11 @@ function sessionTime(p, x) {
  * Write posted attendance hours onto a linked member's application, in the
  * owner-written half (`assignment.attendanceHours`). The lead posted them, so
  * they count as confirmed for the volunteer. Keyed by entry id, so a retry
- * replaces instead of adding twice. A member whose own log for that day
- * the lead already confirmed is skipped, so one shift never counts twice.
- * Returns { ok, gone, selfLogged }.
+ * replaces instead of adding twice. A member's own logged hours carry no
+ * shift, so a confirmed log on the same day doesn't block the post: the
+ * confirm dialog names those members first (see sameDayLogs) so the lead can
+ * set their hours to 0 when the log was this shift. Both sides then count
+ * the same hours. Returns { ok, gone }.
  */
 async function creditAttendanceHours(applicationId, entry) {
   if (!supabase) return { ok: false };
@@ -177,13 +180,49 @@ async function creditAttendanceHours(applicationId, entry) {
   const { data: cur, error: readErr } = await supabase.from('applications').select('assignment, member_state').eq('id', applicationId).maybeSingle();
   if (readErr) return { ok: false, error: readErr };
   if (!cur) return { ok: false, gone: true };
-  if (confirmedSelfLogOnDate(cur, entry.date)) return { ok: true, selfLogged: true };
   const a = cur.assignment || {};
   const list = Array.isArray(a.attendanceHours) ? a.attendanceHours.filter((h) => h && h.id !== entry.id) : [];
   const next = { ...a, attendanceHours: [entry, ...list] };
   const { data, error } = await supabase.from('applications').update({ assignment: next }).eq('id', applicationId).eq('owner_id', me).select('id');
   if (error) return { ok: false, error };
   return { ok: Array.isArray(data) ? data.length > 0 : true };
+}
+
+/**
+ * Attendance entry ids already on each credited application, as
+ * Map<appId, Set<entryId>>, from one read. null when the read fails, so
+ * nothing is re-sent on a guess.
+ */
+async function writtenAttendance(posted) {
+  const ids = [...new Set(posted.flatMap((m) => Object.entries(m.credited || {}).filter(([, v]) => v === true).map(([k]) => k)))];
+  if (!supabase || !ids.length) return new Map();
+  const { data, error } = await supabase.from('applications').select('id, assignment').in('id', ids);
+  if (error || !Array.isArray(data)) return null;
+  return new Map(data.map((a) => [a.id, new Set(((a.assignment && a.assignment.attendanceHours) || []).filter((h) => h && h.id).map((h) => h.id))]));
+}
+
+/**
+ * Members about to get posted hours who already have confirmed hours they
+ * logged themselves on the same day, as [{ name, hrs, activity }]. A failed
+ * read leaves that member out (the post still works; the dialog just can't
+ * warn about them).
+ */
+async function sameDayLogs(targets, date) {
+  if (!supabase) return [];
+  const ids = [...new Set(targets.filter((t) => t.appId).map((t) => t.appId))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('applications').select('id, assignment, member_state').in('id', ids);
+  if (error || !Array.isArray(data)) {
+    if (error) console.error('[lead] could not read same-day hours', error);
+    return [];
+  }
+  const out = [];
+  for (const t of targets) {
+    const app = t.appId && data.find((a) => a.id === t.appId);
+    const h = app && confirmedSelfLogOnDate(app, date);
+    if (h) out.push({ name: t.row.n, hrs: Math.round(Number(h.hrs) * 10) / 10, activity: h.activity || '' });
+  }
+  return out;
 }
 
 /**
@@ -294,12 +333,16 @@ function reachCopy({ seen, unlinked = [], notMember = [], future }) {
  */
 async function creditPostedAttendance(projectId, onlySessionId) {
   const p = getProject(projectId);
-  const result = { delivered: [], failed: [], unlinked: [], notMember: [], selfLogged: [] };
+  const result = { delivered: [], failed: [], unlinked: [], notMember: [] };
   if (!p) return result;
   const cache = new Map();
   const posted = (p.attendanceSessions || []).filter((x) => x.posted && (!onlySessionId || x.id === onlySessionId));
+  const written = await writtenAttendance(posted);
   for (const meta of posted) {
-    const done = meta.credited || {};
+    // A member marked as sent whose application doesn't hold the entry (an
+    // older version skipped people with same-day logged hours) gets it now,
+    // so the lead's total and the volunteer's agree.
+    const done = Object.fromEntries(Object.entries(meta.credited || {}).filter(([appId, v]) => !(v === true && written && written.has(appId) && !written.get(appId).has(`att-${meta.id}`))));
     const rows = (p.attendance && p.attendance[meta.id]) || [];
     const time = sessionTime(p, meta);
     const targets = await postTargets(p, rows, cache);
@@ -333,8 +376,7 @@ async function creditPostedAttendance(projectId, onlySessionId) {
           const m = proj && (proj.attendanceSessions || []).find((x) => x.id === meta.id);
           if (m) m.credited = { ...(m.credited || {}), [appId]: res.ok ? true : 'gone' };
         });
-        if (res.selfLogged) result.selfLogged.push(r.n);
-        else if (res.ok) result.delivered.push(r.n);
+        if (res.ok) result.delivered.push(r.n);
         else result.notMember.push(r.n);
       } else {
         console.error('[lead] could not send posted hours to', r.n, res.error);
@@ -552,9 +594,20 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
       notMember: names((t) => t.notMember),
       future: true,
     });
+    // Self-logged hours carry no shift, so the lead decides whether a log on
+    // the same day was this shift. Name them before anything is locked.
+    let logged = [];
+    try {
+      logged = await sameDayLogs(targets, String(meta.d || '').replace(/^[A-Za-z]{3},\s*/, ''));
+    } catch (err) {
+      console.error('[lead] same-day hours check failed', err);
+    }
+    const loggedCopy = logged.length
+      ? ` ${logged.map((x) => `${x.name} already has ${fmtHours(x.hrs)} confirmed on this day${x.activity ? ` for "${x.activity}"` : ''}`).join('. ')}. Posting adds this shift on top. If that was this shift, go back and set ${logged.length === 1 ? 'their' : 'those'} hours to 0.`
+      : '';
     const ok = await confirmDialog({
       title: `Post attendance for ${meta.d}?`,
-      body: `This locks the shift and adds the hours to each person's total on your People tab. You can't edit it afterward.${reach ? ` ${reach}` : ''}`,
+      body: `This locks the shift and adds the hours to each person's total on your People tab. You can't edit it afterward.${reach ? ` ${reach}` : ''}${loggedCopy}`,
       confirmLabel: 'Post attendance',
       cancelLabel: 'Go back',
       tone: 'brand',
@@ -582,8 +635,7 @@ export function AttendanceTab({ p, params, setParam, goTab }) {
       return;
     }
     const sentBase = reachCopy({ seen: res.delivered.length, unlinked: res.unlinked, notMember: res.notMember, future: false });
-    const twice = res.selfLogged.length ? `${nameList(res.selfLogged)} already ${hasHave(res.selfLogged)} confirmed hours for ${meta.d}, so they weren't added again.` : '';
-    const sent = [sentBase, twice].filter(Boolean).join(' ');
+    const sent = sentBase;
     if (res.failed.length) {
       toast({
         title: 'Attendance posted',
@@ -1153,20 +1205,94 @@ function useMemberHours(listingId) {
   return { members, failed, load };
 }
 
+/* One row per entry a member logged, with the lead's decision applied: the
+   confirmed value (which may differ from what they logged) or a "Don't
+   confirm" with its note. Entries the member removed after a confirmation
+   still count on their totals but aren't listed here. */
 function memberHourRows(members) {
   const out = [];
   for (const app of members || []) {
-    const log = (app.member_state && app.member_state.hoursLog) || [];
-    const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
-    for (const h of log) {
-      const isConfirmed = !!confirmed[h.id];
+    for (const h of memberHourEntries(app)) {
+      if (h.removed) continue;
+      const isConfirmed = !!h.confirmed;
       // A waiting entry on a day the lead already posted from Attendance
-      // would count that shift twice, so it can't be confirmed.
-      const posted = isConfirmed ? null : postedShiftOnDate(app, h.date);
-      out.push({ app, h, confirmed: isConfirmed, posted, name: app.applicant_name || 'Volunteer' });
+      // would count that shift twice, so it can't be confirmed. The volunteer
+      // sees it as not confirmed (`covered`, see memberHourEntries); the lead
+      // keeps it listed with the note to ask them to remove it.
+      const covered = !!h.covered;
+      const posted = isConfirmed || (h.declined && !covered) ? null : postedShiftOnDate(app, h.date);
+      out.push({ app, h, confirmed: isConfirmed, declined: !!h.declined && !covered, posted, name: app.applicant_name || 'Volunteer' });
     }
   }
   return out;
+}
+
+/* The lead's "Don't confirm" on one logged entry, or its undo (note null).
+   Written from a fresh read of the owner-written assignment, so a decision
+   saved since the list loaded isn't lost. */
+async function declineMemberHour(applicationId, hourId, note) {
+  if (!supabase) return { ok: false };
+  const me = await myId();
+  if (!me) return { ok: false };
+  const { data: cur, error: readErr } = await supabase.from('applications').select('assignment').eq('id', applicationId).maybeSingle();
+  if (readErr || !cur) return { ok: false, error: readErr };
+  const a = cur.assignment || {};
+  const declinedHours = { ...(a.declinedHours || {}) };
+  if (note == null) delete declinedHours[hourId];
+  else declinedHours[hourId] = { note: String(note).slice(0, 140), at: new Date().toISOString() };
+  const { error } = await supabase.from('applications').update({ assignment: { ...a, declinedHours } }).eq('id', applicationId).eq('owner_id', me);
+  return { ok: !error, error };
+}
+
+/* Change a member's logged hours before confirming them, or decline them.
+   Both need a reason; the member sees the result on My crew. */
+function MemberHourDecision({ api, row, mode, onSave }) {
+  const change = mode === 'change';
+  const [hrs, setHrs] = useState(String(row.h.hrs));
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState({});
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (busy) return;
+    const e = {};
+    if (change) {
+      const bad = validateHours(hrs);
+      if (bad) e.hrs = bad;
+    }
+    if (!reason.trim()) e.reason = change ? 'Enter a reason.' : 'Tell them why, so they can fix it.';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    const res = await onSave(change ? Math.round(Number(hrs) * 10) / 10 : null, reason.trim());
+    setBusy(false);
+    if (res && res.ok) api.close();
+    else setErr({ reason: (res && res.message) || "Couldn't save that. Check your connection and try again." });
+  }
+  return (
+    <div>
+      <p style={S(`margin:0 0 16px;${META}`)}>
+        {row.h.date}, {row.h.activity || 'Volunteering'}. {row.name} logged {fmtHours(row.h.loggedHrs || row.h.hrs)}.
+      </p>
+      {change ? <Field label="Hours to confirm" value={hrs} onChange={(v) => setHrs(v.replace(/[^\d.]/g, '').slice(0, 5))} inputMode="decimal" error={err.hrs} /> : null}
+      <div style={S(change ? 'margin-top:16px' : '')}>
+        <Field
+          label={change ? 'Reason for the change' : `Why you're not confirming them`}
+          value={reason}
+          onChange={(v) => { setReason(v); if (err.reason) setErr((x) => ({ ...x, reason: undefined })); }}
+          placeholder={change ? 'e.g. Left at 11, not noon' : "e.g. We didn't have a shift that day"}
+          maxLength={change ? 90 : 140}
+          required
+          error={err.reason}
+        />
+      </div>
+      <DialogActions>
+        <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">Cancel</Button>
+        <Button variant={change ? 'primary' : 'dark'} busy={busy} onClick={save} aria-label={change ? 'Confirm changed hours' : "Don't confirm these hours"}>
+          {change ? 'Confirm changed hours' : "Don't confirm"}
+        </Button>
+      </DialogActions>
+    </div>
+  );
 }
 
 /* "1 entry on a day Attendance already covered", "2 entries on days …" */
@@ -1196,12 +1322,12 @@ function csvCell(v) {
     confirmed them, plus shifts the lead posted in Attendance (confirmed). */
 function memberTotals(app) {
   const log = (app.member_state && app.member_state.hoursLog) || [];
-  const ok = (app.assignment && app.assignment.confirmedHours) || {};
+  const own = memberHourEntries(app);
   const posted = (app.assignment && Array.isArray(app.assignment.attendanceHours) && app.assignment.attendanceHours) || [];
   const sum = (rows) => round1(rows.reduce((a, h) => a + Number(h.hrs || 0), 0));
   return {
-    confirmed: round1(sum(log.filter((h) => ok[h.id])) + sum(posted)),
-    waiting: sum(log.filter((h) => !ok[h.id])),
+    confirmed: round1(sum(own.filter((h) => h.confirmed)) + sum(posted)),
+    waiting: sum(own.filter((h) => !h.confirmed && !h.declined)),
     last: (log[0] && log[0].date) || (posted[0] && posted[0].date) || '',
   };
 }
@@ -1234,16 +1360,17 @@ export function HoursTab({ p }) {
   const { members, failed, load } = useMemberHours(p.listingId);
   const [busy, setBusy] = useState(null);
   const memberRows = memberHourRows(members);
-  const waiting = memberRows.filter((r) => !r.confirmed);
-  const done = memberRows.filter((r) => r.confirmed);
-  const waitingHrs = waiting.reduce((a, r) => a + Number(r.h.hrs || 0), 0);
+  const waiting = memberRows.filter((r) => !r.confirmed && !r.declined);
+  const done = memberRows.filter((r) => r.confirmed || r.declined);
   const blocked = waiting.filter((r) => r.posted);
   const confirmable = waiting.filter((r) => !r.posted);
   const confirmableHrs = confirmable.reduce((a, r) => a + Number(r.h.hrs || 0), 0);
   // One total for the heading: People-tab shifts plus join-link shifts, the
   // same sum the tab badge and "Needs you today" show.
-  const allCount = queue.length + waiting.length;
-  const allHrs = queue.reduce((a, q) => a + Number(q.hrs || 0), 0) + waitingHrs;
+  // Days Attendance already covered can't be confirmed, so they stay out of
+  // the count (Lead.jsx's badge leaves them out too).
+  const allCount = queue.length + confirmable.length;
+  const allHrs = queue.reduce((a, q) => a + Number(q.hrs || 0), 0) + confirmableHrs;
 
   async function confirmRow(r, value) {
     if (busy) return;
@@ -1262,6 +1389,52 @@ export function HoursTab({ p }) {
     } else {
       toast({ title: "Couldn't save that", message: 'Check your connection and try again.', tone: 'danger' });
     }
+  }
+
+  function decideRow(r, mode) {
+    openModal({
+      title: mode === 'change' ? `Change hours for ${r.name}` : `Don't confirm ${r.name}'s hours?`,
+      subtitle: mode === 'change' ? 'The changed hours are what count. The reason goes in the audit log.' : 'They see your reason on My crew and can log the right hours.',
+      Body: function DecideBody({ api }) {
+        return (
+          <MemberHourDecision
+            api={api}
+            row={r}
+            mode={mode}
+            onSave={async (hrs, reason) => {
+              const res = mode === 'change'
+                ? await confirmMemberHour(r.app.id, { id: r.h.id, hrs }, true)
+                : await declineMemberHour(r.app.id, r.h.id, reason);
+              if (!res.ok) return { ok: false, message: res.error && res.error.code === 'ATTENDANCE_POSTED' ? res.error.message : null };
+              if (mode === 'change') {
+                logAudit(p.id, `Hours changed for ${r.name}: ${fmtHours(r.h.hrs)} to ${fmtHours(hrs)} on ${r.h.date}. ${reason}`);
+                toast({ title: 'Hours confirmed', message: `${r.name}, ${fmtHours(hrs)} on ${r.h.date}. Saved to the audit log.`, tone: 'ok' });
+              } else {
+                logAudit(p.id, `Hours not confirmed for ${r.name}: ${fmtHours(r.h.hrs)} on ${r.h.date}. ${reason}`);
+                toast({ title: 'Hours not confirmed', message: `${r.name} sees your reason on My crew.`, tone: 'ok' });
+              }
+              load();
+              window.dispatchEvent(new Event('vu:applications-changed'));
+              return { ok: true };
+            }}
+          />
+        );
+      },
+    });
+  }
+
+  async function undoDecline(r) {
+    if (busy) return;
+    setBusy(r.h.id);
+    const res = await declineMemberHour(r.app.id, r.h.id, null);
+    setBusy(null);
+    if (!res.ok) {
+      toast({ title: "Couldn't save that", message: 'Check your connection and try again.', tone: 'danger' });
+      return;
+    }
+    toast({ title: 'Hours waiting again', message: `${r.name}'s ${fmtHours(r.h.hrs)} on ${r.h.date} ${Number(r.h.hrs) === 1 ? 'is' : 'are'} back in your list.`, tone: 'ok' });
+    load();
+    window.dispatchEvent(new Event('vu:applications-changed'));
   }
 
   // One Confirm all for the whole list: join-link entries plus People-tab
@@ -1362,6 +1535,17 @@ export function HoursTab({ p }) {
           {busy === r.h.id ? 'Confirming' : 'Confirm'}
         </Button>
       ),
+      edit: (
+        <IconButton
+          icon="more"
+          label={`More for ${r.name}'s ${fmtHours(r.h.hrs)} on ${r.h.date}`}
+          disabled={!!busy}
+          onClick={(e) => menuFromEvent(e, [
+            ...(r.posted ? [] : [{ key: 'change', label: 'Change hours' }]),
+            { key: 'decline', label: "Don't confirm" },
+          ], (k) => decideRow(r, k))}
+        />
+      ),
     })
   );
   const queueRows = queue.map((q) =>
@@ -1440,7 +1624,7 @@ export function HoursTab({ p }) {
           {done.length ? (
             <details className="vu-details" style={S('margin-top:20px')}>
               <summary style={S(`display:inline-flex;align-items:center;gap:6px;cursor:pointer;list-style:none;${TEXT_LINK}`)}>
-                Confirmed ({done.length})
+                {done.some((r) => r.declined) ? `Decided (${done.length})` : `Confirmed (${done.length})`}
                 <Icon name="chevron-down" size={16} />
               </summary>
               <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
@@ -1448,11 +1632,13 @@ export function HoursTab({ p }) {
                   <li key={`${r.app.id}:${r.h.id}`} className="vu-row vu-row--nolead" style={S('padding:12px 0')}>
                     <div style={S(`min-width:0;${META}`)}>
                       <span style={S(`color:${C.ink};font-weight:600`)}>{r.name}</span>, {r.h.activity || 'Volunteering'}, {r.h.date}
+                      {r.h.adjusted ? `, logged ${shortHrs(r.h.loggedHrs)}` : ''}
+                      {r.declined && r.h.declineNote ? `. ${r.h.declineNote}` : ''}
                     </div>
                     <div className="vu-row-end" style={S('gap:16px')}>
                       {hrsCell(r.h.hrs)}
-                      <StatusText tone="ok">Confirmed</StatusText>
-                      <button type="button" aria-label={`Undo confirmation for ${r.name}, ${r.h.date}`} disabled={!!busy} onClick={() => confirmRow(r, false)} className={cx('vu-link', H.press)} style={S(`${TEXT_LINK};font-size:13px`)}>
+                      {r.declined ? <StatusText tone="mute">Not confirmed</StatusText> : <StatusText tone="ok">Confirmed</StatusText>}
+                      <button type="button" aria-label={`Undo ${r.declined ? 'decision' : 'confirmation'} for ${r.name}, ${r.h.date}`} disabled={!!busy} onClick={() => (r.declined ? undoDecline(r) : confirmRow(r, false))} className={cx('vu-link', H.press)} style={S(`${TEXT_LINK};font-size:13px`)}>
                         Undo
                       </button>
                     </div>
@@ -2190,7 +2376,13 @@ export function SettingsTab({ p }) {
     const synced = await syncListing(p.id);
     const title = kind === 'none' ? 'Photo removed' : 'Cover updated';
     toast(synced
-      ? { title, message: kind === 'none' ? 'Your listing shows its next date instead.' : 'Discover and your join page show it now.', tone: 'ok' }
+      ? {
+        title,
+        message: kind === 'none'
+          ? (isTeam(p) ? 'Your listing shows without a photo now.' : 'Your listing shows its next date instead.')
+          : isPublic(p) ? 'Discover and your join page show it now.' : 'Your join page shows it now.',
+        tone: 'ok',
+      }
       : { title: 'Saved here only', message: "Your join page didn't update. Try again in a minute.", tone: 'warn' });
   }
 
@@ -2370,7 +2562,8 @@ export function SettingsTab({ p }) {
 function DetailsForm({ api, project }) {
   // Same rule as /create: a remote project doesn't need a place.
   const remote = project.delivery === 'remote';
-  const [f, setF] = useState({ name: project.name || '', site: project.site || '', cause: project.cause || '', mission: project.mission || '', bio: project.bio || '' });
+  const [f, setF] = useState({ name: project.name || '', site: project.site || '', cause: project.cause || '', mission: project.mission || '', bio: project.bio || '', signupUrl: project.signupUrl || '', signupOnly: !!project.signupOnly, nonprofitEin: project.nonprofitEin || '', einCheck: null });
+  const official = project.orgClass === 'official';
   // The cause picked at create (or a template's) can be fixed here later.
   const causeOptions = [...new Set([...(f.cause ? [f.cause] : []), ...CAUSES])].map((c) => ({ v: c, l: c }));
   const [err, setErr] = useState({});
@@ -2390,6 +2583,14 @@ function DetailsForm({ api, project }) {
       <div style={S('margin-top:16px')}>
         <TextArea id="pd-bio" label="Details" value={f.bio} maxLength={400} minHeight={70} onChange={(v) => setF((x) => ({ ...x, bio: v }))} />
       </div>
+      <div style={S('margin-top:16px')}>
+        <SignupLinkFields id="pd-signup-url" url={f.signupUrl} only={f.signupOnly} error={err.signupUrl} onChange={(patch) => { setF((x) => ({ ...x, ...patch })); setErr((x) => ({ ...x, signupUrl: undefined })); }} />
+      </div>
+      {official || f.nonprofitEin ? (
+        <div style={S('margin-top:16px')}>
+          <NonprofitEinField id="pd-ein" label={official ? 'IRS EIN' : "Partner nonprofit's EIN"} partner={!official} value={f.nonprofitEin} error={err.nonprofitEin} onChange={(v) => { setF((x) => ({ ...x, nonprofitEin: v })); setErr((x) => ({ ...x, nonprofitEin: undefined })); }} onCheck={(einCheck) => setF((x) => ({ ...x, einCheck }))} />
+        </div>
+      ) : null}
       <DialogActions>
         <Button variant="outline" onClick={() => api.close()} aria-label="Cancel">
           Cancel
@@ -2402,10 +2603,12 @@ function DetailsForm({ api, project }) {
             const e = {};
             if (!f.name.trim()) e.name = 'Enter a project name.';
             if (!remote && !f.site.trim()) e.site = 'Enter where it happens.';
+            if (signupLinkError(f.signupUrl)) e.signupUrl = signupLinkError(f.signupUrl);
+            if (einError(f.nonprofitEin, f.einCheck)) e.nonprofitEin = einError(f.nonprofitEin, f.einCheck);
             setErr(e);
             if (Object.keys(e).length) return;
             setBusy(true);
-            updateProject(project.id, { name: f.name.trim(), site: f.site.trim(), siteShort: f.site.trim(), ...(f.cause ? { cause: f.cause } : {}), mission: f.mission.trim(), bio: f.bio.trim() });
+            updateProject(project.id, { name: f.name.trim(), site: f.site.trim(), siteShort: f.site.trim(), ...(f.cause ? { cause: f.cause } : {}), mission: f.mission.trim(), bio: f.bio.trim(), signupUrl: f.signupUrl.trim(), signupOnly: !!f.signupUrl.trim() && f.signupOnly, nonprofitEin: f.nonprofitEin.trim() });
             const synced = await syncListing(project.id);
             setBusy(false);
             api.close();

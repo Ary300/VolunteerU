@@ -27,12 +27,14 @@ import { toast, confirmDialog, openModal } from '../../lib/overlays.js';
 import { toggleSaved, copyText } from '../../lib/db.js';
 import MessageThread from '../MessageThread.jsx';
 import AppShell from '../AppShell.jsx';
-import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp, memberHourEntries, loadShiftSpots } from '../../lib/listings.js';
+import { getListing, applyToListing, loadMyApplications, setApplicationStatus, myId, listingShifts, myShiftSignUps, signUpForShift, cancelShiftSignUp, memberHourEntries, loadShiftSpots, listingSignup, listingNonprofitHref } from '../../lib/listings.js';
 import { safeUrl } from '../MemberProjects.jsx';
 import { isPastShift, parseTimeRange, googleCalUrl, icsEvent } from '../../lib/calendar.js';
 import { isArchivedApplication } from '../VolunteerApplications.jsx';
 import { whenLabel } from '../AnnouncementBoard.jsx';
 import { AddressMap } from '../MapPanel.jsx';
+import { storedPoint, geocode, distanceMiles } from '../../lib/geo.js';
+import { useLocation, pointOf, milesLabel } from '../../lib/location.js';
 
 /* The verified check sits after the organization's name; the explanation is its hover
    title and screen-reader text. Shared with Detail and Apply. */
@@ -159,21 +161,26 @@ function useStickyTop(ref, gap = 24) {
   return top;
 }
 
-/* True while the apply form's own submit button is on screen (above the
-   phone action bar), so the bar steps aside instead of doubling it. */
+/* True while one of the panel's main actions (the apply button, or the
+   organization's form when it is the only way to hold a spot) is on screen
+   above the phone action bar, so the bar steps aside instead of doubling it. */
 function useSubmitInView(panelRef, barHeight = 80) {
   const [inView, setInView] = useState(false);
-  const target = useRef(null);
+  const target = useRef([]);
   const io = useRef(null);
   useEffect(() => {
-    const el = panelRef.current ? panelRef.current.querySelector('[data-apply-submit]') : null;
-    if (el === target.current) return;
-    target.current = el;
+    const els = panelRef.current ? Array.from(panelRef.current.querySelectorAll('[data-apply-submit]')) : [];
+    if (els.length === target.current.length && els.every((el, i) => el === target.current[i])) return;
+    target.current = els;
     if (io.current) io.current.disconnect();
     io.current = null;
-    if (!el || typeof IntersectionObserver === 'undefined') { setInView(false); return; }
-    io.current = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { rootMargin: `0px 0px -${barHeight}px 0px` });
-    io.current.observe(el);
+    if (!els.length || typeof IntersectionObserver === 'undefined') { setInView(false); return; }
+    const seen = new Map();
+    io.current = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => seen.set(entry.target, entry.isIntersecting));
+      setInView(Array.from(seen.values()).some(Boolean));
+    }, { rootMargin: `0px 0px -${barHeight}px 0px` });
+    els.forEach((el) => io.current.observe(el));
   });
   useEffect(() => () => { if (io.current) io.current.disconnect(); }, []);
   return inView;
@@ -437,7 +444,8 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
 
   async function apply() {
     if (busy || !listing || appsError) return;
-    if (!me) { router.push(`/signin?next=${encodeURIComponent(`/join/${id}`)}`); return; }
+    // Signed out: create an account (or sign in from there) and come back here.
+    if (!me) { router.push(signupHref(id)); return; }
     const positions = listing.positions || [];
     if (positions.length > 1 && !position) {
       setPosError('Choose a role.');
@@ -530,7 +538,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
     // Signed out: the button says "Sign up", so it opens account creation.
     // That page links to sign-in for a returning student, and both come back
     // here with this shift picked.
-    if (!me) { router.push(`/signup?next=${encodeURIComponent(`/join/${id}?shift=${encodeURIComponent(sh.id)}`)}`); return false; }
+    if (!me) { router.push(signupHref(id, sh.id)); return false; }
     if (shiftBusy || !forApp || !forApp.id) return false;
     setShiftBusy(sh.id);
     const res = await signUpForShift(forApp.id, sh.id);
@@ -658,6 +666,15 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
   const positions = listing.positions || [];
   const pipeline = (listing.pipeline || []).filter((x) => x && x.label);
   const needsConsent = pipeline.some((x) => /consent/i.test(x.label));
+  const signup = listingSignup(listing);
+  // The organization's form is the only way to hold a spot: it becomes the
+  // page's main action, ahead of applying here.
+  const formFirst = !!signup && signup.only && !isOwner;
+  // ...and while the apply form shows, it leads the panel (TheirForm `lead`).
+  const formLeads = formFirst && !app && !appsError;
+  const orgName = splitOrgSite(listing).org;
+  const nonprofitHref = listingNonprofitHref(listing);
+  const website = safeUrl(listing.website);
   const shift = isTeam ? null : nextShiftInfo(listing.next_session);
   const shifts = isTeam ? [] : listingShifts(listing);
   const canPickShifts = !isOwner && !!app && !!app.id && SIGNUP_STATUSES.includes(app.status);
@@ -727,7 +744,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
 
   return (
     <Shell signedIn={!!me}>
-      <ListingHeader listing={listing} isTeam={isTeam} />
+      <ListingHeader listing={listing} isTeam={isTeam} formNote={formFirst ? { url: signup.url, org: orgName } : null} />
 
       {/* data-draft: drawn from the server's copy, the browser's read still on its way. */}
       <div className={cx('vu-jl-grid', showBar && 'has-bar')} data-draft={draft ? 'true' : undefined}>
@@ -771,15 +788,7 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
 
           {!isTeam ? <WhereSection listing={listing} /> : null}
 
-          {safeUrl(listing.website) ? (
-            <section className="vu-jl-sec">
-              <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:6px;font:600 15px/1.2 ${F.body}`)}>
-                Visit their website
-                <Icon name="external" size={15} />
-                <span style={S(SR_ONLY)}>(opens in a new tab)</span>
-              </a>
-            </section>
-          ) : null}
+          <OrgLinks website={website} nonprofitHref={nonprofitHref} official={listing.org_class === 'official'} />
         </div>
         <aside ref={panelRef} id="vu-join-apply" className="vu-jl-panel" style={{ top: stickyTop }} aria-live="polite" aria-label={isOwner ? 'Your listing' : 'Apply'}>
           {isOwner ? (
@@ -795,8 +804,11 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
               </Button>
             </StatusBlock>
           ) : (
+            <>
+            {formLeads ? <TheirForm signup={signup} org={orgName} isOwner={false} lead /> : null}
             <ApplyForm
               me={me}
+              afterForm={formLeads}
               needsConsent={needsConsent}
               positions={positions}
               position={position}
@@ -806,16 +818,25 @@ export default function JoinListing({ id, outdated = false, preview = null }) {
               onNote={setNote}
               busy={busy}
               onApply={apply}
+              signinHref={signinHref(id)}
               shiftPicker={pickInForm ? shiftList : panelShifts}
             />
+            </>
           )}
+          {signup && !formLeads ? <TheirForm signup={signup} org={orgName} isOwner={isOwner} applied={!!app} /> : null}
           {!isOwner ? <ListingActions listing={listing} app={app} /> : null}
         </aside>
       </div>
       {showBar ? (
         <div className="vu-jl-bar" data-off={submitInView ? 'true' : undefined}>
           <span className="vu-jl-bar-meta"><b>{listing.name}</b>{barWhen}</span>
-          <Button variant="primary" onClick={jumpToApply}>{me ? 'Apply to join' : 'Sign in to apply'}</Button>
+          {formFirst ? (
+            <Button href={signup.url} target="_blank" rel="noreferrer noopener" variant="primary" icon="external">
+              Fill out their form{NEW_TAB}
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={jumpToApply}>{me ? 'Apply to join' : 'Sign up to apply'}</Button>
+          )}
         </div>
       ) : null}
     </Shell>
@@ -841,7 +862,7 @@ function splitOrgSite(listing) {
    the address. A listing with its own photo shows it under the header. The
    dates live in one place, the panel's Shifts list, so the header never
    repeats them. */
-function ListingHeader({ listing, isTeam }) {
+function ListingHeader({ listing, isTeam, formNote = null }) {
   const cause = listing.cause ? causeOf(listing.cause) : null;
   const photo = photoFor(listing, { seed: false });
   const [broken, setBroken] = useState(false);
@@ -889,6 +910,16 @@ function ListingHeader({ listing, isTeam }) {
         {address ? (
           <p className="vu-break" style={S(`margin:${tokens.length ? 6 : 12}px 0 0;font:400 15px/20px ${F.body};color:${C.ink2}`)}>{address}</p>
         ) : null}
+        {formNote ? (
+          <p className="vu-break" data-form-note="" style={S(`margin:14px 0 0;font:400 15px/22px ${F.body};color:${C.ink}`)}>
+            {formNote.org || 'The organizer'} holds spots through {formNote.org ? 'its' : 'their'} own form.{' '}
+            <a href={formNote.url} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:5px;font-weight:600;color:${C.ink}`)}>
+              Fill out their form
+              <Icon name="external" size={14} />
+              {NEW_TAB}
+            </a>
+          </p>
+        ) : null}
       </header>
       {hasPhoto ? (
         <div className="vu-jl-hero">
@@ -906,7 +937,7 @@ function ListingHeader({ listing, isTeam }) {
    see "Apply" flash before their status. Without JS the panel links to sign-in. */
 function PreviewShell({ id, preview }) {
   const isTeam = preview.org_type === 'team';
-  const next = `/signin?next=${encodeURIComponent(`/join/${id}`)}`;
+  const next = signupHref(id);
   return (
     <>
       <ListingHeader listing={preview} isTeam={isTeam} />
@@ -930,7 +961,7 @@ function PreviewShell({ id, preview }) {
           <noscript>
             <style>{'.vu-jl-wait{display:none}'}</style>
             <div style={S('margin-top:16px')}>
-              <Button href={next} variant="primary" size="lg" full>Sign in to apply</Button>
+              <Button href={next} variant="primary" size="lg" full>Sign up to apply</Button>
             </div>
           </noscript>
         </aside>
@@ -941,12 +972,112 @@ function PreviewShell({ id, preview }) {
 
 /* ---- action panel -------------------------------------------------------- */
 
-function ApplyForm({ me, needsConsent, positions, position, posError, onPosition, note, onNote, busy, onApply, shiftPicker }) {
+/* Account creation and sign-in from this page. Both come back to the listing
+   (Auth keeps ?next= through sign-up, onboarding and sign-in). */
+function signupHref(id, shiftId = '') {
+  const back = shiftId ? `/join/${id}?shift=${encodeURIComponent(shiftId)}` : `/join/${id}`;
+  return `/signup?intent=join&next=${encodeURIComponent(back)}`;
+}
+function signinHref(id) {
+  return `/signin?next=${encodeURIComponent(`/join/${id}`)}`;
+}
+
+const NEW_TAB = <span style={S(SR_ONLY)}> (opens in a new tab)</span>;
+
+/* The organization's own sign-up form. When it's the only way they hold a
+   spot, it is the panel's first and main action (`lead`, above the apply form)
+   for a visitor who hasn't applied, and stays a full-width button under the
+   application status after they apply. Otherwise it's a link to fill out as
+   well, under the panel's main action. */
+function TheirForm({ signup, org, isOwner, lead = false, applied = false }) {
+  const who = org || 'The organizer';
+  const its = org ? 'its' : 'their';
+  if (signup.only) {
+    const body = isOwner
+      ? 'Volunteers are told to fill out your form first. They apply here too so their shifts and hours are tracked.'
+      : applied
+        ? `${who} only saves a spot for people who fill out ${its} own form. If you haven't yet, fill it out now.`
+        : `${who} only saves a spot for people who fill out ${its} own form. Fill it out first, then apply here so your shifts and hours are tracked.`;
+    return (
+      <div data-their-form="only" style={S(lead ? `padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid ${C.line}` : `margin-top:22px;padding-top:18px;border-top:1px solid ${C.line}`)}>
+        {lead ? (
+          <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>Fill out their form first</h2>
+        ) : (
+          <h3 style={S(`margin:0;font:600 16px/1.3 ${F.body};color:${C.ink}`)}>Spots are held through their form</h3>
+        )}
+        <p className="vu-break" style={S(`margin:6px 0 0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>{body}</p>
+        <div style={S('margin-top:14px')}>
+          <Button
+            href={signup.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            variant={isOwner ? 'outline' : 'primary'}
+            size={lead ? 'lg' : 'md'}
+            full
+            icon="external"
+            data-apply-submit={lead ? '' : undefined}
+          >
+            Fill out their form{NEW_TAB}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div data-their-form="also" style={S(`margin-top:22px;padding-top:18px;border-top:1px solid ${C.line}`)}>
+      <p className="vu-break" style={S(`margin:0;font:400 14px/1.5 ${F.body};color:${C.ink2}`)}>
+        {isOwner ? 'Volunteers see a link to your own sign-up form here.' : `${who} also takes sign-ups on ${org ? 'its' : 'their'} own form.`}
+      </p>
+      <a href={signup.url} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(`margin-top:8px;display:inline-flex;align-items:center;gap:6px;font:600 15px/1.2 ${F.body};color:${C.ink}`)}>
+        Also fill out their form
+        <Icon name="external" size={15} />
+        {NEW_TAB}
+      </a>
+    </div>
+  );
+}
+
+/* The organization's website and its nonprofit page here, as plain links.
+   Their own sign-up form sits in the panel, next to Apply (TheirForm). */
+function OrgLinks({ website, nonprofitHref, official }) {
+  if (!website && !nonprofitHref) return null;
+  const LINK = `display:inline-flex;align-items:center;gap:6px;font:600 15px/1.2 ${F.body};color:${C.ink}`;
+  return (
+    <section className="vu-jl-sec" aria-label="Links">
+      <ul style={S('margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:14px')}>
+        {website ? (
+          <li>
+            <a href={website} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(LINK)}>
+              Visit their website
+              <Icon name="external" size={15} />
+              {NEW_TAB}
+            </a>
+          </li>
+        ) : null}
+        {nonprofitHref ? (
+          <li>
+            <Link href={nonprofitHref} className="vu-link-ul" style={S(LINK)}>
+              {official ? 'See their nonprofit page' : 'See the partner nonprofit'}
+              <Icon name="arrow-right" size={15} />
+            </Link>
+          </li>
+        ) : null}
+      </ul>
+    </section>
+  );
+}
+
+/* afterForm: the organization's own form holds the spot and sits above this
+   one, so applying here reads as the second step and its button steps down
+   to the outline style. */
+function ApplyForm({ me, afterForm = false, needsConsent, positions, position, posError, onPosition, note, onNote, busy, onApply, signinHref: signin, shiftPicker }) {
   return (
     <div>
-      <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>Applications are open</h2>
+      <h2 style={S(`margin:0;font:600 20px/1.2 ${F.display};letter-spacing:-0.012em;color:${C.ink}`)}>{afterForm ? 'Then apply here' : 'Applications are open'}</h2>
       <p style={S(`margin:6px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
-        {me ? 'The organizer reads each one and replies in the app.' : "Sign in or create a free account to apply. You'll come back here after."}
+        {afterForm
+          ? (me ? 'Your shifts and hours are tracked here, and the organizer replies in the app.' : "Create a free account to apply, so your shifts and hours are tracked. You'll come right back here to finish.")
+          : (me ? 'The organizer reads each one and replies in the app.' : "Create a free account to apply. You'll come right back here to finish.")}
       </p>
       {needsConsent ? (
         <p style={S(`margin:8px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>
@@ -993,10 +1124,15 @@ function ApplyForm({ me, needsConsent, positions, position, posError, onPosition
       ) : null}
 
       <div style={S('margin-top:20px')}>
-        <Button variant="primary" size="lg" full onClick={onApply} busy={busy} data-apply-submit="">
-          {busy ? 'Applying' : me ? 'Apply to join' : 'Sign in to apply'}
+        <Button variant={afterForm ? 'outline' : 'primary'} size="lg" full onClick={onApply} busy={busy} data-apply-submit="">
+          {busy ? 'Applying' : me ? 'Apply to join' : 'Sign up to apply'}
         </Button>
       </div>
+      {!me && signin ? (
+        <p style={S(`margin:12px 0 0;text-align:center;font:400 14px/1.4 ${F.body};color:${C.ink2}`)}>
+          Have an account? <Link href={signin} className="vu-link-ul" style={S(`font-weight:600;color:${C.ink}`)}>Sign in</Link>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1179,8 +1315,8 @@ function ShiftRow({ shift, site, canPick, signedOut = false, spot = null, signed
         ) : full ? (
           <StatusText tone="mute">Full</StatusText>
         ) : signedOut ? (
-          <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} aria-label={`Sign in to sign up for ${label}`}>
-            Sign in to sign up
+          <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} aria-label={`Sign up for ${label}`}>
+            Sign up
           </Button>
         ) : (
           <Button variant="outline" size="sm" onClick={onSignUp} disabled={disabled} busy={busy} aria-label={`Sign up for ${label}`}>
@@ -1380,8 +1516,30 @@ function WhereSection({ listing }) {
   return (
     <Section title="Where you'll be">
       <AddressMap address={address} lat={listing.lat} lng={listing.lng} />
+      <MilesFromYou address={address} lat={listing.lat} lng={listing.lng} />
     </Section>
   );
+}
+
+/* "7.7 mi from you", when the visitor shared a location and the place can be found. */
+function MilesFromYou({ address, lat, lng }) {
+  const from = pointOf(useLocation());
+  const stored = storedPoint({ lat, lng });
+  const [found, setFound] = useState(null);
+  useEffect(() => {
+    let live = true;
+    if (stored || !from || !address) return undefined;
+    geocode(address).then((p) => live && setFound(p ? { lat: p.lat, lng: p.lng } : null));
+    return () => {
+      live = false;
+    };
+    // stored and from are derived from these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, lat, lng, Boolean(from)]);
+  const to = stored || found;
+  const mi = from && to ? milesLabel(distanceMiles(from, to)) : '';
+  if (!mi) return null;
+  return <p style={S(`margin:8px 0 0;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>{mi} from you</p>;
 }
 
 /* ---- other states -------------------------------------------------------- */

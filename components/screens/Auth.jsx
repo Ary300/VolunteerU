@@ -21,6 +21,7 @@ import { useSnapshot, getState } from '../../lib/store.js';
 import { supabase } from '../../lib/supabase.js';
 import { EMAIL_RX, passwordStrength, signIn, signUp, perform } from '../../lib/db.js';
 import { sameSitePath } from '../../lib/safePath.js';
+import { loadListingsByIds, listingShifts } from '../../lib/listings.js';
 
 // The only ?intent= values onboarding understands.
 const SIGNUP_INTENTS = ['start', 'join', 'both'];
@@ -323,6 +324,32 @@ function SwitchLine({ lead, href, label }) {
   );
 }
 
+/* Coming from a listing (?next=/join/<id>, maybe with ?shift=<id>): the
+   listing's name and the shift label, read from the public listing, so the
+   form can say where the visitor goes back to. null until loaded or when
+   there is no listing. */
+function useNextListing(nextPath) {
+  const [ctx, setCtx] = useState(null);
+  const m = /^\/join\/([0-9a-f-]{36})(?:\?([^#]*))?/i.exec(nextPath || '');
+  const id = m ? m[1] : '';
+  let shiftId = '';
+  try { shiftId = m && m[2] ? new URLSearchParams(m[2]).get('shift') || '' : ''; } catch { shiftId = ''; }
+  useEffect(() => {
+    if (!id) { setCtx(null); return undefined; }
+    let alive = true;
+    loadListingsByIds([id])
+      .then((rows) => {
+        const l = rows && rows[0];
+        if (!alive || !l || !l.name) return;
+        const sh = shiftId ? listingShifts(l).find((x) => String(x.id) === String(shiftId)) : null;
+        setCtx({ name: String(l.name), shift: sh && sh.d ? String(sh.d) : '' });
+      })
+      .catch(() => { /* the generic heading still works */ });
+    return () => { alive = false; };
+  }, [id, shiftId]);
+  return ctx;
+}
+
 export default function Auth({ mode = 'signin' }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -335,14 +362,17 @@ export default function Auth({ mode = 'signin' }) {
   if (intentParam) carry.set('intent', intentParam);
   const nextQuery = carry.toString() ? `?${carry.toString()}` : '';
   const emailParam = (params.get('email') || '').slice(0, 254);
+  // An invite link knows the name the lead typed, so sign-up starts with it.
+  const nameParam = (k) => (mode === 'signup' ? String(params.get(k) || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) : '');
+  const fromListing = useNextListing(mode === 'signin' || mode === 'signup' ? nextParam : '');
   const { state } = useSnapshot();
 
   const [form, setForm] = useState({
     email: emailParam || (mode === 'signin' ? state.account.email || readLastEmail() : ''),
     password: '',
     confirm: '',
-    firstName: '',
-    lastName: '',
+    firstName: nameParam('first'),
+    lastName: nameParam('last'),
     agree: false,
   });
   const [errors, setErrors] = useState({});
@@ -366,7 +396,10 @@ export default function Auth({ mode = 'signin' }) {
     if (failure) setFailure(null);
   };
 
-  const copy = COPY[mode];
+  // A "Start a student project" CTA lands here with intent=start.
+  const copy = mode === 'signup' && intentParam === 'start'
+    ? { ...COPY.signup, sub: "Start a student project and find students to help. It's free." }
+    : COPY[mode];
   const photo = PHOTO[mode] || PHOTO.signin;
   const strength = passwordStrength(form.password);
   const newPassword = mode === 'signup' || mode === 'reset';
@@ -474,6 +507,12 @@ export default function Auth({ mode = 'signin' }) {
               <>
                 <h1 className="vu-auth-h1">{copy.title}</h1>
                 {copy.sub ? <p style={S(`margin:12px 0 0;font:400 16px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>{copy.sub}</p> : null}
+                {fromListing ? (
+                  <p style={S(`margin:${copy.sub ? 8 : 12}px 0 0;font:400 16px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>
+                    Then you're back on <strong style={S(`font-weight:600;color:${C.ink}`)}>{fromListing.name}</strong>
+                    {fromListing.shift ? ` to sign up for ${fromListing.shift}.` : '.'}
+                  </p>
+                ) : null}
               </>
             )}
 

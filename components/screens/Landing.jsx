@@ -18,12 +18,16 @@ import { useSnapshot } from '../../lib/store.js';
 import { Button, Icon } from '../ui.jsx';
 import { SearchBar, CategoryRow, ListingCard, NonprofitRow, DateBlock, whenParts, Sep, WHEN_OPTIONS, ShareHoursCard } from '../vu/index.js';
 import { MarketingHeader, MarketingFooter, useMarketingLinks, scrollToAnchor } from '../Marketing.jsx';
-import { searchListings, searchWebNonprofits, parseState, listingShifts } from '../../lib/listings.js';
+import { searchListings, parseState, listingShifts, townFromZip } from '../../lib/listings.js';
 import { isVolunteerPlace } from '../../lib/nonprofitRules.js';
 import { inferYear, shiftDates } from '../../lib/calendar.js';
-import { whenWindow } from '../DiscoverListings.jsx';
+import { whenWindow, milesFrom } from '../DiscoverListings.jsx';
 import { pickPhotos, PHOTOS, DONATION_PHOTOS } from '../../lib/photos.js';
 import { shiftLabel } from './JoinListing.jsx';
+import { cityOf, stateName, useNearestFirst } from '../WebNonprofits.jsx';
+import NearYou from '../NearYou.jsx';
+import { useLocation, usePlace, resolvePlace, areaOf, pointOf, milesLabel } from '../../lib/location.js';
+import { setPref } from '../../lib/db.js';
 
 const PAGE = 6; // rows per "page" of the list under the grid
 const GRID_COLS = 4; // .lp-grid columns at desktop width
@@ -129,9 +133,8 @@ const HOME_CITY = 'Indianapolis';
    The "See all" link opens every record on Discover with the true total. */
 const HOME_PAGES = [0, 1, 2];
 const CAUSE_ORDER = ['Environment', 'Education', 'Human services', 'Youth', 'Health', 'Arts', 'Civic', 'Disaster relief', 'Food & hunger', 'Homelessness', 'Animals', 'Recreation', 'Religion', 'Nonprofit'];
-/* Listings in Indianapolis sort first in the default view, then the towns
-   around it. */
-const HOME_RE = /\b(indianapolis|indy)\b/i;
+/* Listings in the visitor's town (Indianapolis until they say otherwise)
+   sort first in the default view, then the towns around it. */
 const NEARBY_RE = /\b(indiana|carmel|fishers|westfield|noblesville|zionsville|greenwood|lawrence|speedway|beech grove|avon|plainfield|brownsburg|hamilton county|marion county)\b|,\s*in\b/i;
 
 const LANDING_CSS = `
@@ -143,7 +146,8 @@ const LANDING_CSS = `
 .lp-hero-copy h1 { margin:0; font:700 76px/.98 ${F.display}; letter-spacing:-0.035em; text-wrap:balance; }
 .lp-hero-copy p { margin:18px 0 0; max-width:540px; font:400 19px/1.45 ${F.body}; color:rgba(255,255,255,.92); text-wrap:pretty; }
 .lp-hero-search { position:absolute; left:40px; right:200px; bottom:-42px; z-index:2; }
-.lp-under { margin-top:66px; padding-left:68px; display:flex; align-items:center; gap:10px 24px; flex-wrap:wrap; font:500 14px/1.4 ${F.body}; color:${C.ink2}; }
+.lp-near { margin-top:62px; padding-left:68px; }
+.lp-under { margin-top:10px; padding-left:68px; display:flex; align-items:center; gap:10px 24px; flex-wrap:wrap; font:500 14px/1.4 ${F.body}; color:${C.ink2}; }
 .lp-under a { color:${C.ink}; font-weight:600; text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; }
 .lp-hint { font:500 14px/1.4 ${F.body}; color:${C.emberDeep}; }
 .lp-cats { margin-top:44px; }
@@ -195,7 +199,7 @@ const LANDING_CSS = `
   .lp-hero-copy { left:36px; right:36px; }
   .lp-hero-copy h1 { font-size:60px; }
   .lp-hero-search { left:24px; right:24px; }
-  .lp-under { padding-left:28px; }
+  .lp-under, .lp-near { padding-left:28px; }
   .lp-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .lp-how { grid-template-columns:minmax(0,1fr); gap:40px; }
   .lp-how-card { justify-self:start; }
@@ -220,7 +224,8 @@ const LANDING_CSS = `
   .lp-hero-copy h1 { font-size:40px; line-height:1; }
   .lp-hero-copy p { margin-top:12px; font-size:16px; }
   .lp-hero-search { position:relative; left:auto; right:auto; bottom:auto; margin:-72px 12px 0; }
-  .lp-under { margin-top:16px; padding-left:0; justify-content:center; gap:8px 16px; font-size:13px; }
+  .lp-near { margin-top:14px; padding-left:0; }
+  .lp-under { margin-top:8px; padding-left:0; justify-content:center; gap:8px 16px; font-size:13px; }
   .lp-cats { margin-top:28px; }
   .lp-cats .vu-cats { margin:0 -16px; padding:0 16px; scroll-padding:0 16px; }
   .lp-sec { margin-top:40px; }
@@ -304,15 +309,22 @@ function arrange(rows, when) {
   return dated.concat(undated);
 }
 
-/* Indianapolis listings first, then the rest of central Indiana, then everything
-   else, keeping the date order inside each group. */
-function localRank(l) {
+/** A whole-word match for a town, with "Indy" for Indianapolis. */
+function townRe(city) {
+  const c = String(city || '').trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!c) return null;
+  return new RegExp(`\\b(${c}${c === 'indianapolis' ? '|indy' : ''})\\b`, 'i');
+}
+
+/* Listings in the home town first, then the rest of central Indiana, then
+   everything else, keeping the date order inside each group. */
+function localRank(l, homeRe) {
   const where = `${l.site || ''} ${l.location || ''}`;
-  if (HOME_RE.test(where)) return 0;
+  if (homeRe && homeRe.test(where)) return 0;
   return NEARBY_RE.test(where) ? 1 : 2;
 }
-function localFirst(rows) {
-  return rows.map((l, i) => ({ l, i, r: localRank(l) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.l);
+function localFirst(rows, homeRe) {
+  return rows.map((l, i) => ({ l, i, r: localRank(l, homeRe) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.l);
 }
 
 /* ProPublica returns names in capitals. */
@@ -320,7 +332,9 @@ function titleCase(str) {
   return String(str || '').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function cardProps(l, photo) {
+/** Card fields for a listing. `origin` is the visitor's own point, for "2.4 mi". */
+function cardProps(l, photo, origin = null) {
+  const online = l.delivery === 'remote';
   const student = l.org_class === 'student' || Boolean(l.is_student_led);
   const place = String(l.site || l.location || '').trim();
   const first = place.split(',')[0].trim();
@@ -336,7 +350,8 @@ function cardProps(l, photo) {
     // Undated listings pass '' so the tile reads "No dates yet".
     when: l._next ? shiftLabel(l._next.sh) : '',
     moreDates: more > 0 ? more : 0,
-    online: l.delivery === 'remote',
+    online,
+    distance: origin && !online ? milesLabel(milesFrom(l, origin)) || undefined : undefined,
     photo,
     cause: l.cause,
   };
@@ -372,22 +387,22 @@ function listingFilters({ q, near, cat }) {
   return { q, near, causes: c && c.cause ? [c.cause] : [], place: cat === 'online' ? 'online' : 'all' };
 }
 
-/* One page of ProPublica results for Indianapolis. */
-async function homePage(page) {
-  const res = await fetch(`/api/nonprofits?city=${HOME_CITY}&state=IN&page=${page}`);
+/* One page of ProPublica results for a town. */
+async function homePage(page, city, state) {
+  const res = await fetch(`/api/nonprofits?${new URLSearchParams({ city, state, page: String(page) }).toString()}`);
   if (!res.ok) throw new Error(`nonprofits ${res.status}`);
   const data = await res.json();
   return { rows: Array.isArray(data && data.organizations) ? data.organizations : [], total: Number(data && data.total) || 0, capped: Boolean(data && data.capped) };
 }
 
-/* Indianapolis nonprofits, one per cause in turn so the list mixes causes. */
-async function loadHomeOrgs(max) {
-  const pages = await Promise.all(HOME_PAGES.map(homePage));
+/* The home town's nonprofits, one per cause in turn so the list mixes causes. */
+async function loadHomeOrgs(max, city = HOME_CITY, state = 'IN') {
+  const pages = await Promise.all(HOME_PAGES.map((n) => homePage(n, city, state)));
   const seen = new Set();
   const rows = pages.flatMap((p) => p.rows).filter((o) => {
     if (!o || seen.has(o.ein)) return false;
     seen.add(o.ein);
-    return String(o.city || '').toLowerCase() === HOME_CITY.toLowerCase() && isVolunteerPlace(o);
+    return String(o.city || '').toLowerCase() === city.toLowerCase() && isVolunteerPlace(o);
   });
   const byCause = new Map();
   for (const o of rows) {
@@ -403,27 +418,113 @@ async function loadHomeOrgs(max) {
   return Object.assign(out, { total: pages[0] ? pages[0].total : 0, capped: Boolean(pages[0] && pages[0].capped) });
 }
 
-async function loadOrgs({ q, near, cat }, homeRegion) {
-  const c = CATEGORIES.find((x) => x.key === cat);
-  const place = near || homeRegion || '';
-  if (!q && !near && !(c && c.cause) && homeRegion === HOME_AREA) return loadHomeOrgs(MAX_ORGS);
-  if (q || (c && c.cause)) {
-    const rows = await searchWebNonprofits({ q, near: place, causes: c && c.cause ? [c.cause] : [], throwOnError: true });
-    return rows.slice(0, MAX_ORGS);
+/* Words that find a cause's nonprofits inside one town. ProPublica matches
+   every word against the name and city, so a town needs a few plain words
+   per cause (one two-word phrase finds almost nothing). */
+const TOWN_CAUSE_WORDS = {
+  'Food & hunger': ['food bank', 'food pantry', 'food'],
+  Education: ['tutoring', 'library', 'education'],
+  Environment: ['conservation', 'garden', 'environmental'],
+  Animals: ['animal', 'humane'],
+  Homelessness: ['homeless', 'shelter'],
+  Seniors: ['senior'],
+  Health: ['health'],
+  Arts: ['arts'],
+  Civic: ['community'],
+  'Disaster relief': ['disaster'],
+};
+const STATE_CAUSE_WORD = {
+  'Food & hunger': 'food bank', Education: 'education', Homelessness: 'homeless shelter',
+  Environment: 'conservation', Animals: 'animal rescue', Civic: 'community',
+  Health: 'health', Seniors: 'senior', Arts: 'arts', 'Disaster relief': 'disaster relief',
+};
+
+/* One ProPublica search through /api/nonprofits. Throws when it's down. */
+async function orgSearch(params) {
+  const res = await fetch(`/api/nonprofits?${new URLSearchParams(params).toString()}`);
+  if (!res.ok) throw new Error(`nonprofits ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data && data.organizations) ? data.organizations : [];
+}
+
+/* Where a nonprofit search runs: { city, state } from the typed Where (a ZIP
+   becomes its town) or else the visitor's own area. */
+async function orgArea(near, homeRegion) {
+  const text = String(near || homeRegion || '').trim();
+  if (!text) return { city: '', state: '' };
+  const zip = /^\d{5}$/.test(text);
+  let city = zip ? townFromZip(text) : cityOf(text);
+  let state = parseState(text);
+  if (zip || (city && !parseState(text.replace(/\b\d{5}\b/g, '')))) {
+    const res = await resolvePlace(text);
+    if (res.ok) {
+      city = res.rec.town || city;
+      state = res.rec.state || state;
+    }
   }
-  const lists = await Promise.all(DEFAULT_ORG_QUERIES.map((term) => searchWebNonprofits({ q: term, near: place, throwOnError: true })));
+  return { city, state: city && !state ? 'IN' : state };
+}
+
+/* Rows from several searches, one from each in turn, no EIN twice. */
+function mergeOrgs(lists, max) {
   const seen = new Set();
   const out = [];
-  for (let i = 0; out.length < MAX_ORGS && i < 4; i++) {
+  const longest = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; out.length < max && i < longest; i++) {
     for (const list of lists) {
       const o = list[i];
-      if (o && !seen.has(o.ein) && out.length < MAX_ORGS) {
+      if (o && !seen.has(o.ein) && out.length < max) {
         seen.add(o.ein);
         out.push(o);
       }
     }
   }
   return out;
+}
+
+/* A word or a cause, searched in one town. A cause keeps the records that
+   could take a volunteer, with the ones that fit the cause first. */
+async function townOrgs({ q, cause }, city, state) {
+  if (q) return orgSearch({ q, city, state });
+  const words = TOWN_CAUSE_WORDS[cause] || [STATE_CAUSE_WORD[cause] || cause];
+  const lists = await Promise.all(words.map((w) => orgSearch({ q: w, city, state })));
+  const rows = mergeOrgs(lists, 60).filter(isVolunteerPlace);
+  // Many records carry no IRS cause code, so a name with the cause's own
+  // phrase in it ("Gleaners Food Bank") counts as that cause too.
+  const phrases = words.filter((w) => w.includes(' '));
+  const fits = (o) => o.cause === cause || phrases.some((w) => String(o.name || '').toLowerCase().includes(w));
+  return [...rows.filter(fits), ...rows.filter((o) => !fits(o))];
+}
+
+/* The nonprofits section's rows, with `where` ({ city, state }) saying where
+   they're from: the town searched, or its state when the town had none. */
+async function loadOrgs({ q, near, cat }, homeRegion) {
+  const c = CATEGORIES.find((x) => x.key === cat);
+  const cause = c && c.cause ? c.cause : '';
+  const homeCity = cityOf(homeRegion);
+  if (!q && !near && !cause && homeCity) {
+    const rows = await loadHomeOrgs(MAX_ORGS, homeCity, parseState(homeRegion) || 'IN');
+    return Object.assign(rows, { where: { city: homeCity, state: parseState(homeRegion) || 'IN' } });
+  }
+  const { city, state } = await orgArea(near, homeRegion);
+  if (city) {
+    if (!q && !cause) {
+      const rows = await loadHomeOrgs(MAX_ORGS, city, state);
+      if (rows.length) return Object.assign(rows, { where: { city, state } });
+    } else {
+      const rows = await townOrgs({ q, cause }, city, state);
+      if (rows.length) return Object.assign(rows.slice(0, MAX_ORGS), { where: { city, state } });
+    }
+  }
+  // No town, or a town with no records for this: the state, or every state.
+  const place = { ...(state ? { state } : {}) };
+  if (q || cause) {
+    const rows = await orgSearch({ q: q || STATE_CAUSE_WORD[cause] || cause, ...place });
+    return Object.assign(rows.slice(0, MAX_ORGS), { where: { city: '', state, missed: city } });
+  }
+  if (!state) return Object.assign([], { where: { city: '', state: '', missed: city } });
+  const lists = await Promise.all(DEFAULT_ORG_QUERIES.map((term) => orgSearch({ q: term, ...place })));
+  return Object.assign(mergeOrgs(lists.map((l) => l.slice(0, 4)), MAX_ORGS), { where: { city: '', state, missed: city } });
 }
 
 /* ---- sections -------------------------------------------------------------- */
@@ -454,11 +555,12 @@ function Notice({ title, body, action }) {
 
 /* What the results section shows, computed once in Landing so the page art
    below can avoid the photos the listings use. */
-function useResultsView({ state, query, later, local }) {
+function useResultsView({ state, query, later, homeCity }) {
   const searched = Boolean(query.q || query.near || query.when || query.cat !== 'near');
-  const home = local && !searched;
+  const home = Boolean(homeCity) && !searched;
   const all = state.items;
-  const ranked = useMemo(() => (home ? localFirst(all || []) : all || []), [home, all]);
+  const homeRe = useMemo(() => townRe(homeCity), [homeCity]);
+  const ranked = useMemo(() => (home ? localFirst(all || [], homeRe) : all || []), [home, all, homeRe]);
   // With no search, the grid shows what's open this week; "Show later dates"
   // opens it up to every listing.
   const week = !searched && !later;
@@ -469,16 +571,16 @@ function useResultsView({ state, query, later, local }) {
   const photos = useMemo(() => pickPhotos(pool, { seed: false, used: [HERO_PHOTO] }), [pool]);
   const split = useMemo(() => gridAndRows(pool, photos), [pool, photos]);
   const taken = useMemo(() => [...photos.values()].filter(Boolean).map((p) => p.key), [photos]);
-  return { searched, home, week, pool, photos, laterCount, grid: split.grid, rows: split.rows, taken };
+  return { searched, home, homeRe, week, pool, photos, laterCount, grid: split.grid, rows: split.rows, taken };
 }
 
 /* A listing as a row: date, title, then time and who runs it. Listings with
    their own photo that didn't fit in the grid lead with a thumbnail. */
-function ListingRow({ l, photo }) {
-  const c = cardProps(l, photo);
+function ListingRow({ l, photo, origin }) {
+  const c = cardProps(l, photo, origin);
   const when = whenParts({ when: c.when, moreDates: c.moreDates, hasPhoto: Boolean(photo), online: c.online }).map((x) => x.text);
   const who = c.studentProject ? ['Student project', c.byline].filter(Boolean).join(' · ') : c.org || '';
-  const meta = [...when, who].filter(Boolean);
+  const meta = [...when, who, c.distance].filter(Boolean);
   const dated = Boolean(l._next);
   const lead = photo ? (
     /* eslint-disable-next-line @next/next/no-img-element */
@@ -511,15 +613,15 @@ function ListingRow({ l, photo }) {
   );
 }
 
-function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear, shown, onMore, onLater, onNonprofits, discoverHref, authed, sectionRef }) {
-  const { searched, home, week, pool, photos, laterCount, grid, rows } = view;
+function Opportunities({ state, view, query, homeCity, origin, onRetry, onWiden, onAnyDay, onClear, shown, onMore, onLater, onNonprofits, discoverHref, sectionRef }) {
+  const { searched, home, homeRe, week, pool, photos, laterCount, grid, rows } = view;
   const visibleRows = useMemo(() => rows.slice(0, shown), [rows, shown]);
-  const nearHome = home && pool.some((l) => localRank(l) < 2);
+  const nearHome = home && pool.some((l) => localRank(l, homeRe) < 2);
   const title = searched
     ? describe(query)
     : week
-      ? (nearHome || (home && !pool.length) ? 'Open this week around Indianapolis' : 'Open this week')
-      : nearHome ? 'Open around Indianapolis' : 'Open on VolunteerU';
+      ? (nearHome || (home && !pool.length) ? `Open this week around ${homeCity}` : 'Open this week')
+      : nearHome ? `Open around ${homeCity}` : 'Open on VolunteerU';
   const rowsTitle = searched ? 'More results' : week ? 'More this week' : 'More opportunities';
   let body;
   if (state.status === 'loading') body = <SkeletonCards />;
@@ -538,7 +640,7 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
       />
     ) : (
       <Notice
-        title={home ? 'Nothing posted near Indianapolis this week' : 'Nothing posted this week'}
+        title={home ? `Nothing posted near ${homeCity} this week` : 'Nothing posted this week'}
         body={laterCount ? `${laterCount} ${laterCount === 1 ? 'opportunity has' : 'opportunities have'} later dates. The nonprofits below take volunteers too.` : 'Organizations and student projects show up here once they post. The nonprofits below take volunteers too.'}
         action={
           <div style={S('display:flex;gap:12px;flex-wrap:wrap')}>
@@ -555,7 +657,7 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
           <ul className="lp-grid">
             {grid.map((l, i) => (
               <li key={l.id}>
-                <ListingCard {...cardProps(l, photos.get(l.id))} eager={i < GRID_COLS} />
+                <ListingCard {...cardProps(l, photos.get(l.id), origin)} eager={i < GRID_COLS} />
               </li>
             ))}
           </ul>
@@ -564,7 +666,7 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
           <div className={grid.length ? 'lp-rows' : 'lp-rows is-only'}>
             {grid.length ? <h3 className="vu-t-h3s">{rowsTitle}</h3> : null}
             <ul className="vu-list lp-list" aria-label={grid.length ? rowsTitle : title}>
-              {visibleRows.map((l) => <ListingRow key={l.id} l={l} photo={photos.get(l.id)} />)}
+              {visibleRows.map((l) => <ListingRow key={l.id} l={l} photo={photos.get(l.id)} origin={origin} />)}
             </ul>
           </div>
         ) : null}
@@ -581,7 +683,7 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
     <section ref={sectionRef} id="lp-results" className="lp-sec" aria-labelledby="lp-results-h" aria-busy={state.status === 'loading' ? 'true' : 'false'}>
       <div className="lp-sec-head">
         <h2 id="lp-results-h" aria-live="polite">{title}</h2>
-        {authed && pool.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null}
+        {pool.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null}
       </div>
       {body}
       {more ? <div className="lp-more">{more}</div> : null}
@@ -589,24 +691,40 @@ function Opportunities({ state, view, query, onRetry, onWiden, onAnyDay, onClear
   );
 }
 
-function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discoverHref }) {
-  const rows = shownRows || state.rows;
+function Nonprofits({ state, rows: shownRows, query, homeRegion, discoverHref, origin = null }) {
+  // Nearest to the visitor first, each with its distance, when we know where they are.
+  const nearest = useNearestFirst(shownRows || state.rows, origin);
+  const rows = nearest.rows;
   const near = query.near || homeRegion;
   const c = CATEGORIES.find((x) => x.key === query.cat);
   const what = query.q ? `Nonprofits for “${query.q}”` : c && c.cause ? `${c.label} nonprofits` : 'Registered nonprofits';
-  const nationwide = near && !parseState(near);
-  const home = near === HOME_AREA && !query.q && !query.near && !(c && c.cause);
-  const title = home ? 'Nonprofits in Indianapolis' : near && !nationwide ? `${what} near ${near}` : what;
+  const homeCity = cityOf(homeRegion);
+  const home = Boolean(homeCity) && near === homeRegion && !query.q && !query.near && !(c && c.cause);
+  // Where the rows really come from (loadOrgs reports it), so the heading
+  // never names a town the results aren't in.
+  const where = state.status === 'done' && state.where ? state.where : null;
+  const fellBack = Boolean(where && !where.city);
+  const nationwide = fellBack ? !where.state : near && !parseState(near) && !cityOf(near);
+  const title = home
+    ? `Nonprofits in ${homeCity}`
+    : fellBack
+      ? where.state ? `${what} in ${stateName(where.state)}` : what
+      : near && !nationwide ? `${what} near ${near}` : what;
+  const missed = fellBack && where.missed ? `No IRS records matched in ${where.missed}, so these are from ${where.state ? `across ${stateName(where.state)}` : 'every state'}. ` : '';
   const sub = home
-    ? 'From IRS nonprofit records for Indianapolis. Each one opens a page with its address, map and any open shifts.'
-    : nationwide
-    ? `From IRS nonprofit records, all states. Add a state to “${near}” to narrow it.`
-    : near
-      ? 'From IRS nonprofit records. Each one opens a page with its address, map and any open shifts.'
-      : 'From IRS nonprofit records. Search a city or state to see ones near you.';
-  // Every Indianapolis record, on Discover's Nonprofits tab, with ProPublica's real total.
+    ? `From IRS nonprofit records for ${homeCity}. Each one opens a page with its address, map, how to volunteer and any open shifts.`
+    : missed
+      ? `${missed}Each one opens a page with its address, map and any open shifts.`
+      : nationwide
+        ? `From IRS nonprofit records, all states. Add a state to “${near}” to narrow it.`
+        : where && where.city
+          ? `From IRS nonprofit records for ${where.city}${where.state ? `, ${where.state}` : ''}. Each one opens a page with its address, map, how to volunteer and any open shifts.`
+          : near
+            ? 'From IRS nonprofit records. Each one opens a page with its address, map and any open shifts.'
+            : 'From IRS nonprofit records. Search a city or state to see ones near you.';
+  // Every record for the home town, on Discover's Nonprofits tab, with ProPublica's real total.
   const seeAll = home && state.status === 'done' && state.total > 0
-    ? <Link className="lp-link" href={`/discover?${new URLSearchParams({ view: 'nonprofits', near: HOME_AREA }).toString()}`}>See all {state.total.toLocaleString('en-US')}{state.capped ? '+' : ''} nonprofits in Indianapolis</Link>
+    ? <Link className="lp-link" href={`/discover?${new URLSearchParams({ view: 'nonprofits', near: homeRegion }).toString()}`}>See all {state.total.toLocaleString('en-US')}{state.capped ? '+' : ''} nonprofits in {homeCity}</Link>
     : null;
   let body;
   if (state.status === 'loading') {
@@ -622,7 +740,7 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discove
           <NonprofitRow
             key={o.ein}
             name={titleCase(o.name)}
-            parts={[o.cause && o.cause !== 'Nonprofit' ? o.cause.replace('&', 'and') : '', [titleCase(o.city), o.state].filter(Boolean).join(', ')]}
+            parts={[o.cause && o.cause !== 'Nonprofit' ? o.cause.replace('&', 'and') : '', [titleCase(o.city), o.state].filter(Boolean).join(', '), nearest.miles(o)]}
             href={`/nonprofits/${o.ein}`}
           />
         ))}
@@ -636,7 +754,7 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, authed, discove
           <h2 id="lp-np-h">{title}</h2>
           <p className="lp-sub">{sub}</p>
         </div>
-        {seeAll || (authed && rows.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null)}
+        {seeAll || (rows.length ? <Link className="lp-link" href={discoverHref}>Open in Discover</Link> : null)}
       </div>
       {body}
     </section>
@@ -777,7 +895,20 @@ export default function Landing() {
   const router = useRouter();
   const links = useMarketingLinks();
   const { state: store } = useSnapshot();
-  const homeRegion = links.authed ? String((store.prefs && store.prefs.location) || '').trim() : HOME_AREA;
+  // The visitor's own area: a signed-in volunteer's saved one, else the
+  // location this browser was given (the Near you line), else Indianapolis
+  // for signed-out visitors.
+  const loc = useLocation();
+  const locSet = loc && loc.status === 'set' ? loc : null;
+  const locArea = areaOf(locSet);
+  const savedArea = links.authed ? String((store.prefs && store.prefs.location) || '').trim() : '';
+  const chosenArea = savedArea || locArea;
+  const homeRegion = chosenArea || (links.authed ? '' : HOME_AREA);
+  const homeCity = cityOf(homeRegion);
+  // Distances are from the visitor's own point, while the page shows their
+  // own town (a saved area somewhere else has no "you" in it).
+  const ownPoint = locSet && (!savedArea || cityOf(savedArea).toLowerCase() === String(locSet.town || '').toLowerCase()) ? pointOf(locSet) : null;
+  const [askLoc, setAskLoc] = useState(0);
   const resultsRef = useRef(null);
   const reqRef = useRef(0);
 
@@ -790,7 +921,13 @@ export default function Landing() {
   const [orgs, setOrgs] = useState({ status: 'loading', rows: [] });
   const [shown, setShown] = useState(PAGE);
   const [later, setLater] = useState(false);
-  const view = useResultsView({ state: opps, query, later, local: homeRegion === HOME_AREA });
+  // A ZIP or town typed in Where measures distances from there, the same as
+  // one picked in the Near you line (the visitor's own point when it's theirs).
+  const typedNear = /^\s*\d{5}\s*$/.test(query.near) || cityOf(query.near) ? query.near.trim() : '';
+  const ownTyped = Boolean(typedNear) && Boolean(locSet) && [areaOf(locSet), locSet.zip, locSet.town].some((v) => v && String(v).toLowerCase() === typedNear.toLowerCase());
+  const typedPlace = usePlace(ownTyped ? '' : typedNear);
+  const origin = !typedNear || ownTyped ? (typedNear ? pointOf(locSet) : ownPoint) : pointOf(typedPlace.rec);
+  const view = useResultsView({ state: opps, query, later, homeCity });
   const takenSig = view.taken.join('|');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const art = useMemo(() => pickArt(view.taken), [takenSig]);
@@ -810,17 +947,27 @@ export default function Landing() {
         if (id === reqRef.current) setOpps({ status: 'error', items: [] });
       });
     loadOrgs(next, homeRegion)
-      .then((rows) => { if (id === reqRef.current) setOrgs({ status: 'done', rows, total: Number(rows.total) || 0, capped: Boolean(rows.capped) }); })
+      .then((rows) => { if (id === reqRef.current) setOrgs({ status: 'done', rows, total: Number(rows.total) || 0, capped: Boolean(rows.capped), where: rows.where || null }); })
       .catch((err) => {
         console.warn('[landing] nonprofit search failed', err);
         if (id === reqRef.current) setOrgs({ status: 'error', rows: [] });
       });
   }
 
+  // A new home area reruns whatever is showing, there.
+  const queryRef = useRef(EMPTY_QUERY);
+  queryRef.current = query;
   useEffect(() => {
-    run(EMPTY_QUERY);
+    run(queryRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeRegion]);
+
+  // A location picked in the Near you line; a signed-in volunteer's saved
+  // area moves with it. One the browser filled in quietly leaves a saved area alone.
+  function onLocation(rec, how = {}) {
+    const area = areaOf(rec);
+    if (links.authed && area && area !== savedArea && !(how.quiet && savedArea)) setPref('location', area);
+  }
 
   // Arriving from another page at /#student-projects or /#search: the jump
   // runs before the results and nonprofit rows above the anchor have grown,
@@ -873,6 +1020,8 @@ export default function Landing() {
   };
 
   const onCategory = (key) => {
+    // Near you with no location yet asks for one.
+    if (key === 'near' && !chosenArea) setAskLoc((n) => n + 1);
     setWhat('');
     setHint('');
     run({ q: '', near: where.trim(), when, cat: key }, { scroll: true });
@@ -943,13 +1092,15 @@ export default function Landing() {
               onWhere={(v) => { setWhere(v); if (hint) setHint(''); }}
               when={when}
               onWhen={setWhen}
-              wherePlaceholder="Indianapolis, IN"
+              wherePlaceholder={homeRegion || HOME_AREA}
               onSubmit={onSearch}
               busy={opps.status === 'loading' && query !== EMPTY_QUERY}
               label="Search opportunities and nonprofits"
             />
           </div>
         </section>
+
+        <NearYou className="lp-near" area={chosenArea} fallback={HOME_CITY} ask={askLoc} onChange={onLocation} />
 
         <div className="lp-under">
           {hint ? <span className="lp-hint" role="alert">{hint}</span> : <span>Free for students 13 and up</span>}
@@ -980,10 +1131,11 @@ export default function Landing() {
           onAnyDay={() => { setWhen(''); run({ ...query, when: '' }); }}
           onClear={clearSearch}
           discoverHref={discoverHref}
-          authed={links.authed}
+          homeCity={homeCity}
+          origin={origin}
         />
 
-        <Nonprofits state={orgs} rows={orgRows} query={query} homeRegion={homeRegion} authed={links.authed} discoverHref={nonprofitsHref} />
+        <Nonprofits state={orgs} rows={orgRows} query={query} homeRegion={homeRegion} discoverHref={nonprofitsHref} origin={origin} />
 
         <VolunteerOrLead goSearch={goSearch} startProject={startProject} art={art} />
         </div>

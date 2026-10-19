@@ -22,7 +22,7 @@ import { identifyUser, resetAnalytics } from '../lib/analytics.js';
 import { onboardingJustFinished, clearOnboardingFinished } from '../lib/onboardingFlag.js';
 
 /* Routes that require a signed-in account. */
-const PROTECTED = ['/app', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/projects', '/notifications', '/settings', '/onboarding'];
+const PROTECTED = ['/app', '/crew', '/volunteers', '/opportunity', '/apply', '/lead', '/create', '/profile', '/saved', '/friends', '/notifications', '/settings', '/onboarding'];
 /* Routes anyone can open, but a signed-in account finishes onboarding first. */
 const PUBLIC_IN_APP = ['/discover'];
 /* Routes a signed-in user should not sit on. */

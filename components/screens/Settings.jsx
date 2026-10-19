@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { S } from '../../lib/style.js';
 import { C, F, causeOf } from '../../lib/tokens.js';
 import { Pressable, Field, Select, Toggle, Chip, Icon, Avatar, Button, StatusText } from '../ui.jsx';
@@ -140,18 +141,19 @@ function SectionNav({ active, router }) {
   return (
     <nav ref={ref} aria-label="Settings sections" className="vu-set-nav">
       {SECTIONS.map((sec) => (
-        <Pressable
+        // Real links, so a section opens in a new tab and copies as a URL.
+        <Link
           key={sec.k}
-          label={sec.label}
-          current={active === sec.k ? 'page' : undefined}
-          onClick={() => router.push(`/settings/${sec.k}`)}
+          href={`/settings/${sec.k}`}
+          aria-current={active === sec.k ? 'page' : undefined}
           className="vu-set-tab"
+          style={{ textDecoration: 'none' }}
         >
           <span aria-hidden="true" className="vu-set-ic">
             <Icon name={sec.icon} size={18} />
           </span>
           {sec.label}
-        </Pressable>
+        </Link>
       ))}
     </nav>
   );
@@ -345,7 +347,7 @@ function AccountSection({ state, router }) {
           <div className="vu-set-fields" style={S('margin-top:20px')}>
             <Field label="First name" value={f.firstName} onChange={set('firstName')} required error={err.firstName} maxLength={40} autoComplete="given-name" />
             <Field label="Last name" value={f.lastName} onChange={set('lastName')} maxLength={40} autoComplete="family-name" />
-            <Field label="Email" type="email" value={signInEmail} readOnly hint="You sign in with this email." />
+            <Field label="Email" type="email" value={signInEmail} readOnly disabled hint="You sign in with this email. It can't be changed here yet." />
             <Field label="Phone" value={f.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" hint="Not shown to organizations or students." />
             <Field label="School" value={f.school} onChange={set('school')} maxLength={60} />
             <Select label="Grade" value={f.grade} options={GRADES} onChange={set('grade')} />
@@ -671,14 +673,25 @@ function PermissionsSection({ state }) {
 
 /* ---- data ---------------------------------------------------------------- */
 
-async function restoreFrom(file) {
+/* Read and check a backup file before anything is asked or replaced.
+   Resolves to its text; throws with a message that says what to do. */
+async function readBackup(file) {
   const text = await file.text();
   let parsed = null;
   try { parsed = JSON.parse(text); } catch { parsed = null; }
-  if (!parsed || typeof parsed !== 'object' || !('__schema' in parsed)) throw new Error("That file isn't a VolunteerU backup.");
+  const isObj = (v) => !!v && typeof v === 'object';
+  if (!isObj(parsed) || !('__schema' in parsed) || !isObj(parsed.account) || !isObj(parsed.prefs)) {
+    throw new Error("That file isn't a VolunteerU backup. Choose the volunteeru-backup.json you downloaded here.");
+  }
+  if (parsed.__schema !== getState().__schema) throw new Error("That backup is from a different version of VolunteerU, so it can't be loaded.");
   const me = getSyncUser();
-  if (me && parsed.__owner && parsed.__owner !== me) throw new Error('That backup is from a different account.');
+  if (me && parsed.__owner && parsed.__owner !== me) throw new Error('That backup is from a different account. Sign in to that account to restore it.');
+  return text;
+}
+
+function restoreFrom(text) {
   const session = { ...getState().session };
+  const me = getSyncUser();
   importState(text);
   // Keep this sign-in, and save the restored copy to the account.
   update((st) => {
@@ -715,10 +728,18 @@ function DataSection({ router }) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     e.target.value = '';
+    // Check the file first, so a wrong file never reaches the confirm step.
+    let text;
+    try {
+      text = await readBackup(file);
+    } catch (err) {
+      toast({ title: "Backup wasn't restored", message: (err && err.message) || 'Choose a VolunteerU backup file.', tone: 'danger' });
+      return;
+    }
     const ok = await confirmDialog({ title: 'Restore this backup?', body: 'Your saved hours, projects and settings get replaced with what is in the file.', confirmLabel: 'Restore backup', cancelLabel: 'Go back' });
     if (!ok) return;
     try {
-      await restoreFrom(file);
+      restoreFrom(text);
       toast({ title: 'Backup restored', tone: 'ok' });
     } catch (err) {
       console.warn('restore failed', err);

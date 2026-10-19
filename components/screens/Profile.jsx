@@ -23,7 +23,7 @@ import { safeUrl } from '../MemberProjects.jsx';
 import { track } from '../../lib/analytics.js';
 import { useSnapshot } from '../../lib/store.js';
 import { openModal, toast, confirmDialog } from '../../lib/overlays.js';
-import { download, updateAccount, removeHoursLog, syncMyServiceHours } from '../../lib/db.js';
+import { download, updateAccount, removeHoursLog, syncMyServiceHours, csvDate, csvHourStatus } from '../../lib/db.js';
 import { loadMyApplications, memberHourEntries, removeMemberHours } from '../../lib/listings.js';
 import { badges as BADGE_DEFS } from '../../lib/seed.js';
 import { openLogHours, sortByLogDate, causeLabel } from '../LogHoursForm.jsx';
@@ -65,7 +65,8 @@ export function summarizeService(apps) {
     for (const h of memberHourEntries(app)) {
       const verified = !!h.confirmed;
       const hrs = Number(h.hrs) || 0;
-      if (verified) out.verified += hrs; else out.pending += hrs;
+      // Hours the organizer chose not to confirm aren't waiting on anyone.
+      if (verified) out.verified += hrs; else if (!h.declined) out.pending += hrs;
       // `id` is unique across applications (hour ids repeat between them);
       // `hourId` is the id inside this application's log.
       out.entries.push({ ...h, ...base, id: `${app.id}:${h.id}`, hourId: h.id, hrs, verified });
@@ -92,7 +93,8 @@ export function causeTotals(serviceEntries, hoursLog) {
     if (!k) return;
     m.set(k, round1((m.get(k) || 0) + (Number(hrs) || 0)));
   };
-  for (const e of serviceEntries || []) add(e.cause, e.hrs);
+  // Hours the organizer didn't confirm don't count toward any cause.
+  for (const e of serviceEntries || []) if (!e.declined) add(e.cause, e.hrs);
   for (const h of hoursLog || []) add(h.category, h.hrs);
   return [...m.entries()].map(([name, n]) => ({ name, n })).filter((b) => b.n > 0).sort((a, b) => b.n - a.n);
 }
@@ -126,8 +128,8 @@ function csvEscape(v) {
 export function hoursCSV(serviceEntries, hoursLog) {
   const head = ['Date', 'Activity', 'Organization', 'Hours', 'Status'];
   const all = [
-    ...(serviceEntries || []).map((e) => ({ date: e.date, row: [e.date, e.activity || e.name, e.org, e.hrs, e.verified ? 'Confirmed by organizer' : 'Waiting on organizer'] })),
-    ...(hoursLog || []).map((h) => ({ date: h.date, row: [h.date, h.name, h.org, h.hrs, 'Logged on your own'] })),
+    ...(serviceEntries || []).map((e) => ({ date: e.date, row: [csvDate(e.date), e.activity || e.name, e.org, e.hrs, csvHourStatus(e)] })),
+    ...(hoursLog || []).map((h) => ({ date: h.date, row: [csvDate(h.date), h.name, h.org, h.hrs, 'Logged on your own'] })),
   ];
   const rows = sortByLogDate(all).map((x) => x.row);
   return { count: rows.length, text: [head, ...rows].map((r) => r.map(csvEscape).join(',')).join('\n') };
@@ -200,7 +202,7 @@ export default function Profile() {
   const ratings = apps ? ratingsFrom(apps) : [];
   const notes = state.leadFeedback || [];
   const noteCount = ratings.length + notes.length;
-  const helped = helpedPlaces(apps, svcEntries);
+  const helped = helpedPlaces(apps, svcEntries, selfLog);
 
   const sections = [
     { v: 'hours', l: 'Hours', id: 'vu-sec-hours' },
@@ -250,8 +252,10 @@ export default function Profile() {
           const el = document.getElementById(id);
           if (el && el.getBoundingClientRect().top - bar <= 64) cur = keys[i];
         });
+        // Scrolled to the very end, a short last section counts as current. At
+        // the top of a page that already fits the window, the first one does.
         const doc = document.documentElement;
-        if (window.innerHeight + window.scrollY >= doc.scrollHeight - 4) cur = keys[keys.length - 1];
+        if (window.scrollY > 8 && window.innerHeight + window.scrollY >= doc.scrollHeight - 4) cur = keys[keys.length - 1];
         setTab(cur);
       });
     };
@@ -401,7 +405,7 @@ export default function Profile() {
           <div style={S(`margin-top:${metaLine ? 10 : 8}px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px`)}>
             {allRows.length || ratings.length ? (
               <p style={S(`margin:0;font:400 15px/1.5 ${F.body};color:${C.ink2}`)}>
-                <FactSentence shifts={allRows.length} orgs={orgCount} rating={ratings.length ? starsLabel(avg) : ''} raters={ratings.length} />
+                <FactSentence shifts={allRows.filter((r) => r.status !== 'declined').length} orgs={orgCount} rating={ratings.length ? starsLabel(avg) : ''} raters={ratings.length} />
               </p>
             ) : null}
             <span className="vu-noprint">

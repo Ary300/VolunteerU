@@ -11,7 +11,7 @@
    no card chrome (the shared .vu-card classes): the photo, or a DateTile that
    prints the date. A listing with neither has nothing worth a picture-sized
    block, so it's a plain row in a list under the cards. In Newest order the
-   cards come first. The title is a real link to /join/<id>; a plain click
+   cards come first; in Nearest, distance order wins. The title is a real link to /join/<id>; a plain click
    opens the details dialog instead, where the volunteer picks a role, applies
    or messages, and a modified click (new tab) follows the link. A `when`
    window (today, week, weekend, month) is matched against each listing's
@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { S } from '../lib/style.js';
 import { C, F, R } from '../lib/tokens.js';
-import { searchListingsPage, matchListings, applyToListing, loadMyApplications, listingShifts, loadListingsByIds, myId, nearTerm } from '../lib/listings.js';
+import { searchListingsPage, matchListings, applyToListing, loadMyApplications, listingShifts, loadListingsByIds, myId, nearArea, listingInArea, listingSignup, listingNonprofitHref } from '../lib/listings.js';
 import { shiftDates, inferYear, startOfDay } from '../lib/calendar.js';
 import { usePhotoPicker, resolveCover } from '../lib/photos.js';
 import { toggleSaved } from '../lib/db.js';
@@ -38,6 +38,8 @@ import DateBlock from './vu/DateBlock.jsx';
 import { whenParts, fmtWhen, Sep } from './vu/ListingCard.jsx';
 import { causeOf } from '../lib/tokens.js';
 import MessageThread from './MessageThread.jsx';
+import { storedPoint, cachedGeocode, distanceMiles, geocode, directionsHref } from '../lib/geo.js';
+import { milesLabel } from '../lib/location.js';
 
 /* One status vocabulary everywhere on Discover ("Apply" becomes "Applied"). */
 export const STATUS = { pending: 'Applied', accepted: 'Accepted', declined: 'Not accepted', withdrawn: 'Withdrawn' };
@@ -206,14 +208,104 @@ function placeName(site) {
  * 9:00 AM-12:00 PM") for the map pieces to parse; `whenLabel` is the house
  * format ("Sat, Oct 24 · 9 AM to 12 PM · 2 more dates"), '' without a date.
  */
-export function cardFacts(listing, now = new Date()) {
+export function cardFacts(listing, now = new Date(), origin = null) {
   const shifts = listingShifts(listing, now);
   const next = shifts[0] || null;
   const moreDates = Math.max(0, shifts.length - 1);
   const when = next ? [String(next.d || '').trim(), String(next.t || '').trim()].filter(Boolean).join(' · ') : '';
   const whenLabel = next ? fmtWhen({ date: next.d, time: next.t, moreDates }) : '';
   const online = listing.delivery === 'remote' || listing.org_type === 'team';
-  return { next, when, whenLabel, moreDates, place: placeName(listing.site || listing.location), online };
+  const miles = origin && !online ? milesFrom(listing, origin) : NaN;
+  return { next, when, whenLabel, moreDates, place: placeName(listing.site || listing.location), online, miles };
+}
+
+/**
+ * Miles from `origin` to where a listing happens: its stored coordinates, or
+ * the map's cached geocode of its address. NaN when neither is known (no
+ * distance is shown rather than a guess).
+ */
+export function milesFrom(listing, origin) {
+  if (!origin || !listing) return NaN;
+  let p = storedPoint(listing);
+  if (!p) {
+    const address = String(listing.location || listing.site || '').trim();
+    const hit = address ? cachedGeocode(address) : null;
+    p = hit ? { lat: hit.lat, lng: hit.lng } : null;
+  }
+  return p ? distanceMiles(origin, p) : NaN;
+}
+
+/* Nearest looks up the addresses of listings saved without coordinates
+   before the list shows, so a listing isn't sorted last only because the map
+   hasn't placed it yet. Lookups go through geocode() (cached for a month and
+   shared with the map, which asks for the same addresses); a few distinct
+   addresses at most, and never longer than PLACE_WAIT_MS. */
+/* The loading cards: at most this many, with the text lines sized like a
+   card's title, who line and when line, so each block is a card's height. */
+const SKELETON_MAX = 6;
+const SKEL_LINES = { gap0: 10, title: 18, gap: 8, line: 14 };
+
+/* A link in the quick view's links row. */
+const QV_LINK = `display:inline-flex;align-items:center;gap:6px;font:500 14px/1.3 ${F.body};color:${C.ink}`;
+
+const PLACE_MAX = 8;
+const PLACE_WAIT_MS = 2500;
+async function placeListings(rows) {
+  const todo = [];
+  const seen = new Set();
+  for (const l of rows) {
+    if (storedPoint(l)) continue;
+    const address = String(l.location || l.site || '').trim();
+    if (!address || cachedGeocode(address) !== undefined || seen.has(address.toLowerCase())) continue;
+    seen.add(address.toLowerCase());
+    todo.push(address);
+    if (todo.length >= PLACE_MAX) break;
+  }
+  if (!todo.length) return;
+  let timer;
+  const wait = new Promise((resolve) => { timer = setTimeout(resolve, PLACE_WAIT_MS); });
+  try {
+    await Promise.race([Promise.all(todo.map((a) => geocode(a).catch(() => null))), wait]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* The addresses Nearest couldn't place in time, looked up afterwards a few
+   at a time (at most PLACE_REST_MAX), so the list can sort again once they
+   land. Resolves to how many were looked up. */
+const PLACE_REST_MAX = 40;
+const PLACE_REST_CHUNK = 4;
+async function placeRest(rows, alive) {
+  const todo = [];
+  const seen = new Set();
+  for (const l of rows) {
+    if (storedPoint(l)) continue;
+    const address = String(l.location || l.site || '').trim();
+    const key = address.toLowerCase();
+    if (!address || cachedGeocode(address) !== undefined || seen.has(key)) continue;
+    seen.add(key);
+    todo.push(address);
+    if (todo.length >= PLACE_REST_MAX) break;
+  }
+  for (let i = 0; i < todo.length && alive(); i += PLACE_REST_CHUNK) {
+    await Promise.all(todo.slice(i, i + PLACE_REST_CHUNK).map((a) => geocode(a).catch(() => null)));
+  }
+  return todo.length;
+}
+
+/** Nearest first; online listings and ones with no known place keep their order after the rest. */
+function byDistance(rows, origin) {
+  return rows
+    // Online listings show no distance, so they sort with the unplaced ones.
+    .map((l, i) => ({ l, i, d: l.delivery === 'remote' || l.org_type === 'team' ? NaN : milesFrom(l, origin) }))
+    .sort((a, b) => {
+      const ka = Number.isFinite(a.d);
+      const kb = Number.isFinite(b.d);
+      if (ka !== kb) return ka ? -1 : 1;
+      return (ka ? a.d - b.d : 0) || a.i - b.i;
+    })
+    .map((x) => x.l);
 }
 
 function applyErrorMessage(e) {
@@ -247,13 +339,12 @@ const holds = (v, t) => String(v || '').toLowerCase().includes(t);
  * site and cause. Used on the few listings a volunteer saved, which are
  * loaded by id instead of searched.
  */
-export function matchesSearch(l, { q = '', causes = [], kind = 'all', place = 'all', near = '' } = {}, me = null) {
+export function matchesSearch(l, { q = '', causes = [], kind = 'all', place = 'all', near = '', origin = null } = {}, me = null) {
   if (!l || l.status !== 'live') return false;
   if (me && l.owner_id === me) return false;
   if ((kind === 'student' || kind === 'official') && l.org_class !== kind) return false;
   if (causes.length && !causes.includes(l.cause)) return false;
-  const loc = nearTerm(near).toLowerCase();
-  if (loc && !holds(l.site, loc) && !holds(l.location, loc)) return false;
+  if (!listingInArea(l, nearArea(near, origin))) return false;
   if (place === 'online' && !(l.delivery === 'remote' || l.delivery === 'hybrid' || l.org_type === 'team' || /remote|online|virtual/i.test(l.site || ''))) return false;
   if (place === 'person' && !(l.delivery === 'in_person' || l.delivery === 'hybrid')) return false;
   const term = cleanTerm(q);
@@ -293,8 +384,8 @@ async function searchAllPages(filters, maxRows = 1000) {
 }
 
 export default function DiscoverListings({
-  mode = 'search', interest = '', q = '', causes = [], kind = 'all', place = 'all', near = '', sort = 'recent', when = '',
-  windows = [], savedOnly = false, showEmpty = true, heading = '', onClearFilters, onCount, onRows, initial = 6,
+  mode = 'search', interest = '', q = '', causes = [], kind = 'all', place = 'all', near = '', sort: sortBy = 'recent', origin = null, when = '',
+  windows = [], savedOnly = false, showEmpty = true, heading = '', onClearFilters, onAnywhere, onCount, onRows, initial = 6,
   highlight = null, onHover, bare = false, excludeIds = [], scroller = false, cols = 2,
 }) {
   const router = useRouter();
@@ -318,6 +409,14 @@ export default function DiscoverListings({
   const [page, setPage] = useState({ total: null, hasMore: false });
   const [moreState, setMoreState] = useState('idle'); // idle | loading | failed
   const searchKey = useRef('');
+  // Nearest is sorted here, by distance from the visitor; the database
+  // returns those rows newest first. Nearest in a town loads every page so
+  // the closest listing can't sit on a later one.
+  const nearest = sortBy === 'nearest' && Boolean(origin);
+  // Goes up when addresses placed after the first sort are in (placeRest).
+  const [placed, setPlaced] = useState(0);
+  const sort = sortBy === 'nearest' ? 'recent' : sortBy;
+  const originKey = origin ? `${origin.lat.toFixed(4)},${origin.lng.toFixed(4)}` : '';
 
   useEffect(() => {
     let alive = true;
@@ -345,7 +444,7 @@ export default function DiscoverListings({
     setLoading(true);
     setExpanded(false);
     setMoreState('idle');
-    searchKey.current = `${mode}#${interest}#${q}#${causeKey}#${kind}#${place}#${near}#${sort}#${when}#${windowKey}#${savedDep}#${nonce}`;
+    searchKey.current = `${mode}#${interest}#${q}#${causeKey}#${kind}#${place}#${near}#${originKey}#${sort}#${nearest}#${when}#${windowKey}#${savedDep}#${nonce}`;
     const run = async () => {
       try {
         let ls;
@@ -354,7 +453,7 @@ export default function DiscoverListings({
           // The saved ids are on hand, so load those listings directly and
           // filter them, instead of hunting for them page by page.
           const now = new Date();
-          const found = await loadSavedMatches(saved, { q, causes, kind, place, near, sort });
+          const found = await loadSavedMatches(saved, { q, causes, kind, place, near, origin, sort });
           ls = found.filter((l) => inWindow(l, when, now, windows));
           meta = { total: ls.length, hasMore: false };
         } else if (mode === 'match') {
@@ -362,17 +461,23 @@ export default function DiscoverListings({
           // Score a wide pool, then keep the best 9 that fit When and free
           // time: the query ranks only the newest rows it fetches, so a narrow
           // pool can miss the strongest keyword match.
-          const pool = await matchListings({ interest, causes, near, limit: MATCH_POOL });
+          const pool = await matchListings({ interest, causes, near, origin, limit: MATCH_POOL });
           ls = pool.filter((l) => inWindow(l, when, now, windows)).slice(0, MATCH_SHOWN);
-        } else if (when || windows.length) {
-          const all = await searchAllPages({ q, causes, kind, place, near, sort });
+        } else if (when || windows.length || (nearest && near)) {
+          const all = await searchAllPages({ q, causes, kind, place, near, origin, sort }, when || windows.length ? 1000 : 400);
           const now = new Date();
           ls = all.rows.filter((l) => inWindow(l, when, now, windows));
           meta = { total: all.capped ? null : ls.length, hasMore: false };
         } else {
-          const res = await searchListingsPage({ q, causes, kind, place, near, sort });
+          const res = await searchListingsPage({ q, causes, kind, place, near, origin, sort });
           ls = res.rows;
           meta = { total: res.total, hasMore: res.hasMore };
+        }
+        if (alive && origin && ls && ls.length) {
+          await placeListings(ls);
+          // Addresses still unplaced are looked up after the list shows; it
+          // sorts again once, when they're in.
+          placeRest(ls, () => alive).then((n) => { if (alive && n) setPlaced((v) => v + 1); });
         }
         if (!alive) return;
         setFailed(false);
@@ -392,7 +497,7 @@ export default function DiscoverListings({
     const t = setTimeout(run, (mode !== 'match' && (q || near)) ? 280 : 0);
     return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, interest, q, causeKey, kind, place, near, sort, when, windowKey, savedDep, nonce]);
+  }, [mode, interest, q, causeKey, kind, place, near, originKey, sort, nearest, when, windowKey, savedDep, nonce]);
 
   // Listings already on screen in another list (the main list leaves out the
   // picks shown above it), so no card appears twice. `count` below still
@@ -403,19 +508,24 @@ export default function DiscoverListings({
     if (listings === null) return null;
     const skip = new Set(excludeIds || []);
     const rows = skip.size ? listings.filter((l) => !skip.has(l.id)) : listings;
-    const kept = savedOnly ? rows.filter((l) => saved.includes(l.id)) : rows;
-    if (mode === 'match' || sort !== 'recent') return kept;
-    // Newest order leads with listings that have a photo or a date. A stable
-    // split, so each group keeps the database's order.
+    const kept0 = savedOnly ? rows.filter((l) => saved.includes(l.id)) : rows;
+    const kept = nearest ? byDistance(kept0, origin) : kept0;
+    // Nearest is distance order only; other sorts keep their own order too.
+    if (mode === 'match' || nearest || sort !== 'recent') return kept;
+    // Newest leads with listings that have a photo or a date. A stable
+    // split, so each group keeps its order.
     const now = new Date();
     const media = kept.filter((l) => hasMedia(l, now));
     return media.length === kept.length ? kept : [...media, ...kept.filter((l) => !hasMedia(l, now))];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listings, savedOnly, savedKey, excludeKey, mode, sort]);
+  }, [listings, savedOnly, savedKey, excludeKey, mode, sort, nearest, originKey, placed]);
   /* The number of matches to print. Search mode uses the database's total, so
      the count isn't capped at one page. Saved-only loads every saved listing,
      so its count is exact. */
-  const count = shown === null || failed
+  // A match block that failed shows nothing, so it reports none.
+  const count = failed && mode === 'match'
+    ? 0
+    : shown === null || failed
     ? null
     : savedOnly
       ? shown.length
@@ -457,8 +567,9 @@ export default function DiscoverListings({
   const photos = fitting ? poolPhotos : listPhotos;
   const facts = useMemo(() => {
     const now = new Date();
-    return new Map(visible.map((l) => [l.id, cardFacts(l, now)]));
-  }, [visible]);
+    return new Map(visible.map((l) => [l.id, cardFacts(l, now, origin)]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, originKey]);
 
   useEffect(() => {
     if (!onRows) return;
@@ -473,7 +584,7 @@ export default function DiscoverListings({
     const key = searchKey.current;
     setMoreState('loading');
     try {
-      const res = await searchListingsPage({ q, causes, kind, place, near, sort, offset: listings.length });
+      const res = await searchListingsPage({ q, causes, kind, place, near, origin, sort, offset: listings.length });
       if (key !== searchKey.current) return;
       setListings((prev) => {
         const seen = new Set((prev || []).map((l) => l.id));
@@ -547,13 +658,21 @@ export default function DiscoverListings({
     const factLine = claims.length ? `${claims.join(' and ')}, ${reportedBy(listing)}` : '';
     const positions = listing.positions || [];
     const pickRole = !app && positions.length > 1;
-    const f = cardFacts(listing);
-    // The card's meta grammar: who, where, then the cause, joined by dots.
+    const f = cardFacts(listing, new Date(), origin);
+    // The card's meta grammar: who, where, how far, then the cause, joined by dots.
     const meta = [
       isOfficial(listing) ? '' : 'Student project',
       String(listing.site || listing.location || '').trim(),
+      milesLabel(f.miles),
       listing.cause ? causeOf(listing.cause).label : '',
     ].filter(Boolean);
+    // Ways to volunteer outside VolunteerU, as on the full page: the
+    // organization's own sign-up form, its nonprofit page and directions.
+    const signup = listingSignup(listing);
+    const nonprofitHref = listingNonprofitHref(listing);
+    const address = f.online ? '' : String(listing.location || listing.site || '').trim();
+    const spot = storedPoint(listing);
+    const directions = spot ? directionsHref(spot.lat, spot.lng) : address ? directionsHref(address) : '';
     openModal({
       title: listing.name,
       subtitle: meta.length ? (
@@ -582,9 +701,10 @@ export default function DiscoverListings({
         const send = async () => {
           if (sending) return;
           if (signedOut) {
-            // The same step /join takes: sign in, then come back to this listing.
+            // The same step /join takes: make a free account (or sign in from
+            // there), then come back to this listing.
             api.close();
-            router.push(`/signin?next=${encodeURIComponent(`/join/${listing.id}`)}`);
+            router.push(`/signup?intent=join&next=${encodeURIComponent(`/join/${listing.id}`)}`);
             return;
           }
           if (pickRole && !role) {
@@ -656,10 +776,51 @@ export default function DiscoverListings({
               </ul>
             </div>
           ) : null}
-          {safeUrl(listing.website) ? (
-            <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(`display:inline-flex;align-items:center;gap:6px;align-self:flex-start;font:500 14px/1.3 ${F.body};color:${C.ink}`)}>
-              Visit their website <Icon name="external" size={14} />
-            </a>
+          {signup && signup.only ? (
+            <div style={S(`padding-top:14px;border-top:1px solid ${C.line}`)}>
+              <div style={S(`font:600 15px/1.3 ${F.body};color:${C.ink}`)}>Spots are held through their form</div>
+              <div style={S(`margin-top:4px;${small}`)}>Fill out their form to hold a spot, and apply here so your shifts and hours are tracked.</div>
+              <div style={S('margin-top:12px')}>
+                <Button href={signup.url} target="_blank" rel="noreferrer noopener" variant="outline" icon="external">
+                  Fill out their form<span className="vu-sr"> (opens in a new tab)</span>
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {(signup && !signup.only) || safeUrl(listing.website) || nonprofitHref || directions ? (
+            <ul style={S('margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:10px 20px')}>
+              {signup && !signup.only ? (
+                <li>
+                  <a href={signup.url} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(QV_LINK)}>
+                    Also fill out their form <Icon name="external" size={14} />
+                    <span className="vu-sr"> (opens in a new tab)</span>
+                  </a>
+                </li>
+              ) : null}
+              {nonprofitHref ? (
+                <li>
+                  <Link href={nonprofitHref} prefetch={false} className="vu-link-ul" style={S(QV_LINK)} onClick={() => api.close()}>
+                    Nonprofit page
+                  </Link>
+                </li>
+              ) : null}
+              {safeUrl(listing.website) ? (
+                <li>
+                  <a href={safeUrl(listing.website)} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(QV_LINK)}>
+                    Visit their website <Icon name="external" size={14} />
+                    <span className="vu-sr"> (opens in a new tab)</span>
+                  </a>
+                </li>
+              ) : null}
+              {directions ? (
+                <li>
+                  <a href={directions} target="_blank" rel="noreferrer noopener" className="vu-link-ul" style={S(QV_LINK)}>
+                    Directions <Icon name="external" size={14} />
+                    <span className="vu-sr"> (opens Google Maps in a new tab)</span>
+                  </a>
+                </li>
+              ) : null}
+            </ul>
           ) : null}
           <div style={S('display:flex;gap:10px;flex-wrap:wrap;margin-top:2px')}>
             {app ? (
@@ -668,7 +829,7 @@ export default function DiscoverListings({
               </Button>
             ) : (
               <Button variant="primary" onClick={send} busy={sending}>
-                {signedOut ? 'Sign in to apply' : sending ? 'Applying' : 'Apply'}
+                {signedOut ? 'Sign up to apply' : sending ? 'Applying' : 'Apply'}
               </Button>
             )}
             <DetailSave listing={listing} onToggle={() => save(listing)} />
@@ -706,19 +867,28 @@ export default function DiscoverListings({
   );
 
   if (shown === null) {
-    if (mode === 'match') return null;
+    // The same shape the cards take, in still blocks, as many as the list
+    // shows at first: the match block one row (three cards; from 1320px,
+    // beside the map, CSS shows two, see Discover's DISCOVER_CSS), the main
+    // list `initial` cards (six: two rows of three, or three rows of two
+    // beside the map). So neither the list nor what's under it moves when
+    // the cards land or the page learns its width.
+    const n = mode === 'match' ? (cols === 3 ? 3 : 2) : Math.max(2, Math.min(SKELETON_MAX, initial));
     return (
       <section aria-label={title} aria-busy="true">
         {header}
-        <div className={`${cols === 3 ? 'vu-grid-3' : 'vu-grid-2'} dz-grid`}>
-          {(cols === 3 ? [0, 1, 2] : [0, 1]).map((i) => (
+        <div className={`${cols === 3 ? 'vu-grid-3' : 'vu-grid-2'} dz-grid dz-skel${mode === 'match' ? ' dz-skel-match' : ''}`} aria-hidden="true">
+          {Array.from({ length: n }, (_, i) => (
             <div key={i}>
               <div className="vu-skel" style={S(`aspect-ratio:3 / 2;border-radius:${R.photo}`)} />
-              <div className="vu-skel" style={S('margin-top:12px;height:18px;width:70%')} />
-              <div className="vu-skel" style={S('margin-top:8px;height:14px;width:45%')} />
+              <div className="vu-skel" style={S(`margin-top:${SKEL_LINES.gap0}px;height:${SKEL_LINES.title}px;width:70%`)} />
+              <div className="vu-skel" style={S(`margin-top:${SKEL_LINES.gap}px;height:${SKEL_LINES.line}px;width:45%`)} />
+              <div className="vu-skel" style={S(`margin-top:${SKEL_LINES.gap}px;height:${SKEL_LINES.line}px;width:55%`)} />
             </div>
           ))}
         </div>
+        {/* Where "Show more" / "Show all" lands, under a list that has more. */}
+        <div className="vu-skel" aria-hidden="true" style={S(`margin-top:32px;height:44px;width:236px;border-radius:${R.pill}`)} />
       </section>
     );
   }
@@ -738,16 +908,21 @@ export default function DiscoverListings({
   if (shown.length === 0) {
     // The match feed stays silent; its mount point carries its own way forward.
     if (mode === 'match' || !showEmpty) return null;
-    const emptyTitle = savedOnly ? 'Nothing saved matches' : active ? (q ? `Nothing for “${q}” yet` : 'Nothing matches these filters') : 'No opportunities posted yet';
+    // Only a place narrows the list (often one the browser filled in): say
+    // so, and offer every town instead of filters nobody set.
+    const placeOnly = Boolean(near) && !savedOnly && !(q || (causes || []).length || kind !== 'all' || place !== 'all' || when || (windows || []).length);
+    const emptyTitle = savedOnly ? 'Nothing saved matches' : placeOnly ? `Nothing posted near ${near} yet` : active ? (q ? `Nothing for “${q}” yet` : 'Nothing matches these filters') : 'No opportunities posted yet';
     const emptyBody = savedOnly
       ? saved.length
         ? 'None of your saved opportunities fit these filters.'
         : 'Save an opportunity with its bookmark and it shows up here.'
-      : active
-        ? near ? 'Try a broader word, another day or clear the location.' : 'Try a broader word or clear a filter.'
-        : 'No student projects yet. Start one and it shows up here.';
-    const cta = active && onClearFilters ? 'Clear filters' : !active ? 'Start a student project' : '';
-    const onCta = active ? onClearFilters : () => router.push('/create');
+      : placeOnly
+        ? 'Search every town, or try a nearby one in Where. The nonprofits below take volunteers too.'
+        : active
+          ? near ? 'Try a broader word, another day or clear the location.' : 'Try a broader word or clear a filter.'
+          : 'No student projects yet. Start one and it shows up here.';
+    const cta = placeOnly ? (onAnywhere ? 'Search every town' : '') : active && onClearFilters ? 'Clear filters' : !active ? 'Start a student project' : '';
+    const onCta = placeOnly ? onAnywhere : active ? onClearFilters : () => router.push('/create');
     return (
       <section aria-label={title} aria-busy={loading ? 'true' : undefined}>
         {header}
@@ -763,56 +938,77 @@ export default function DiscoverListings({
   }
 
   // Cards for listings with a photo or a date; the rest as rows below them.
-  const cards = visible.filter((l) => Boolean(photos.get(l.id)) || Boolean(facts.get(l.id).next));
-  const plain = visible.filter((l) => !photos.get(l.id) && !facts.get(l.id).next);
+  // Nearest keeps distance order instead: each run of cards or rows is drawn
+  // where it falls, so a closer listing with no date never sits under farther cards.
+  const isCard = (l) => Boolean(photos.get(l.id)) || Boolean(facts.get(l.id).next);
+  const cards = visible.filter(isCard);
+  const plain = visible.filter((l) => !isCard(l));
+  const runs = nearest && !scroller
+    ? visible.reduce((out, l) => {
+      const k = isCard(l) ? 'cards' : 'plain';
+      const last = out[out.length - 1];
+      return last && last.kind === k ? [...out.slice(0, -1), { kind: k, items: [...last.items, l] }] : [...out, { kind: k, items: [l] }];
+    }, [])
+    : [{ kind: 'cards', items: cards }, { kind: 'plain', items: plain }].filter((r) => r.items.length);
   const gridClass = scroller ? 'vu-hscroll dz-grid' : `${cols === 3 ? 'vu-grid-3' : 'vu-grid-2'} dz-grid`;
-  // Photo-less cards that render as rows get a DateBlock instead of a DateTile.
-  const asRows = rowsGrid(cards, photos);
+  // The first four cards on the page load their photos right away.
+  const eagerIds = new Set(runs.filter((r) => r.kind === 'cards').flatMap((r) => r.items).slice(0, 4).map((l) => l.id));
+  const firstPlain = runs.findIndex((r) => r.kind === 'plain');
 
   return (
     <section aria-label={title} aria-busy={loading ? 'true' : undefined}>
       {header}
-      {cards.length ? (
-        <div
-          className={gridClass}
-          style={S(`transition:opacity .16s ease;opacity:${loading ? 0.55 : 1}${scroller ? ';margin-left:-16px;margin-right:-16px;padding:0 16px;scroll-padding:0 16px' : ''}`)}
-        >
-          {cards.map((l, i) => (
-            <OppCard
-              key={l.id}
-              eager={i < 4}
-              listing={l}
-              facts={facts.get(l.id)}
-              photo={photos.get(l.id)}
-              app={applied.get(l.id)}
-              saved={saved.includes(l.id)}
-              selected={Array.isArray(highlight) ? highlight.includes(l.id) : highlight === l.id}
-              row={asRows || (phone && !scroller)}
-              onHover={onHover}
-              onOpen={() => details(l)}
-              onSave={() => save(l)}
-            />
-          ))}
-        </div>
-      ) : null}
-      {plain.length ? (
-        <div style={S(`margin-top:${cards.length ? 40 : 22}px;transition:opacity .16s ease;opacity:${loading ? 0.55 : 1}`)}>
-          <h3 style={S(`margin:0 0 4px;font:600 15px/20px ${F.body};color:${C.ink}`)}>No dates posted yet</h3>
-          <div className="vu-list">
-            {plain.map((l) => (
-              <OppRow
-                key={l.id}
-                listing={l}
-                facts={facts.get(l.id)}
-                app={applied.get(l.id)}
-                saved={saved.includes(l.id)}
-                onOpen={() => details(l)}
-                onSave={() => save(l)}
-              />
-            ))}
+      {runs.map((run, ri) => {
+        const gap = ri ? 40 : run.kind === 'plain' ? 22 : 0;
+        if (run.kind === 'cards') {
+          // Photo-less cards that render as rows get a DateBlock instead of a DateTile.
+          const asRows = rowsGrid(run.items, photos);
+          return (
+            <div
+              key={`c${ri}`}
+              className={gridClass}
+              style={S(`transition:opacity .16s ease;opacity:${loading ? 0.55 : 1}${gap ? `;margin-top:${gap}px` : ''}${scroller ? ';margin-left:-16px;margin-right:-16px;padding:0 16px;scroll-padding:0 16px' : ''}`)}
+            >
+              {run.items.map((l) => {
+                return (
+                  <OppCard
+                    key={l.id}
+                    eager={eagerIds.has(l.id)}
+                    listing={l}
+                    facts={facts.get(l.id)}
+                    photo={photos.get(l.id)}
+                    app={applied.get(l.id)}
+                    saved={saved.includes(l.id)}
+                    selected={Array.isArray(highlight) ? highlight.includes(l.id) : highlight === l.id}
+                    row={asRows || (phone && !scroller)}
+                    onHover={onHover}
+                    onOpen={() => details(l)}
+                    onSave={() => save(l)}
+                  />
+                );
+              })}
+            </div>
+          );
+        }
+        return (
+          <div key={`p${ri}`} style={S(`margin-top:${gap}px;transition:opacity .16s ease;opacity:${loading ? 0.55 : 1}`)}>
+            {ri === firstPlain ? <h3 style={S(`margin:0 0 4px;font:600 15px/20px ${F.body};color:${C.ink}`)}>No dates posted yet</h3> : null}
+            <div className="vu-list">
+              {run.items.map((l) => (
+                <OppRow
+                  key={l.id}
+                  listing={l}
+                  facts={facts.get(l.id)}
+                  app={applied.get(l.id)}
+                  saved={saved.includes(l.id)}
+                  onOpen={() => details(l)}
+                  onSave={() => save(l)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ) : null}
+        );
+      })}
       {!expanded && (fit ? fit.full.length > fit.collapsed.length : shown.length > initial) && !scroller ? (
         <div style={S('margin-top:32px')}>
           <Button onClick={() => setExpanded(true)}>
@@ -870,9 +1066,10 @@ function quickView(onOpen) {
 /* The viewer's own state, the only badge a Discover photo carries. */
 const BADGE = { accepted: { k: 'in', t: "You're in", tone: 'ok' }, pending: { k: 'applied', t: 'Applied', tone: 'wait' } };
 
-/** "Student project · Pantry Hall", or the place alone for an organization. */
+/** "Student project · Pantry Hall · 2.4 mi", or the place (and distance) alone for an organization. */
 function whoParts(l, facts) {
-  return isOfficial(l) ? [facts.place].filter(Boolean) : ['Student project', facts.place].filter(Boolean);
+  const mi = milesLabel(facts.miles);
+  return isOfficial(l) ? [facts.place, mi].filter(Boolean) : ['Student project', facts.place, mi].filter(Boolean);
 }
 
 /**
@@ -928,7 +1125,7 @@ function OppCard({ listing: l, eager = false, facts, photo, app, saved, selected
               <span key={i}>
                 {i ? <Sep /> : null}
                 {w}
-                {i === 0 && official && l.verified ? <Icon name="badge-check" size={14} color={C.confirmed} label="Verified organization" className="vu-card-check" /> : null}
+                {i === 0 && official && l.verified && w === facts.place ? <Icon name="badge-check" size={14} color={C.confirmed} label="Verified organization" className="vu-card-check" /> : null}
               </span>
             ))}
           </div>

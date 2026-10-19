@@ -464,10 +464,24 @@ function Upcoming({ apps, posted, failed, onRetry, bookings, hideEmpty = false }
           })}
         </div>
       ) : (
-        <div style={S('margin-top:8px')}>
-          <p style={S(`margin:0;${SMALL}`)}>Shifts you sign up for show up here.</p>
-          <Link href="/discover" className={LINK} style={S(`display:inline-block;margin-top:12px;font:600 14px/1.2 ${F.body}`)}>Find a shift</Link>
-        </div>
+        (() => {
+          // Applications still waiting on an answer, with no shift picked yet:
+          // say so, so the student can see they've already done something.
+          const waiting = (apps || []).filter((a) => a && a.listings && !a.listings.unlisted && (a.status === 'pending' || a.status === 'waitlisted')).length;
+          return (
+            <div style={S('margin-top:8px')}>
+              <p style={S(`margin:0;${SMALL}`)}>
+                {waiting
+                  ? `${waiting === 1 ? '1 application is' : `${waiting} applications are`} waiting to hear back. Shifts you sign up for show up here.`
+                  : 'Shifts you sign up for show up here.'}
+              </p>
+              <span style={S('display:flex;gap:8px 20px;flex-wrap:wrap;margin-top:12px')}>
+                {waiting ? <Link href="/profile?focus=applications" className={LINK} style={S(`display:inline-block;font:600 14px/1.2 ${F.body}`)}>See your applications</Link> : null}
+                <Link href="/discover" className={LINK} style={S(`display:inline-block;font:600 14px/1.2 ${F.body}`)}>Find a shift</Link>
+              </span>
+            </div>
+          );
+        })()
       )}
       {failed && items.length ? (
         <LoadError text="Couldn't load the rest of your shifts. Check your connection and try again." onRetry={onRetry} />

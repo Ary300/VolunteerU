@@ -15,7 +15,7 @@
    carrying ?next= back to the page the visitor is on.
    ========================================================================== */
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { S, s, cx, H } from '../lib/style.js';
@@ -152,7 +152,7 @@ function NavItem({ href, on, icon, children, label, badge, pending, onPending })
 export function navKeyFor(pathname) {
   if (pathname === '/app') return 'home';
   if (/^\/crew/.test(pathname)) return 'crew';
-  if (/^\/(discover|nonprofits|volunteers|opportunity|apply|friends|projects)/.test(pathname)) return 'discover';
+  if (/^\/(discover|nonprofits|volunteers|opportunity|apply|projects)/.test(pathname)) return 'discover';
   if (/^\/(lead|create)/.test(pathname)) return 'lead';
   // Settings is reached from the account menu and has no section of its own,
   // so nothing lights up there (CARDS 5). Profile stays for /profile only.
@@ -160,8 +160,26 @@ export function navKeyFor(pathname) {
   return '';
 }
 
+/* The path and time of the last shell that showed on screen. A route with a
+   loading.js commits two shells for one visit (the skeleton's, then the
+   page's); only the first fades in, so the swap to the page happens in
+   place with no blank frame. Decided at commit (a layout effect, before
+   paint), since a concurrent render can run the page before its skeleton. */
+let lastShell = { path: '', at: -Infinity };
+const SAME_VISIT_MS = 2000;
+
 export default function AppShell({ children, loading = false }) {
   const pathname = usePathname() || '';
+  const routeRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = routeRef.current;
+    // Strict Mode runs effects twice on the same node; decide once.
+    if (!el || el.dataset.shellSeen) return;
+    el.dataset.shellSeen = '1';
+    const now = performance.now();
+    if (lastShell.path === pathname && now - lastShell.at < SAME_VISIT_MS) el.style.animation = 'none';
+    lastShell = { path: pathname, at: now };
+  }, [pathname]);
   const router = useRouter();
   const { state, ephemeral } = useSnapshot();
   const hydrated = useHydrated();
@@ -472,9 +490,9 @@ export default function AppShell({ children, loading = false }) {
           style={S(`position:fixed;inset:0;z-index:199;background:${C.scrim}`)} />
       ) : null}
 
-      <div id="vu-main" className="vu-main-pad">
-        <div className="vu-route-in">{children}</div>
-      </div>
+      <main id="vu-main" tabIndex={-1} className="vu-main-pad" style={{ outline: 'none' }}>
+        <div ref={routeRef} className="vu-route-in">{children}</div>
+      </main>
 
       {/* phone and tablet tab bar (hidden at >= 1180px) */}
       {hydrated ? (

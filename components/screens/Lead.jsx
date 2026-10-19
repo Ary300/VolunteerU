@@ -31,7 +31,8 @@ import {
   isTeam, orgTypeLabel, taskStats, taskRoles, tasksOf, roleOf, pipelineFor,
   requestProjectVerification, parseSessionDate, formatSessionDate, uid, shortName, messageTemplateOptions,
 } from '../../lib/db.js';
-import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment, postAnnouncement } from '../../lib/listings.js';
+import { loadOwnerApplications, loadListingThreads, myShiftSignUps, shiftSignUpCount, setMemberAssignment, postAnnouncement, memberHourEntries, setApplicationStatus } from '../../lib/listings.js';
+import { getSyncUser } from '../../lib/sync.js';
 import { createInvites, revokeInvite, inviteEmailError, inviteLink, inviteMailto, inviteSms, invitesAsText, EMAIL_MAX } from '../../lib/invites.js';
 import {
   AttendanceTab, ApplicationsTab, HoursTab, QualityTab, MessagesTab, SettingsTab,
@@ -174,9 +175,11 @@ function rosterCount(p) {
 }
 
 /** Who picked one shift on the join page, read from the project's application
-    rows. Accepted members fill a spot. Applicants who picked it are listed
-    while they wait on the lead, and don't fill one yet. Withdrawn and
-    declined rows count for nothing. */
+    rows. Accepted members are going. Applicants who picked it are listed
+    while they wait on the lead; they hold a spot too (the database's
+    shift_spots counts pending and accepted sign-ups), so the lead's count
+    matches the spots left that volunteers see. Withdrawn and declined rows
+    count for nothing. */
 function shiftSignUps(apps, shiftId) {
   const id = String(shiftId);
   const picked = (a) => myShiftSignUps(a).some((x) => String(x.id) === id);
@@ -187,15 +190,18 @@ function shiftSignUps(apps, shiftId) {
 }
 
 /** A shift with its real fill. On a published project, volunteers pick their
-    shifts on the join page, so a shift is filled by the accepted members who
-    signed up for it. A finished shift keeps the count recorded when it ran
-    if that's higher. A project that was never published has no sign-ups, so
-    an upcoming shift is filled by the roster Attendance lists for it. */
+    shifts on the join page, so a shift is filled by the sign-ups holding a
+    spot on it: accepted members plus applicants waiting on the lead, the
+    same count the join page's "spots left" uses. A finished shift keeps the
+    count recorded when it ran if that's higher. A project that was never
+    published has no sign-ups, so an upcoming shift is filled by the roster
+    Attendance lists for it. */
 function withFill(p, x, apps = [], now = new Date()) {
   if (x.st === 'Cancelled') return x;
   const past = x.st === 'Complete' || isPastShift(x, now);
   if (!p.listingId) return past ? x : { ...x, filledCount: rosterCount(p) };
-  const n = shiftSignUpCount((apps || []).filter((a) => a.status === 'accepted'), String(x.id));
+  const holding = (apps || []).filter((a) => a.status === 'accepted' || (!past && a.status === 'pending'));
+  const n = shiftSignUpCount(holding, String(x.id));
   if (past) return n > (Number(x.filledCount) || 0) ? { ...x, filledCount: n } : x;
   return { ...x, filledCount: n };
 }
@@ -210,9 +216,7 @@ const linkSlug = (name, appId) => `p-${norm(name).split(' ')[0] || 'x'}-${String
 
 /** Hours the lead confirmed on one member's own log. */
 function confirmedMemberHours(app) {
-  const log = (app.member_state && app.member_state.hoursLog) || [];
-  const ok = (app.assignment && app.assignment.confirmedHours) || {};
-  return Math.round(log.filter((h) => ok[h.id]).reduce((a, h) => a + (Number(h.hrs) || 0), 0) * 10) / 10;
+  return Math.round(memberHourEntries(app).filter((h) => h.confirmed).reduce((a, h) => a + (Number(h.hrs) || 0), 0) * 10) / 10;
 }
 
 /** Everything waiting on the lead, counted once for the whole screen.
@@ -243,9 +247,7 @@ function memberHoursWaiting(apps) {
   const out = [];
   for (const app of apps) {
     if (app.status !== 'accepted') continue;
-    const log = (app.member_state && app.member_state.hoursLog) || [];
-    const ok = (app.assignment && app.assignment.confirmedHours) || {};
-    for (const h of log) if (!ok[h.id]) out.push({ app, h });
+    for (const h of memberHourEntries(app)) if (!h.confirmed && !h.declined && !h.removed) out.push({ app, h });
   }
   return out;
 }
@@ -319,7 +321,7 @@ function applyMemberLinks(p, apps) {
           else delete person.signUps;
           changed = true;
         }
-        if (person.st === 'Inactive' && person.leftVia === 'app') {
+        if ((person.st === 'Inactive' || person.st === 'Waitlist') && person.leftVia === 'app') {
           person.st = 'Active';
           delete person.leftVia;
           changed = true;
@@ -421,6 +423,13 @@ function applyMemberLinks(p, apps) {
         p.people.splice(i, 1);
         linked.delete(app.id);
         changed = true;
+      } else if (app.status === 'waitlisted') {
+        // Waitlisted from Applications or People: the roster says the same.
+        if (person.st !== 'Waitlist') {
+          person.st = 'Waitlist';
+          person.leftVia = 'app';
+          changed = true;
+        }
       } else if (person.st !== 'Inactive') {
         // Withdrew or was declined later: keep their history, mark them inactive.
         person.st = 'Inactive';
@@ -684,10 +693,15 @@ function ProjectMissing({ projects, tab }) {
       <section aria-labelledby="lead-missing" style={S('max-width:640px')}>
         <h1 id="lead-missing" style={S(`margin:0;font:700 clamp(28px, 6.4vw, 36px)/1.08 ${F.display};letter-spacing:-0.03em;color:${C.ink}`)}>This project isn't available</h1>
         <p style={S(`margin:12px 0 0;font:400 16px/1.55 ${F.body};color:${C.ink2}`)}>
-          It may have been deleted, or it belongs to another account. Open one of your projects instead.
+          {list.length ? 'It may have been deleted, or it belongs to another account. Open one of your projects instead.' : 'It may have been deleted, or it belongs to another account. You can start your own.'}
         </p>
-        <h2 style={S(`${H3};margin:36px 0 0`)}>Your projects</h2>
-        <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
+        {list.length ? null : (
+          <div style={S('margin-top:24px')}>
+            <Button variant="primary" icon="plus" href="/create">Start a student project</Button>
+          </div>
+        )}
+        {list.length ? <h2 style={S(`${H3};margin:36px 0 0`)}>Your projects</h2> : null}
+        {list.length ? <ul style={S(`margin:12px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
           {list.map((x) => (
             <li key={x.id} style={S(RULE)}>
               <Link
@@ -712,7 +726,7 @@ function ProjectMissing({ projects, tab }) {
               </Link>
             </li>
           ))}
-        </ul>
+        </ul> : null}
       </section>
     </div>
   );
@@ -728,9 +742,18 @@ export default function Lead({ projectId, tab: tabParam }) {
   // /lead with a stale active id still opens one of the lead's projects. A
   // project link (/lead/<id>/...) only ever opens that project.
   const p = projectId ? getProject(projectId) : getProject(state.activeProjectId) || owned.find((x) => !x.archived) || owned[0] || null;
-  const missing = !p && !!projectId && owned.length > 0;
+  // The signed-in account's workspace is in (lib/sync.js stamps its owner),
+  // so an empty project list is real and not still loading.
+  const syncUser = state.session && state.session.authed ? getSyncUser() : null;
+  const workspaceIn = !syncUser || (state.__owner || (state.account && state.account.id)) === syncUser;
+  const missing = !p && !!projectId && (owned.length > 0 || workspaceIn);
   const TABS = tabsFor(p);
   const tab = TABS.some(([k]) => k === tabParam) ? tabParam : 'overview';
+  // An unknown tab (/lead/<id>/bogus) shows Overview, so the address says so too.
+  const badTab = !!(p && projectId && tabParam && tab !== tabParam);
+  useEffect(() => {
+    if (badTab) router.replace(`/lead/${encodeURIComponent(projectId)}/overview`);
+  }, [badTab, projectId, router]);
   const tabLabel = (TABS.find(([k]) => k === tab) || [])[1] || 'Overview';
   useDocumentTitle(p ? `${p.name} \u00b7 ${tabLabel}, VolunteerU` : missing ? MISSING_TITLE : LEAD_TITLE);
   const linkApps = useListingApps(p);
@@ -1664,7 +1687,12 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
   const filtering = !!(q || status !== 'all' || role !== 'all');
 
   const count = (st) => p.people.filter((x) => x.st === st).length;
-  const summary = `${count('Active')} active, ${count('Onboarding')} onboarding, ${count('Waitlist')} on the waitlist`;
+  // One waitlist: roster rows on it plus applicants waitlisted from
+  // Applications who never made the roster.
+  const onRosterApps = new Set(p.people.map((x) => x.appId).filter(Boolean));
+  const waitlisted = count('Waitlist') + linkApps.filter((a) => a.status === 'waitlisted' && !onRosterApps.has(a.id)).length;
+  const invited = count('Invited');
+  const summary = `${count('Active')} active, ${count('Onboarding')} onboarding, ${waitlisted} on the waitlist${invited ? `, ${invited} invited` : ''}`;
   const matches = openLinkSuggestions(stored);
   const team = isTeam(stored);
   // The accepted application behind a roster row, so the lead can message
@@ -1802,7 +1830,36 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
     });
   }
 
+  // A roster row that came from an application: its status lives on that
+  // application, so the volunteer's join page and sign-ups follow it.
+  const appBacked = (person) => {
+    const app = person.appId ? appsById.get(person.appId) : null;
+    return app && (app.status === 'accepted' || app.status === 'waitlisted') ? app : null;
+  };
+
+  /* Move one row to Active or Waitlist. Rows backed by an application change
+     the application too; the roster follows on the next load. */
+  async function setRosterStatus(person, st) {
+    const app = appBacked(person);
+    if (app) {
+      const want = st === 'Waitlist' ? 'waitlisted' : 'accepted';
+      if (app.status !== want) {
+        const { ok, error } = await setApplicationStatus(app.id, want);
+        if (!ok) {
+          console.error('[lead] could not change application status', error);
+          return false;
+        }
+        window.dispatchEvent(new Event('vu:applications-changed'));
+      }
+      updatePerson(p.id, person.id, st === 'Waitlist' ? { st, leftVia: 'app' } : { st, leftVia: undefined });
+      return true;
+    }
+    updatePerson(p.id, person.id, { st });
+    return true;
+  }
+
   function personMenu(e, person) {
+    const backed = !!appBacked(person);
     menuFromEvent(
       e,
       [
@@ -1820,7 +1877,10 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         ...(team ? [{ key: 'role', label: person.role === NO_TEAM_ROLE ? 'Give a role' : 'Change role', icon: 'flag' }, { sep: true }] : []),
         { key: 'active', label: 'Mark active', icon: 'check', disabled: person.st === 'Active' },
         { key: 'waitlist', label: 'Move to waitlist', icon: 'clock', disabled: person.st === 'Waitlist' },
-        { key: 'inactive', label: 'Mark inactive', icon: 'minus', disabled: person.st === 'Inactive' },
+        // Inactive is a roster note only. A member who joined through the join
+        // link is moved to the waitlist or removed instead, so what they see
+        // on their join page always matches this roster.
+        ...(backed ? [] : [{ key: 'inactive', label: 'Mark inactive', icon: 'minus', disabled: person.st === 'Inactive' }]),
         { sep: true },
         { key: 'consent', label: person.consent ? 'Mark guardian consent form missing' : 'Mark guardian consent form received', icon: 'file' },
         { key: 'trained', label: person.trained ? 'Mark training not done' : 'Mark training done', icon: 'award' },
@@ -1837,6 +1897,13 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
         }[key];
         if (key === 'role') {
           teamRolePicker(person);
+          return;
+        }
+        if (backed && (key === 'active' || key === 'waitlist')) {
+          const ok = await setRosterStatus(person, key === 'active' ? 'Active' : 'Waitlist');
+          toast(ok
+            ? { title: key === 'active' ? 'Marked active' : 'Moved to waitlist', message: key === 'active' ? `${person.n} can sign up for shifts again.` : `${person.n} sees they're on the waitlist and can't sign up for shifts.`, tone: 'ok', timeout: 2600 }
+            : { title: "Couldn't save that", message: 'Check your connection and try again.', tone: 'danger' });
           return;
         }
         if (key === 'invite-copy') {
@@ -1896,8 +1963,14 @@ function People({ p: stored, params, setParam, linkApps = [] }) {
       ],
       (key) => {
         if (key === 'active' || key === 'waitlist') {
-          selected.forEach((id) => updatePerson(p.id, id, { st: key === 'active' ? 'Active' : 'Waitlist' }));
-          toast({ title: key === 'active' ? `Marked ${n} active` : `Moved ${n} to waitlist`, tone: 'ok' });
+          const st = key === 'active' ? 'Active' : 'Waitlist';
+          const people = p.people.filter((x) => selected.includes(x.id));
+          Promise.all(people.map((x) => setRosterStatus(x, st))).then((res) => {
+            const bad = res.filter((r) => !r).length;
+            toast(bad
+              ? { title: `Saved ${n - bad} of ${n}`, message: 'Some changes didn\'t save. Check your connection and try again.', tone: 'warn' }
+              : { title: key === 'active' ? `Marked ${n} active` : `Moved ${n} to waitlist`, tone: 'ok' });
+          });
           setSelected([]);
         } else if (key === 'export') {
           const subset = { ...p, people: p.people.filter((x) => selected.includes(x.id)) };
@@ -2469,8 +2542,27 @@ function ImportForm({ api, project, onInvited }) {
     .filter(Boolean)
     .map((l) => l.split(',').map((x) => x.trim()))
     .filter((parts) => parts[0]);
-  // name, school, grade, then an optional email.
-  const valid = parsed.filter((r) => r.length >= 3 && r.length <= 4 && r[0].includes(' ') && r[1] && /^\d{1,2}$/.test(r[2]) && Number(r[2]) >= 6 && Number(r[2]) <= 12 && !inviteEmailError(r[3]));
+  // The name comes first. After it, columns are read by what they hold, in
+  // any order: anything with an @ is the email, a number from 6 to 12 (or
+  // "grade 9") is the grade, and the rest is the school.
+  const rowOf = (r) => {
+    const [n, ...rest] = r;
+    const out = { n, school: '', grade: '', email: '', extra: 0, badEmail: false };
+    const school = [];
+    for (const v of rest) {
+      if (!v) continue;
+      const g = /^(?:grade\s*)?(\d{1,2})(?:th)?$/i.exec(v);
+      if (v.includes('@') && !out.email) { out.email = v; out.badEmail = !!inviteEmailError(v); } else if (g && !out.grade) out.grade = g[1];
+      else school.push(v);
+    }
+    out.school = school.join(', ');
+    out.extra = school.length > 1 ? school.length - 1 : 0;
+    return out;
+  };
+  const valid = parsed
+    .map(rowOf)
+    .filter((r) => r.n.includes(' ') && r.school && !r.extra && r.grade && Number(r.grade) >= 6 && Number(r.grade) <= 12 && !r.badEmail)
+    .map((r) => [r.n, r.school, r.grade, r.email]);
   const bad = parsed.length - valid.length;
   const published = !!project.listingId;
   const submit = async () => {
@@ -3034,27 +3126,42 @@ function Shifts({ p, goTab, apps = [] }) {
   const COLS = `grid-template-columns:44px minmax(0,1fr)${showLoc ? ' minmax(0,1.5fr)' : ''} 72px 112px 76px`;
   const narrow = useNarrow();
   const pillOf = (label) => (label === 'Staffed' ? 'ok' : label === 'Cancelled' ? 'bad' : /^Needs/.test(label) ? 'wait' : 'mute');
-  const editBtn = (x, raw) => (
+  // An archived project runs no shifts: rows are read-only and upcoming ones read Paused.
+  const archived = !!p.archived;
+  const labelOf = (x) => {
+    const l = shiftLabel(x);
+    return archived && l !== 'Done' && l !== 'Cancelled' ? 'Paused' : l;
+  };
+  const editBtn = (x, raw) => (archived ? null : (
     <Pressable label={`Edit shift ${x.d}`} onClick={() => editSession(raw)} className={cx(H.secondary, H.press)} style={S(ROW_BTN)}>
       Edit
     </Pressable>
-  );
+  ));
 
   return (
     <div className="vu-layout-rail" style={S('margin-top:32px')}>
       <section aria-labelledby="sh-h" style={S('min-width:0')}>
         <div className="vu-sec-head" style={S('flex-wrap:wrap;align-items:center')}>
           <h2 id="sh-h" style={S(H2)}>Shifts</h2>
-          <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
-            <Button variant="outline" size="sm" icon="refresh" onClick={repeat}>Repeat weekly</Button>
-            <Button variant="primary" size="sm" icon="plus" onClick={() => editSession(null)}>Add shift</Button>
-          </div>
+          {archived ? null : (
+            <div style={S('display:flex;gap:10px;flex-wrap:wrap')}>
+              <Button variant="outline" size="sm" icon="refresh" onClick={repeat}>Repeat weekly</Button>
+              <Button variant="primary" size="sm" icon="plus" onClick={() => editSession(null)}>Add shift</Button>
+            </div>
+          )}
         </div>
+        {archived ? (
+          <p style={S(`margin:8px 0 0;${META}`)}>
+            This project is archived, so no shifts run.{' '}
+            <button type="button" onClick={() => goTab('settings')} className={cx('vu-link', H.press)} style={S(TEXT_LINK)}>Restore it in Settings</button>
+            {' '}to add or edit shifts.
+          </p>
+        ) : null}
         {narrow && p.sessions.length ? (
           <ul aria-label="Shifts" style={S(`margin:16px 0 0;padding:0;list-style:none;border-top:1px solid ${C.line}`)}>
             {p.sessions.map((raw) => {
               const x = withFill(p, raw, apps);
-              const label = shiftLabel(x);
+              const label = labelOf(x);
               return (
                 <li key={x.id} style={S(`padding:14px 0;${RULE};display:flex;align-items:flex-start;gap:14px`)}>
                   <DateBlock date={x.d} size="sm" month />
@@ -3081,7 +3188,7 @@ function Shifts({ p, goTab, apps = [] }) {
               {p.sessions.length ? (
                 p.sessions.map((raw) => {
                   const x = withFill(p, raw, apps);
-                  const label = shiftLabel(x);
+                  const label = labelOf(x);
                   const su = p.listingId ? shiftSignUps(apps, raw.id) : null;
                   return (
                     <div key={x.id} role="row" className={H.row} style={S(`display:grid;${COLS};gap:6px 16px;padding:12px 0;${RULE};align-items:center;transition:background .16s ease`)}>
@@ -3100,7 +3207,7 @@ function Shifts({ p, goTab, apps = [] }) {
                   );
                 })
               ) : (
-                <EmptyState compact icon="calendar" title="No shifts yet" body="Add 1 shift, then repeat it weekly to fill out the term." cta="Add shift" onCta={() => editSession(null)} />
+                archived ? null : <EmptyState compact icon="calendar" title="No shifts yet" body="Add 1 shift, then repeat it weekly to fill out the term." cta="Add shift" onCta={() => editSession(null)} />
               )}
             </div>
           </div>

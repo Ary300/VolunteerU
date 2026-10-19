@@ -104,7 +104,9 @@ function InviteActions({ first, api }) {
   if (live.length) {
     return (
       <div style={S(panel)}>
-        <div>Anyone with the join link can apply to {live.length === 1 ? live[0].name : 'your projects'}, {first} included. You accept applications from your project page.</div>
+        <div>
+          Students listed here can't be messaged directly. Share your join link at school or in your club, and {first} can apply to {live.length === 1 ? live[0].name : 'your projects'} like anyone else. You accept applications from your project page.
+        </div>
         <div style={S('margin-top:12px;display:flex;flex-direction:column;gap:8px')}>
           {live.map((p) => (
             <div key={p.id} style={S('display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap')}>

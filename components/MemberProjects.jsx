@@ -19,7 +19,7 @@ import { useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { S, s } from '../lib/style.js';
 import { C, F, R } from '../lib/tokens.js';
-import { loadMyMemberships, updateMemberState, setMyTaskStatus, logMemberHours, removeMemberHours, checkInMember, myShiftSignUps } from '../lib/listings.js';
+import { loadMyMemberships, updateMemberState, setMyTaskStatus, logMemberHours, removeMemberHours, checkInMember, myShiftSignUps, memberHourEntries } from '../lib/listings.js';
 import { openModal, toast, confirmDialog } from '../lib/overlays.js';
 import { syncMyServiceHours } from '../lib/db.js';
 import { checkInWindow, shiftDates } from '../lib/calendar.js';
@@ -97,15 +97,6 @@ function signUpLabel(sh) {
   return t ? `${sh.d} · ${t}` : String(sh.d || '');
 }
 
-/** True when a sign-up ({ d, t }) is for the shift a stored session names. */
-function sameShift(sh, session) {
-  const a = sh && dateParts(sh.d);
-  const p = sessionParts(session);
-  const b = p && dateParts(p.date);
-  if (!a || !b) return false;
-  return a.month === b.month && a.day === b.day && formatShiftTime(sh.t) === p.time;
-}
-
 /** The cause as the rest of the app names it ("Food and hunger"); free text
     the cause list doesn't know is shown as written. */
 function causeLabel(cause) {
@@ -117,6 +108,19 @@ function causeLabel(cause) {
 function postedShift(l) {
   const v = plain(l && l.next_session);
   return v && !/^not scheduled$/i.test(v) ? v : '';
+}
+
+/** The volunteer's own sign-ups that haven't ended, soonest first. */
+function upcomingSignUps(app) {
+  const startOf = (x) => { const d = shiftDates(x); return d ? d.start.getTime() : Infinity; };
+  return myShiftSignUps(app).filter((x) => !x.past).sort((a, b) => startOf(a) - startOf(b));
+}
+
+/** The shift a member checks in to: their own soonest sign-up when they have
+    one, otherwise the project's next posted shift ('' for none). */
+function checkInShift(app) {
+  const mine = upcomingSignUps(app)[0];
+  return mine ? signUpLabel(mine) : postedShift(app.listings);
 }
 
 /** A project with nowhere to show up to: a task-based team or a remote
@@ -317,7 +321,7 @@ export default function MemberProjects({ hoursInRail = false } = {}) {
   }
 
   function checkInFor(app) {
-    const session = postedShift(app.listings);
+    const session = checkInShift(app);
     openModal({
       title: `Check in to ${app.listings.name}`,
       subtitle: 'Enter the code from your organizer if they gave you one.',
@@ -485,18 +489,20 @@ function ProjectBlock({ app, first, nameId, onMessage, onToggleStep, onAck, onTo
 
 function MemberHours({ app, nameId, onLog, onRemove, hoursInRail }) {
   const [showAll, setShowAll] = useState(false);
-  const log = (app.member_state && app.member_state.hoursLog) || [];
-  const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
+  // The member's own log with the organizer's decision applied: confirmed
+  // entries carry the hours the organizer approved, which can differ from
+  // what was logged, and declined ones carry the organizer's reason.
+  const log = memberHourEntries(app).filter((h) => !h.removed);
   // Shifts the organizer posted in Attendance. They wrote these into the
   // assignment, so they count as confirmed and the volunteer can't remove them.
   const posted = (app.assignment && Array.isArray(app.assignment.attendanceHours) ? app.assignment.attendanceHours : [])
     .filter((h) => h && h.id && Number(h.hrs) > 0);
   const sum = (rows) => rows.reduce((a, h) => a + Number(h.hrs || 0), 0);
-  const confirmedSum = sum(log.filter((h) => confirmed[h.id])) + sum(posted);
-  const waitingSum = sum(log.filter((h) => !confirmed[h.id]));
+  const confirmedSum = sum(memberHourEntries(app).filter((h) => h.confirmed)) + sum(posted);
+  const waitingSum = sum(log.filter((h) => !h.confirmed && !h.declined));
   const rows = [
     ...posted.map((h) => ({ ...h, key: `posted:${h.id}`, v: true, posted: true })),
-    ...log.map((h) => ({ ...h, key: `log:${h.id}`, v: !!confirmed[h.id], posted: false })),
+    ...log.map((h) => ({ ...h, key: `log:${h.id}`, v: !!h.confirmed, posted: false })),
   ];
   const shown = showAll ? rows : rows.slice(0, HOURS_PREVIEW);
   return (
@@ -527,6 +533,8 @@ function MemberHours({ app, nameId, onLog, onRemove, hoursInRail }) {
             const meta = [
               hasDate ? otherYear : h.date,
               h.posted ? 'From attendance' : '',
+              h.adjusted ? `You logged ${hrs(h.loggedHrs)}` : '',
+              h.declined && h.declineNote ? h.declineNote : '',
             ].filter(Boolean);
             return (
               // Two grid cells: the date, then one wrapping line of title and
@@ -545,6 +553,15 @@ function MemberHours({ app, nameId, onLog, onRemove, hoursInRail }) {
                     <span className="vu-row-num">{hrs(h.hrs)}</span>
                     {h.v ? (
                       <StatusText tone="ok" title={h.posted ? 'Posted by the organizer from attendance' : 'Confirmed by the organizer'}>Confirmed</StatusText>
+                    ) : h.declined ? (
+                      <>
+                        <StatusText tone="mute" title="The organizer didn't confirm these hours">Not confirmed</StatusText>
+                        <IconButton
+                          icon="trash"
+                          label={`Remove ${hrs(h.hrs)} for ${h.activity}, ${h.date}`}
+                          onClick={() => onRemove(h)}
+                        />
+                      </>
                     ) : (
                       <>
                         <StatusText tone="wait">Waiting</StatusText>
@@ -597,42 +614,45 @@ const STRONG = `font-weight:600;color:${C.ink}`;
 function MemberCheckIn({ app, onCheckIn }) {
   const checkins = (app.member_state && app.member_state.checkins) || [];
   const last = checkins[0];
-  const nextSession = postedShift(app.listings);
-  const scheduled = !!nextSession;
+  // The volunteer's own upcoming sign-ups, soonest first. Once they've picked
+  // a shift, the block is about that shift, not whatever the project runs
+  // next, so a member signed up for Oct 31 is never pointed at Oct 24.
+  const mySignUps = upcomingSignUps(app);
+  const mine = mySignUps[0] || null;
+  const projectNext = postedShift(app.listings);
+  const target = checkInShift(app);
+  const scheduled = !!target;
   // Check-in opens 1 hour before the shift and closes at the end of its day
   // (same rule checkInMember enforces), so there's no button a week early.
-  const win = scheduled ? checkInWindow(nextSession) : { state: 'unknown' };
-  const doneForThis = !!(last && scheduled && last.session && plain(last.session) === nextSession);
-  // The volunteer's own upcoming sign-ups, soonest first, so they can see
-  // which shift they picked and get to the shift list to change it.
-  const startOf = (x) => { const d = shiftDates(x); return d ? d.start.getTime() : Infinity; };
-  const mySignUps = myShiftSignUps(app).filter((x) => !x.past).sort((a, b) => startOf(a) - startOf(b));
+  const win = scheduled ? checkInWindow(target) : { state: 'unknown' };
+  const doneForThis = !!(last && scheduled && last.session && plain(last.session) === target);
   const over = win.state === 'over';
-  const forNext = scheduled ? mySignUps.find((x) => sameShift(x, nextSession)) : null;
-  const others = mySignUps.filter((x) => x !== forNext);
-  // Scheduled, still ahead, and the member hasn't picked it: ask them to sign up.
-  const askToSignUp = scheduled && !over && !mySignUps.length;
+  const forNext = mine;
+  const others = mySignUps.slice(1);
+  // Scheduled, still ahead, and the member hasn't picked a shift: ask them to sign up.
+  const askToSignUp = !mine && !!projectNext && !over;
   let note = null;
-  if (win.state === 'early' && forNext) note = `Check-in opens ${opensAtLabel(win.opensAt, nextSession)}`;
+  if (win.state === 'early' && forNext) note = `Check-in opens ${opensAtLabel(win.opensAt, target)}`;
   else if (over) note = 'No new shift posted yet. If you went, log your hours.';
   // Checking in again for the same shift stays possible (a mistyped code, a
   // second visit that day); the label says it's another check-in.
   const canCheckIn = win.state === 'open' || win.state === 'unknown';
-  const time = sessionTime(nextSession);
+  const time = mine ? formatShiftTime(mine.t) : sessionTime(projectNext);
   const moreLine = (n) => `${n} more ${n === 1 ? 'shift' : 'shifts'}`;
   const shiftsHref = app.listing_id ? `/join/${app.listing_id}#vu-join-apply` : '';
+  const blockDate = mine ? mine.d : app.listings.next_session;
 
   // The heading names what the block is about right now. "Check in" only
   // when there's something to check in to: a shift the member signed up for
   // whose window is open, or a project with no posted shift (check in on
   // arrival). Otherwise it names the shift the lines describe.
-  const heading = !scheduled || (forNext && canCheckIn) ? 'Check in' : over ? 'Last shift' : 'Next shift';
+  const heading = !scheduled || (forNext && canCheckIn) ? 'Check in' : over ? 'Last shift' : mine ? 'Your next shift' : 'Next shift';
 
   let lines;
   if (!scheduled) {
     lines = 'Check in when you get there.';
   } else if (askToSignUp) {
-    lines = <b style={S(STRONG)}>{nextSession}</b>;
+    lines = <b style={S(STRONG)}>{projectNext}</b>;
   } else if (forNext) {
     lines = (
       <>
@@ -642,24 +662,14 @@ function MemberCheckIn({ app, onCheckIn }) {
       </>
     );
   } else {
-    lines = (
-      <>
-        {time ? <b style={S(STRONG)}>{time}</b> : null}
-        {mySignUps.length ? (
-          <div style={S('margin-top:2px')}>
-            Signed up for <b style={S(STRONG)}>{signUpLabel(mySignUps[0])}</b>
-            {mySignUps.length > 1 ? ` and ${moreLine(mySignUps.length - 1)}` : ''}
-          </div>
-        ) : null}
-      </>
-    );
+    lines = time ? <b style={S(STRONG)}>{time}</b> : null;
   }
 
   return (
     <div>
       <h3 style={S(H3)}>{heading}</h3>
       <div style={S('margin-top:10px;display:flex;align-items:center;gap:14px')}>
-        {scheduled && !askToSignUp ? <DateBlock date={app.listings.next_session} size="md" month /> : null}
+        {scheduled && !askToSignUp ? <DateBlock date={blockDate} size="md" month /> : null}
         <div style={S(`min-width:0;flex:1;font:400 14px/1.45 ${F.body};color:${C.ink2}`)}>{lines}</div>
       </div>
       {last ? (

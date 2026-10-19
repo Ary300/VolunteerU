@@ -1,7 +1,7 @@
 'use client';
 
 /* ==========================================================================
-   Misc.jsx, notifications, saved, friends going, peer project page
+   Misc.jsx, notifications, saved, peer project page
    ========================================================================== */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -16,9 +16,9 @@ import { useSnapshot } from '../../lib/store.js';
 import { toast } from '../../lib/overlays.js';
 import {
   markNotificationsSeen, getNotificationsSeenAt,
-  getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus, copyText,
+  getOpportunity, toggleSaved, spotsLeft, upcomingShifts, applicationFor, applicationStatus,
 } from '../../lib/db.js';
-import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications, listingShifts } from '../../lib/listings.js';
+import { loadMyNotifications, loadMyApplications, loadListingsByIds, loadOwnerApplications, listingShifts, myShiftSignUps } from '../../lib/listings.js';
 import { nextShiftInfo, shiftLabel } from './JoinListing.jsx';
 import SavedNonprofits, { isNonprofitId } from '../SavedNonprofits.jsx';
 
@@ -39,8 +39,8 @@ function PageHead({ title, sub }) {
 
 /* An empty screen (CARDS.md 4.1): one sentence and, only where a next step
    helps, one underlined link 12px below. No heading, no box, no filled
-   button. Notifications uses it for the muted-feed line; Saved and Friends
-   have their own empty layouts below, so the screens don't share one. */
+   button. Notifications uses it for the muted-feed line; Saved has its
+   own empty layout below, so the screens don't share one. */
 function EmptyNote({ children, linkLabel, href }) {
   return (
     <div className="vu-empty" style={S(`padding-top:20px;border-top:1px solid ${C.line}`)}>
@@ -62,6 +62,7 @@ function mutedNotifLabels(prefs) {
   return [
     np.applicationUpdates === false ? 'application updates' : '',
     np.crewMessages === false ? 'project messages' : '',
+    np.hoursConfirmed === false ? 'confirmed hours' : '',
   ].filter(Boolean);
 }
 
@@ -93,24 +94,45 @@ function notifWhen(at) {
 
 /* ---- notification centre -------------------------------------------------- */
 
-/** One "New application" item per pending application to the signed-in
-    owner's listings, linked to that project's Applications tab when the
-    listing belongs to one of their workspaces. */
+/** The shifts an applicant picked, for the lead's feed: "Sat, Oct 31" or
+    "Sat, Oct 31 and 2 more". '' when they picked none. */
+function pickedShifts(a) {
+  const mine = myShiftSignUps(a).filter((x) => !x.past && x.d);
+  if (!mine.length) return '';
+  return mine.length > 1 ? `${mine[0].d} and ${mine.length - 1} more` : String(mine[0].d);
+}
+
+/** Owner feed items for the signed-in owner's listings: one "New
+    application" per pending application (with the role, the shift they
+    picked and their note), and one "withdrew" per withdrawal. Each links to
+    that project's Applications tab when the listing belongs to one of their
+    workspaces. */
 function ownerApplicationItems(apps, projects) {
   const pidFor = new Map((projects || []).filter((p) => p.listingId).map((p) => [p.listingId, p.id]));
   return (apps || [])
-    .filter((a) => a && a.status === 'pending')
+    .filter((a) => a && (a.status === 'pending' || (a.status === 'withdrawn' && a.decided_at)))
     .map((a) => {
       const who = String(a.applicant_name || '').trim() || 'A volunteer';
       const project = a.listings && a.listings.name;
       const pid = pidFor.get(a.listing_id);
+      const href = pid ? `/lead/${encodeURIComponent(pid)}/applications` : '/lead';
+      if (a.status === 'withdrawn') {
+        return {
+          id: `app-wd-${a.id}-${a.decided_at}`,
+          type: 'application',
+          title: project ? `${who} withdrew from ${project}` : `${who} withdrew`,
+          body: a.position ? String(a.position) : '',
+          at: a.decided_at,
+          href,
+        };
+      }
       return {
         id: `app-new-${a.id}`,
         type: 'application',
         title: project ? `${who} applied to ${project}` : `${who} applied`,
-        body: [a.position, a.note].filter(Boolean).map(String).join(', ').slice(0, 280),
+        body: [a.position, pickedShifts(a), a.note].filter(Boolean).map(String).join(', ').slice(0, 280),
         at: a.created_at || null,
-        href: pid ? `/lead/${encodeURIComponent(pid)}/applications` : '/lead',
+        href,
       };
     });
 }
@@ -245,7 +267,7 @@ export function Notifications() {
       <div style={S('margin-top:24px')}>
         {muted.length ? (
           <EmptyNote linkLabel="Notification settings" href="/settings/notifications">
-            {`You turned off ${muted.join(' and ')}, so they don't show up here.`}
+            {`You turned off ${muted.length > 2 ? `${muted.slice(0, -1).join(', ')} and ${muted[muted.length - 1]}` : muted.join(' and ')}, so they don't show up here.`}
           </EmptyNote>
         ) : (
           /* One plain line under the title, no rule or box. A volunteer
@@ -289,7 +311,7 @@ export function Notifications() {
   );
 }
 
-/* ---- cards shared by Saved and Friends ------------------------------------- */
+/* ---- cards on the Saved page ----------------------------------------------- */
 
 /* The photo badge for the viewer's own application (CARDS.md 1.4): accepted
    reads "You're in", pending reads "Applied", anything else shows nothing. */
@@ -535,140 +557,6 @@ export function Saved() {
           {body}
           <SavedNonprofits ids={npIds} withHeading={Boolean(n)} />
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---- friends going --------------------------------------------------------- */
-
-/** Live listings for a set of ids. A failed read reports `failed` instead of
-    treating every id as gone; ids a successful read didn't return are null. */
-function useLiveListings(ids) {
-  const [rows, setRows] = useState(() => new Map());
-  const [failed, setFailed] = useState(false);
-  const [nonce, setNonce] = useState(0);
-  const key = ids.join('|');
-  useEffect(() => {
-    if (!ids.length) return undefined;
-    let alive = true;
-    setFailed(false);
-    loadListingsByIds(ids)
-      .then((found) => {
-        if (!alive) return;
-        const byId = new Map((found || []).map((r) => [String(r.id), r]));
-        setRows(new Map(ids.map((id) => [id, byId.get(String(id)) || null])));
-      })
-      .catch((err) => {
-        console.error('[friends] load failed', err);
-        if (alive) setFailed(true);
-      });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, nonce]);
-  const loading = !failed && ids.some((id) => !rows.has(id));
-  return { rows, failed, loading, retry: () => setNonce((n) => n + 1) };
-}
-
-/** Save or unsave from a card outside the Saved page, with a toast that says which. */
-function flipSaved(id, wasSaved) {
-  toggleSaved(id);
-  toast({ title: wasSaved ? 'Removed from saved' : 'Saved', tone: 'brand', actionLabel: 'Undo', onAction: () => toggleSaved(id) });
-}
-
-export function Friends() {
-  const { state } = useSnapshot();
-  const going = state.friendsGoing || [];
-  // Catalogue opportunities resolve locally; published listings (uuid ids)
-  // are read from the backend, the same way Saved does it.
-  const liveIds = going.filter((id) => UUID_RX.test(String(id)) && !getOpportunity(id));
-  const live = useLiveListings(liveIds);
-  const entries = going
-    .map((id) => {
-      const opp = getOpportunity(id);
-      if (opp) return { id, opp, photoKey: { id, cover: opp.img, cause: opp.cause } };
-      const listing = live.rows.get(id);
-      return listing ? { id, listing, photoKey: listing } : null;
-    })
-    .filter(Boolean);
-  const photos = usePhotoPicker(entries.map((e) => e.photoKey));
-  const saved = state.saved || [];
-  const accountSchool = String((state.account && state.account.school) || '').trim();
-  const school = accountSchool || 'your school';
-
-  let body;
-  if (live.failed) {
-    body = <ErrorState title="Couldn't load these shifts" body="Check your connection and try again." onRetry={live.retry} />;
-  } else if (live.loading && !entries.length) {
-    body = <SkeletonRows n={Math.min(liveIds.length, 3)} h={120} />;
-  } else if (!entries.length) {
-    body = <FriendsEmpty school={accountSchool} />;
-  } else {
-    body = (
-      <div className="vu-grid-3">
-        {entries.map((e) => {
-          if (e.opp) {
-            const { opp } = e;
-            return (
-              <OpportunityCard
-                key={e.id}
-                opp={opp}
-                photo={photos.get(e.id)}
-                saved={saved.includes(opp.id)}
-                onToggleSave={() => flipSaved(opp.id, saved.includes(opp.id))}
-              />
-            );
-          }
-          const { listing } = e;
-          return (
-            <ListingCard
-              key={e.id}
-              {...liveCardProps(listing)}
-              photo={photos.get(listing.id)}
-              saved={saved.includes(listing.id)}
-              onToggleSave={() => flipSaved(listing.id, saved.includes(listing.id))}
-            />
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div className="vu-page">
-      {/* An empty page's sentence already says what shows up here. */}
-      <PageHead title="Friends going" sub={entries.length || live.loading || live.failed ? `Shifts students from ${school} signed up for.` : ''} />
-      <div style={S('margin-top:28px')}>{body}</div>
-    </div>
-  );
-}
-
-/* Friends going, nobody yet. The list matches on school, so without one
-   the useful step is adding it; with one, inviting friends is. Either way a
-   shift search sits next to it as a text button. */
-function FriendsEmpty({ school }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  async function copyInvite() {
-    setBusy(true);
-    const ok = await copyText(`${window.location.origin}/signup`);
-    setBusy(false);
-    toast(ok ? { title: 'Link copied', tone: 'ok' } : { title: "Couldn't copy", message: 'Select the text and copy it yourself.', tone: 'warn' });
-  }
-  return (
-    <div className="vu-empty" style={S(`display:flex;align-items:center;justify-content:space-between;gap:16px 32px;flex-wrap:wrap;padding:20px 0;border-top:1px solid ${C.line};border-bottom:1px solid ${C.line}`)}>
-      <p style={S(`margin:0;max-width:520px;font:400 15px/1.5 ${F.body};color:${C.ink2};text-wrap:pretty`)}>
-        {school
-          ? `No one from ${school} has signed up for a shift yet. Send friends the sign-up link and their shifts show up here.`
-          : 'Add your school and the shifts your classmates sign up for show up here.'}
-      </p>
-      <div style={S('display:flex;align-items:center;gap:12px 20px;flex-wrap:wrap')}>
-        {school ? (
-          <Button size="sm" icon="link" busy={busy} onClick={copyInvite}>Copy invite link</Button>
-        ) : (
-          <Button size="sm" href="/settings/account">Add your school</Button>
-        )}
-        <Button size="sm" variant="ghost" onClick={() => router.push('/discover')}>Find a shift</Button>
       </div>
     </div>
   );

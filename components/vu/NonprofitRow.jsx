@@ -81,17 +81,22 @@ function subParts(sub, parts) {
  * @param {()=>void} [props.onClick]  with href, runs just before the link navigates
  * @param {boolean} [props.external]  opens in a new tab with the external mark
  * @param {React.ReactNode} [props.trailing] replaces the chevron (a button, a status)
+ * @param {string} [props.note]       a last, quieter part of the sub line, e.g. "Not on the map"
+ * @param {(on: boolean)=>void} [props.onHover] pointer or keyboard focus enters (true) or leaves (false), for a map beside the list
  * @param {string} [props.cause]      accepted for older callers; unused
  */
 // eslint-disable-next-line no-unused-vars
-export default function NonprofitRow({ name, sub, parts, openCount, cause, href, onClick, trailing, external = false, className }) {
+export default function NonprofitRow({ name, sub, parts, openCount, cause, href, onClick, trailing, external = false, className, note, onHover }) {
   const meta = subParts(sub, parts);
+  const hoverProps = onHover
+    ? { onPointerEnter: () => onHover(true), onPointerLeave: () => onHover(false), onFocus: () => onHover(true), onBlur: () => onHover(false) }
+    : {};
   const n = Number(openCount);
   const body = (
     <>
       <span style={S('min-width:0;flex:1')}>
         <span className="vu-np-name vu-trunc">{name}</span>
-        {meta.length ? (
+        {meta.length || note ? (
           <span className="vu-np-sub vu-trunc">
             {meta.map((m, i) => (
               <span key={i}>
@@ -103,6 +108,16 @@ export default function NonprofitRow({ name, sub, parts, openCount, cause, href,
                 {m}
               </span>
             ))}
+            {note ? (
+              <span className="vu-np-note">
+                {meta.length ? (
+                  <span className="vu-sep" aria-hidden="true">
+                    {' · '}
+                  </span>
+                ) : null}
+                {note}
+              </span>
+            ) : null}
           </span>
         ) : null}
       </span>
@@ -121,7 +136,7 @@ export default function NonprofitRow({ name, sub, parts, openCount, cause, href,
   const cls = ['vu-np', className].filter(Boolean).join(' ');
   if (href && external) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={cls} {...hoverProps}>
         {body}
       </a>
     );
@@ -129,17 +144,21 @@ export default function NonprofitRow({ name, sub, parts, openCount, cause, href,
   if (href) {
     // onClick runs before the navigation (a list remembers its scroll there).
     return (
-      <Link href={href} className={cls} onClick={onClick}>
+      <Link href={href} className={cls} onClick={onClick} {...hoverProps}>
         {body}
       </Link>
     );
   }
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className={cls}>
+      <button type="button" onClick={onClick} className={cls} {...hoverProps}>
         {body}
       </button>
     );
   }
-  return <div className={cls}>{body}</div>;
+  return (
+    <div className={cls} {...hoverProps}>
+      {body}
+    </div>
+  );
 }

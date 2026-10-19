@@ -21,6 +21,9 @@ import { APPLICATION_STATUS as STATUS_WORDS } from '../lib/seed.js';
 
 // Words from lib/seed.js (shared with the lead's screens); each status maps
 // to a status tone (StatusText in the rows).
+// Same rule as the listing page (JoinListing THREAD_STATUSES): the thread is
+// open while the application is live, closed once declined or withdrawn.
+const THREAD_STATUSES = ['pending', 'accepted', 'waitlisted'];
 const TONES = { pending: 'wait', accepted: 'ok', waitlisted: 'mute', declined: 'bad', withdrawn: 'mute' };
 export const APPLICATION_STATUS = Object.fromEntries(
   Object.entries(TONES).map(([k, tone]) => [k, { label: STATUS_WORDS[k].label, tone }])
@@ -150,7 +153,9 @@ export default function VolunteerApplications({ showEmpty = false, bare = false 
                 </div>
                 <div className="vu-row-end">
                   <StatusText tone={st.tone}>{st.label}</StatusText>
-                  <Button size="sm" onClick={() => openThread(app)} aria-label={`Message ${name}`}>Message</Button>
+                  {THREAD_STATUSES.includes(app.status) ? (
+                    <Button size="sm" onClick={() => openThread(app)} aria-label={`Message ${name}`}>Message</Button>
+                  ) : null}
                 </div>
               </div>
             </li>

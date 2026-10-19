@@ -6,8 +6,10 @@
    DiscoverMap   Discover's map: a day/time pill pin at each listing's real
                  spot (a dot when undated, "+N" when several share a place),
                  a popup for the picked pin with links to the listing and to
-                 directions, hollow dots at nonprofits' IRS street addresses,
-                 zoom, Near me and Expand (a full-screen map).
+                 directions, a hollow dot at the IRS street address of every
+                 nonprofit the page lists (placed in one batch through
+                 /api/nonprofits/places, lib/nonprofitPlaces.js), zoom, Near me
+                 and Expand (a full-screen map).
    AddressMap    one listing's address on a small map, with Directions and
                  Open in Maps links (the listing page).
 
@@ -23,13 +25,13 @@ import { S } from '../lib/style.js';
 import { C, F, R } from '../lib/tokens.js';
 import { Icon } from './ui.jsx';
 import { shiftDates } from '../lib/calendar.js';
-import { geocode, cachedGeocode, nonprofitSpot, storedPoint, addressKey, directionsHref, searchHref } from '../lib/geo.js';
+import { geocode, cachedGeocode, storedPoint, addressKey, directionsHref, searchHref } from '../lib/geo.js';
+import { useNonprofitPlaces, canonEin, useMapHover, setMapPick, useRowHoverLink } from '../lib/nonprofitPlaces.js';
 import { pinLabel, pinHtml } from './vu/MapPins.jsx';
 import MapCanvas from './map/MapCanvas.jsx';
 import MapOverlay from './map/MapOverlay.jsx';
 import { loadLeaflet, createBaseMap } from './map/leaflet.js';
 
-const NONPROFIT_CAP = 20;
 const ADDRESS_ZOOM = 15;
 
 /** A map search for an address, opened in a new tab. */
@@ -127,36 +129,39 @@ function pinsFrom(placed) {
   });
 }
 
-/** Nonprofits on the map, at the street address on their IRS record. */
+/**
+ * Nonprofits on the map, at the street address on their IRS record: every
+ * listed org, placed in one batch (lib/nonprofitPlaces.js). Orgs that share
+ * an address (one office building) share one dot.
+ */
 function useNonprofitDots(nonprofits) {
-  const list = useMemo(() => (nonprofits || []).filter((o) => o && o.ein).slice(0, NONPROFIT_CAP), [nonprofits]);
-  const [spots, setSpots] = useState(() => new Map());
+  const list = useMemo(() => {
+    const seen = new Set();
+    return (nonprofits || []).filter((o) => {
+      const id = o && canonEin(o.ein);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, [nonprofits]);
+  const eins = useMemo(() => list.map((o) => o.ein), [list]);
+  const { places, missing, loading } = useNonprofitPlaces(eins);
 
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      // One at a time: the geocoder queues upstream calls a second apart anyway.
-      for (const o of list) {
-        if (!live) return;
-        const id = String(o.ein);
-        const p = await nonprofitSpot(id);
-        if (!live) return;
-        setSpots((m) => (m.get(id) === p ? m : new Map(m).set(id, p)));
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [list]);
+  const dots = useMemo(() => {
+    const bySpot = new Map();
+    list.forEach((o) => {
+      const ein = canonEin(o.ein);
+      const p = places.get(ein);
+      if (!p) return;
+      const spot = `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+      const org = { ein, name: o.name || '', cause: o.cause || '', address: p.address || '' };
+      const have = bySpot.get(spot);
+      bySpot.set(spot, have ? { ...have, orgs: [...have.orgs, org] } : { key: `np:${spot}`, point: { lat: p.lat, lng: p.lng }, address: p.address || '', orgs: [org] });
+    });
+    return [...bySpot.values()].map((d) => ({ ...d, ein: d.orgs[0].ein, name: d.orgs[0].name, cause: d.orgs[0].cause }));
+  }, [list, places]);
 
-  return useMemo(
-    () =>
-      list
-        .map((o) => ({ o, p: spots.get(String(o.ein)) }))
-        .filter(({ p }) => p)
-        .map(({ o, p }) => ({ key: `np:${o.ein}`, ein: String(o.ein), name: o.name, cause: o.cause || '', address: p.address || '', point: { lat: p.lat, lng: p.lng } })),
-    [list, spots]
-  );
+  return { dots, missing, loading, total: list.length };
 }
 
 /** The searched town's center, when it can be found. */
@@ -190,23 +195,30 @@ function useTownCenter(town) {
  * @param {object} props
  * @param {Array<object>} props.listings rows from DiscoverListings' onRows (listing columns plus cardFacts)
  * @param {Map<string, object|null>} [props.photos] the cards' own photos (never stock)
- * @param {Array<{ein:number|string,name:string,cause?:string}>} [props.nonprofits]
+ * @param {Array<{ein:number|string,name:string,cause?:string}>} [props.nonprofits] every nonprofit row the page lists; each gets a dot
  * @param {string|null} [props.highlight] listing id hovered in the list (its pin turns ink)
  * @param {(ids:string|string[]|null)=>void} [props.onPick] a pin was picked: its listing id, or every id at that place; null when closed
  * @param {(org:object)=>void} [props.onOpenNonprofit] kept for callers; a nonprofit's popup links to its page
  * @param {string} [props.town] the searched place; the map starts there when it has no pins
+ * @param {{lat:number,lng:number}|null} [props.here] the visitor's own location, when the page knows it; the map keeps it in view with what's around it
+ * @param {(missing:Set<string>)=>void} [props.onNonprofitPlaces] the EINs that can't go on the map (PO boxes, no match)
  * @param {boolean} [props.inline] draw the map in place (default). false draws only the full-screen map, while `expanded`
  * @param {boolean} [props.expanded] the full-screen map is open (controlled); leave undefined to let Expand manage it
  * @param {(open:boolean)=>void} [props.onExpandedChange]
  */
 // eslint-disable-next-line no-unused-vars
-export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight = null, onPick, onOpenNonprofit, town = '', inline = true, expanded, onExpandedChange, className, style }) {
+export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight = null, onPick, onOpenNonprofit, town = '', here: givenHere = null, onNonprofitPlaces, inline = true, expanded, onExpandedChange, className, style }) {
   const placed = usePlacedGroups(listings);
   const pins = useMemo(() => pinsFrom(placed), [placed]);
-  const dots = useNonprofitDots(nonprofits);
+  const { dots, missing } = useNonprofitDots(nonprofits);
   const center = useTownCenter(town);
+  useRowHoverLink();
+  const hoverEin = useMapHover();
   const [picked, setPicked] = useState(null);
   const [ownOpen, setOwnOpen] = useState(false);
+  // Near me on this map wins over a location the page passed in.
+  const [nearHere, setNearHere] = useState(null);
+  const here = nearHere || (givenHere && Number.isFinite(givenHere.lat) && Number.isFinite(givenHere.lng) ? { lat: givenHere.lat, lng: givenHere.lng } : null);
   const open = expanded === undefined ? ownOpen : Boolean(expanded);
 
   const setOpen = (v) => {
@@ -214,34 +226,57 @@ export function DiscoverMap({ listings = [], photos, nonprofits = [], highlight 
     if (onExpandedChange) onExpandedChange(v);
   };
 
+  const missingKey = [...missing].sort().join(',');
+  const placesRef = useRef(onNonprofitPlaces);
+  placesRef.current = onNonprofitPlaces;
+  useEffect(() => {
+    if (placesRef.current) placesRef.current(new Set(missingKey ? missingKey.split(',') : []));
+  }, [missingKey]);
+
   const notOnMap = placed.filter((g) => g.state === 'none').reduce((n, g) => n + g.items.length, 0);
   const onMap = pins.reduce((n, p) => n + p.items.length, 0);
-  const label = `Map of ${onMap} ${onMap === 1 ? 'opportunity' : 'opportunities'}${pins.length && pins.length !== onMap ? ` at ${pins.length} places` : ''}`;
+  const orgsOnMap = dots.reduce((n, d) => n + d.orgs.length, 0);
+  const oppText = `${onMap} ${onMap === 1 ? 'opportunity' : 'opportunities'}${pins.length && pins.length !== onMap ? ` at ${pins.length} places` : ''}`;
+  const orgText = `${orgsOnMap} ${orgsOnMap === 1 ? 'nonprofit' : 'nonprofits'}`;
+  // "Map of 22 nonprofits" when the page lists no opportunities, never "0 opportunities and 22 nonprofits".
+  const label = `Map of ${[onMap || !orgsOnMap ? oppText : '', orgsOnMap ? orgText : ''].filter(Boolean).join(' and ')}`;
+
+  // The dot of the row being hovered in the list.
+  const hoverDot = hoverEin ? (dots.find((d) => d.orgs.some((o) => o.ein === hoverEin)) || {}).key || null : null;
 
   function pick(want) {
     // Picking the open pin again closes it.
     const key = want && want === picked ? null : want;
     setPicked(key);
+    const dot = key ? dots.find((d) => d.key === key) : null;
+    setMapPick(dot ? dot.ein : null);
     if (!onPick) return;
     const pin = key ? pins.find((p) => p.key === key) : null;
     onPick(pin ? (pin.items.length === 1 ? pin.items[0].id : pin.items.map((l) => l.id)) : null);
   }
 
-  // A pick whose place left the map (filters changed) closes its popup.
+  // A pick whose place left the map (filters changed) closes its popup. A
+  // group of close dots (MapCanvas draws them, "npg:<spot>+<spot>") stays
+  // while every dot in it is still here.
   const pickRef = useRef(pick);
   pickRef.current = pick;
   useEffect(() => {
     if (!picked) return;
-    if (!pins.some((p) => p.key === picked) && !dots.some((d) => d.key === picked)) pickRef.current(null);
+    const hasDot = (k) => dots.some((d) => d.key === k);
+    const ok = picked.startsWith('npg:') ? picked.slice(4).split('+').every((spot) => hasDot(`np:${spot}`)) : pins.some((p) => p.key === picked) || hasDot(picked);
+    if (!ok) pickRef.current(null);
   }, [pins, dots, picked]);
 
-  const shared = { pins, dots, photos, highlight, picked, onPick: pick, center, notOnMap, ariaLabel: label };
+  // The open dot no longer counts as picked once this map goes away.
+  useEffect(() => () => setMapPick(null), []);
+
+  const shared = { pins, dots, photos, highlight, hoverDot, picked, onPick: pick, center, here, onHere: setNearHere, notOnMap, ariaLabel: label };
 
   return (
     <>
       {inline ? <MapCanvas {...shared} onExpand={() => setOpen(true)} className={className} style={style} /> : null}
       {open ? (
-        <MapOverlay title={label} onClose={() => setOpen(false)}>
+        <MapOverlay title={label} onClose={() => setOpen(false)} onEscape={() => (picked ? (pick(null), true) : false)}>
           <MapCanvas {...shared} wheel="always" autoFocus={false} style={{ position: 'absolute', inset: 0, borderRadius: 0 }} />
         </MapOverlay>
       ) : null}

@@ -3,15 +3,34 @@ import { notFound, redirect } from 'next/navigation';
 import AppFrame from '../../../components/AppFrame.jsx';
 import Nonprofit from '../../../components/screens/Nonprofit.jsx';
 import { cleanEin, fetchOrganization, causeFromNtee } from '../../../lib/propublica.js';
+import { nonprofitLinks } from '../../../lib/nonprofitLinks.js';
 
 /* /nonprofits/<ein>, a registered nonprofit's page, public and shareable.
    The server reads the IRS record once (cached for a day) so the link
    unfurls with the organization's name and town, and the page arrives with
    its facts already in hand. A malformed or unknown EIN is a 404 with this
    segment's not-found page. If ProPublica is down the page still opens and
-   loads the record in the browser, with a retry. */
+   loads the record in the browser, with a retry.
+
+   The website, phone and volunteer page (lib/nonprofitLinks.js) arrive with
+   the page when they come back within LINKS_WAIT_MS, which they do once
+   they're cached. A first lookup that takes longer keeps running, and the
+   page asks /api/nonprofits?ein=&links=1 for it from the browser. */
 
 const DESCRIPTION_MAX = 200;
+const LINKS_WAIT_MS = 1200;
+
+/** The record the browser gets, with links when they came back in time. */
+async function withLinks(org) {
+  const { efileId: _id, efileForm: _form, ...rest } = org;
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), LINKS_WAIT_MS);
+  });
+  const links = await Promise.race([nonprofitLinks(org), late]);
+  clearTimeout(timer);
+  return links ? { ...rest, ...links } : rest;
+}
 
 const readOrg = cache(async (ein) => fetchOrganization(ein));
 
@@ -59,9 +78,10 @@ export default async function Page({ params }) {
   if (String(raw) !== ein) redirect(`/nonprofits/${ein}`);
   const r = await readOrg(ein);
   if (r.status === 'not_found') notFound();
+  const initial = r.status === 'ok' ? await withLinks(r.organization) : null;
   return (
     <AppFrame>
-      <Nonprofit ein={ein} initial={r.status === 'ok' ? r.organization : null} />
+      <Nonprofit ein={ein} initial={initial} />
     </AppFrame>
   );
 }

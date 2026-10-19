@@ -29,6 +29,7 @@ const MARKETING_CSS = `
 .mk-nav a[aria-current="page"] { color:${C.ink}; font-weight:600; box-shadow:inset 0 -2px 0 ${C.ink}; }
 .mk-right { margin-left:auto; display:flex; align-items:center; gap:20px; flex:none; }
 .mk-signin { font:600 15px/1 ${F.body}; color:${C.ink}; white-space:nowrap; }
+.mk-short { display:none; }
 .mk-foot { margin-top:96px; box-shadow:inset 0 1px 0 ${C.line}; }
 .mk-foot-row { padding-top:32px; padding-bottom:48px; display:flex; align-items:center; gap:28px; }
 .mk-foot-brand { display:flex; align-items:center; gap:8px; margin-right:auto; color:${C.ink}; font:700 17px/1 ${F.display}; letter-spacing:-0.02em; }
@@ -54,11 +55,17 @@ const MARKETING_CSS = `
 @media (min-width: 901px) {
   .mk-menu { display:none; }
 }
+/* Small phones: the logo alone carries the brand so the header row fits. */
+@media (max-width: 379px) {
+  .mk-brand-name { display:none; }
+}
 @media (max-width: 719px) {
   .mk-wrap { padding:0 16px; }
   .mk-head-row { height:60px; gap:12px; }
   .mk-brand { font-size:19px; gap:8px; }
   .mk-right { gap:14px; }
+  .mk-long { display:none; }
+  .mk-short { display:inline; }
   .mk-foot { margin-top:64px; }
   .mk-foot-row { flex-direction:column; align-items:flex-start; gap:20px; padding-top:32px; padding-bottom:40px; }
   .mk-foot-nav { flex-wrap:wrap; gap:14px 22px; }
@@ -110,7 +117,11 @@ export function scrollToAnchor(e, href) {
   if (window.history && window.history.replaceState) window.history.replaceState(null, '', `#${hash}`);
 }
 
-export function MarketingHeader({ active = '' }) {
+/* `next`: a same-site path the header's Sign in and Sign up should come back
+   to (an invite link passes its own), so they don't drop the visitor's place.
+   `signUpHref`: a fuller sign-up link to use instead (an invite adds the
+   invitee's name). */
+export function MarketingHeader({ active = '', next = '', signUpHref = '' }) {
   const router = useRouter();
   const pathname = usePathname();
   const links = useMarketingLinks();
@@ -141,7 +152,7 @@ export function MarketingHeader({ active = '' }) {
       <div className="mk-wrap mk-head-row">
         <Link href="/" aria-label="VolunteerU home" className="mk-brand">
           <Logo size={30} title="" />
-          <span>VolunteerU</span>
+          <span className="mk-brand-name">VolunteerU</span>
         </Link>
         <nav aria-label="Primary" className="mk-nav">
           {nav.map((l) => (
@@ -156,11 +167,27 @@ export function MarketingHeader({ active = '' }) {
           ))}
         </nav>
         <div className="mk-right">
-          <Link href={links.authed ? '/app' : '/signin'} className="mk-signin">
+          <Link href={links.authed ? '/app' : next ? `/signin?next=${encodeURIComponent(next)}` : '/signin'} className="mk-signin">
             {links.authed ? 'Open app' : 'Sign in'}
           </Link>
-          <Button variant="dark" size="sm" onClick={() => router.push(links.authed ? links.search : links.signUp)}>
-            {links.authed ? 'Search opportunities' : 'Sign up free'}
+          {/* Phones show the short label; the name stays whole for screen readers. */}
+          <Button
+            variant="dark"
+            size="sm"
+            aria-label={links.authed ? 'Search opportunities' : 'Sign up free'}
+            onClick={() => router.push(links.authed ? links.search : signUpHref || (next ? `/signup?next=${encodeURIComponent(next)}` : links.signUp))}
+          >
+            {links.authed ? (
+              <>
+                <span className="mk-long">Search opportunities</span>
+                <span className="mk-short">Search</span>
+              </>
+            ) : (
+              <>
+                <span className="mk-long">Sign up free</span>
+                <span className="mk-short">Sign up</span>
+              </>
+            )}
           </Button>
         </div>
         <IconButton

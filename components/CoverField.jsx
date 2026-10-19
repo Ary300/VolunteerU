@@ -128,6 +128,10 @@ export default function CoverField({ value, suggested = '', cause = '', fallback
   const [error, setError] = useState('');
   const [drop, setDrop] = useState(false);
   const fileRef = useRef(null);
+  const uploadRef = useRef(null);
+  // The Upload button is disabled while it works, which drops keyboard focus
+  // to the page. A pick from the file chooser gets focus back on it after.
+  const refocus = useRef(false);
   const alive = useRef(true);
   const previewRef = useRef('');
 
@@ -138,6 +142,13 @@ export default function CoverField({ value, suggested = '', cause = '', fallback
       if (previewRef.current) URL.revokeObjectURL(previewRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (busy || !refocus.current) return;
+    refocus.current = false;
+    const at = document.activeElement;
+    if ((!at || at === document.body || at === fileRef.current) && uploadRef.current) uploadRef.current.focus();
+  }, [busy]);
 
   const own = value ? resolveCover(value) : null;
   const usingSuggestion = !value && Boolean(suggested);
@@ -248,11 +259,13 @@ export default function CoverField({ value, suggested = '', cause = '', fallback
         onChange={(e) => {
           const f = e.target.files && e.target.files[0];
           e.target.value = '';
-          if (f) takeFile(f);
+          if (!f) return;
+          refocus.current = true;
+          takeFile(f);
         }}
       />
       <div className="cf-acts">
-        <Button size="sm" icon="upload" full extra="padding:0 10px" busy={busy} onClick={() => fileRef.current && fileRef.current.click()} aria-describedby={helpId}>
+        <Button ref={uploadRef} size="sm" icon="upload" full extra="padding:0 10px" busy={busy} onClick={() => fileRef.current && fileRef.current.click()} aria-describedby={helpId}>
           {busy ? 'Uploading photo' : 'Upload a photo'}
         </Button>
         <Button size="sm" icon="image" full extra="padding:0 10px" disabled={busy} onClick={chooseLibrary}>

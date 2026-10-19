@@ -1,6 +1,11 @@
-import { redirect } from 'next/navigation';
+import ProjectsRedirect from '../../components/ProjectsRedirect.jsx';
 
-// The bare path has no page of its own; student projects are run from Lead.
+export const metadata = {
+  title: 'Student projects, VolunteerU',
+};
+
+// The bare path has no page of its own: Lead when signed in, the student
+// projects on Discover when signed out (see ProjectsRedirect).
 export default function Page() {
-  redirect('/lead');
+  return <ProjectsRedirect />;
 }

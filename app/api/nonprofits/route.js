@@ -5,6 +5,17 @@
 
    GET ?q=&city=&state=&ntee=&page=   search, returns { organizations, total, page, pages, capped }
    GET ?ein=                          one organization, returns { organization }
+   GET ?ein=&links=1                  the same, plus how to volunteer with them:
+                                      website, volunteerUrl, phone, phoneTel,
+                                      linkSource ('irs990' | 'wikidata' | '')
+                                      from lib/nonprofitLinks.js. Only the
+                                      nonprofit page asks for this; map dots and
+                                      saved rows use the plain, faster ?ein=.
+
+   GET ?around=<lat>,<lng>            the neighborhood names around a point
+                                      (OpenStreetMap), returns { city, areas },
+                                      so a list can also search "Broad Ripple"
+                                      for a visitor standing there.
 
    `city` turns the search into required terms ("+food +carmel"), which
    ProPublica matches against the name and the city, so a town's own
@@ -18,21 +29,35 @@
    ========================================================================== */
 
 import { UPSTREAM, PAGE_SIZE, MAX_PAGE, MAX_RESULTS, composeQuery, searchRow, fetchOrganization } from '../../../lib/propublica.js';
+import { nonprofitLinks } from '../../../lib/nonprofitLinks.js';
+import { nominatimReverse } from '../../../lib/geocoders.js';
 
 export const runtime = 'nodejs';
 
-const HEADERS = { 'User-Agent': 'VolunteerU (nonprofit search)' };
+const HEADERS = { 'User-Agent': 'VolunteerU/1.0 (https://www.volunteeruapp.com)' };
 const CITY_RX = /^[A-Za-z][A-Za-z .'-]{0,59}$/;
 
 function fail(error, status) {
   return Response.json({ error }, { status });
 }
 
-async function orgDetail(ein) {
+/* A day at the edge: IRS records and websites change rarely. */
+const DETAIL_CACHE = 'public, s-maxage=86400, stale-while-revalidate=604800';
+
+/** The fields the browser gets; the e-file ids stay on the server. */
+function publicOrg(o) {
+  const { efileId: _id, efileForm: _form, ...rest } = o;
+  return rest;
+}
+
+async function orgDetail(ein, withLinks) {
   const r = await fetchOrganization(ein);
   if (r.status === 'not_found') return fail('not_found', 404);
   if (r.status !== 'ok') return fail(r.error || 'upstream', 502);
-  return Response.json({ organization: r.organization });
+  if (!withLinks) return Response.json({ organization: publicOrg(r.organization) }, { headers: { 'Cache-Control': DETAIL_CACHE } });
+  const links = await nonprofitLinks(r.organization);
+  const organization = { ...publicOrg(r.organization), ...links };
+  return Response.json({ organization }, { headers: { 'Cache-Control': DETAIL_CACHE } });
 }
 
 async function search({ q, city, state, ntee, page }) {
@@ -70,14 +95,56 @@ async function search({ q, city, state, ntee, page }) {
   return Response.json({ organizations, total, page, pages, capped: total >= MAX_RESULTS });
 }
 
+/* ---- neighborhoods around a point ------------------------------------------ */
+
+const AREA_CACHE = new Map(); // "39.87,-86.14" -> { at, v }
+const AREA_CACHE_MAX = 500;
+const AREA_KEEP_MS = 7 * 24 * 3600 * 1000;
+const AREA_NAME_RX = /^[A-Za-z][A-Za-z .'-]{1,40}$/;
+
+async function areasAround(raw) {
+  const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(raw);
+  const lat = m ? Number(m[1]) : NaN;
+  const lng = m ? Number(m[2]) : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return fail('bad_point', 400);
+  // About a kilometer: a neighborhood never needs a precise point.
+  const rlat = Math.round(lat * 100) / 100;
+  const rlng = Math.round(lng * 100) / 100;
+  const key = `${rlat},${rlng}`;
+  const hit = AREA_CACHE.get(key);
+  if (hit && Date.now() - hit.at < AREA_KEEP_MS) return Response.json(hit.v, { headers: { 'Cache-Control': DETAIL_CACHE } });
+  let r;
+  try {
+    r = await nominatimReverse(rlat, rlng);
+  } catch (err) {
+    console.error('[api/nonprofits] reverse lookup failed', key, err && err.message);
+    return fail('upstream', 502);
+  }
+  const city = r && AREA_NAME_RX.test(r.city) ? r.city : '';
+  const names = r ? [r.neighbourhood, r.quarter, r.suburb, r.hamlet] : [];
+  const areas = [];
+  for (const n of names) {
+    if (!n || !AREA_NAME_RX.test(n) || n.toLowerCase() === city.toLowerCase()) continue;
+    if (!areas.some((a) => a.toLowerCase() === n.toLowerCase())) areas.push(n);
+  }
+  const v = { city, areas: areas.slice(0, 2) };
+  AREA_CACHE.delete(key);
+  AREA_CACHE.set(key, { at: Date.now(), v });
+  while (AREA_CACHE.size > AREA_CACHE_MAX) AREA_CACHE.delete(AREA_CACHE.keys().next().value);
+  return Response.json(v, { headers: { 'Cache-Control': DETAIL_CACHE } });
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+
+  const around = searchParams.get('around');
+  if (around !== null) return areasAround(around.slice(0, 60));
 
   const einRaw = searchParams.get('ein');
   if (einRaw !== null) {
     const ein = einRaw.trim().replace(/\D/g, '');
     if (!/^\d{6,9}$/.test(ein)) return fail('bad_ein', 400);
-    return orgDetail(ein);
+    return orgDetail(ein, searchParams.get('links') === '1');
   }
 
   const q = (searchParams.get('q') || '').trim().slice(0, 120);

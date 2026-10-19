@@ -23,6 +23,8 @@ import { resolveCover, suggestedCover } from '../../lib/photos.js';
 import CoverField from '../CoverField.jsx';
 import { geocode } from '../../lib/geo.js';
 import { readPartner, clearPartnerParams } from '../../lib/partnerPrefill.js';
+import { signupColumnsMissing, einDigits, httpLink } from '../../lib/listings.js';
+import { SignupLinkFields, NonprofitEinField, signupLinkError, einError } from '../ListingLinks.jsx';
 import {
   defaultDraft, generatedSessions, totalSlots, safetyComplete, validateFirstSession,
   CAUSE_OPTIONS, TERM_OPTIONS, REPEAT_OPTIONS, AUDIENCE_OPTIONS, MISSION_MAX,
@@ -327,7 +329,7 @@ export default function Create() {
     const partner = readPartner(partnerQuery);
     if (!partner || partnerDone.current === partner.site) return;
     partnerDone.current = partner.site;
-    setDraft((d) => ({ ...d, site: partner.site, delivery: d.delivery === 'remote' ? 'in_person' : d.delivery }));
+    setDraft((d) => ({ ...d, site: partner.site, delivery: d.delivery === 'remote' ? 'in_person' : d.delivery, ...(partner.ein ? { nonprofitEin: partner.ein } : {}) }));
     clearPartnerParams();
     toast({ title: 'Site filled in', message: `${partner.name} is the project's site. Change it in About the project.`, tone: 'ok' });
   }, [partnerQuery, authed]);
@@ -452,6 +454,10 @@ export default function Create() {
       if (!d.mission.trim()) e.mission = 'Enter a sentence on what happens and who it helps.';
       else if (d.mission.length > MISSION_MAX) e.mission = `Shorten it to ${MISSION_MAX} characters.`;
       if (d.website.trim() && !/^https?:\/\/[^\s]+\.[^\s]+/.test(d.website.trim())) e.website = 'Enter a full link starting with https://';
+      const formErr = signupLinkError(d.signupUrl);
+      if (formErr) e.signupUrl = formErr;
+      const einErr = einError(d.nonprofitEin, d.einCheck);
+      if (einErr) e.nonprofitEin = einErr;
       // Light check: a lead should have done some volunteering first. Waived
       // when they already have confirmed hours on VolunteerU.
       if (!hasHours && d.founderExperience.trim().length < 12) {
@@ -473,7 +479,7 @@ export default function Create() {
       if (!safetyComplete(d)) e.safety = 'Check all 3 boxes before you publish.';
       // A meeting or form step is only doable with its link. Blank-name rows
       // never publish, so they don't count.
-      const noLink = labeledSteps(d.pipeline).filter(stepNeedsLink).length;
+      const noLink = labeledSteps(d.pipeline).filter((st) => stepNeedsLink(st, draftFormLink(d))).length;
       if (noLink) e.pipeline = `${noLink === 1 ? '1 step is' : `${noLink} steps are`} missing a link. Paste it in, or remove the step.`;
     }
     return e;
@@ -543,6 +549,11 @@ export default function Create() {
       const project = await perform('create.publish', () => createProject(payload));
       const live = getProject(project.id);
       const onDiscover = !!(live && live.listingId);
+      // A database without migration 0007 saves the listing without the form link.
+      const linksDropped = onDiscover && (draft.signupUrl || einDigits(draft.nonprofitEin)) && signupColumnsMissing();
+      if (linksDropped) {
+        toast({ title: "Form link didn't save", message: "Your listing is up, but volunteers won't see your form link yet.", tone: 'warn' });
+      }
       toast({
         title: 'Project published',
         message: onDiscover
@@ -911,6 +922,8 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
         </div>
       </Section>
 
+      <LinksSection d={d} set={set} errors={errors} />
+
       <Section id="cr-track" title="Track record" hint="Run this before? Add rough numbers. Leave them blank if you're starting out.">
         <div className="cr-grid2">
           <Field label="Events hosted so far" value={d.eventsHosted} onChange={(v) => set({ eventsHosted: v.replace(/\D/g, '').slice(0, 5) })} placeholder="0" inputMode="numeric" />
@@ -961,6 +974,31 @@ function Step1({ d, set, errors, onNext, router, hasHours }) {
         </Button>
       </Actions>
     </div>
+  );
+}
+
+/* The organization's own sign-up form, and for a registered nonprofit (or a
+   project started from a nonprofit's page) its EIN. */
+function LinksSection({ d, set, errors }) {
+  const official = (d.orgClass || 'student') === 'official';
+  const partner = !official && !!String(d.nonprofitEin || '').trim();
+  return (
+    <Section id="cr-links" title={official ? 'Sign-up form and EIN' : 'Your own sign-up form'}>
+      <div className="cr-stack">
+        <SignupLinkFields url={d.signupUrl || ''} only={!!d.signupOnly} onChange={(patch) => set(patch)} error={errors.signupUrl} id="cr-signup-url" />
+        {official || partner ? (
+          <NonprofitEinField
+            id="cr-ein"
+            label={partner ? "Partner nonprofit's EIN" : 'IRS EIN'}
+            partner={partner}
+            value={d.nonprofitEin || ''}
+            onChange={(v) => set({ nonprofitEin: v })}
+            onCheck={(einCheck) => set({ einCheck })}
+            error={errors.nonprofitEin}
+          />
+        ) : null}
+      </div>
+    </Section>
   );
 }
 
@@ -1241,6 +1279,7 @@ function Step3({ d, set, errors, onNext, onBack }) {
 
       <PipelineEditor
         steps={d.pipeline}
+        formLink={draftFormLink(d)}
         error={errors.pipeline}
         onChange={(pipeline) => set({ pipeline })}
         title="Before their first shift"
@@ -1276,14 +1315,21 @@ const STEP_FIELDS = {
 };
 
 /** A pipeline step is incomplete if its kind requires a link and none is set. */
-export function stepNeedsLink(st) {
+/** The draft's own sign-up form link, which a Form step with no link of
+    its own uses (lib/listings.js listingRow writes it in when publishing). */
+export function draftFormLink(d) {
+  return httpLink(d && d.signupUrl);
+}
+
+export function stepNeedsLink(st, formLink = '') {
   const cfg = STEP_FIELDS[st.kind];
+  if (st.kind === 'form' && formLink) return false;
   return !!(cfg && cfg.link && cfg.link.required && !(st.link || '').trim());
 }
 
 /* Shared pipeline editor: a numbered list of steps, edited inline. Each step
    collects the details the volunteer needs to actually do it. */
-function PipelineEditor({ steps, onChange, title, blurb, error }) {
+function PipelineEditor({ steps, onChange, title, blurb, error, formLink = '' }) {
   const setStep = (i, patch) => onChange(steps.map((st, j) => (j === i ? { ...st, ...patch } : st)));
   const remove = (i) => onChange(steps.filter((_, j) => j !== i));
   const add = () => onChange([...steps, { id: `pl-user-${Date.now().toString(36)}-${steps.length}`, label: '', kind: 'check', required: true, note: '', link: '', when: '', due: '' }]);
@@ -1301,7 +1347,9 @@ function PipelineEditor({ steps, onChange, title, blurb, error }) {
           const cfg = STEP_FIELDS[st.kind] || {};
           const n = i + 1;
           const key = st.id || String(i);
-          const linkMissing = stepNeedsLink(st) && (st.label || '').trim() && (tried || left.has(key));
+          const linkMissing = stepNeedsLink(st, formLink) && (st.label || '').trim() && (tried || left.has(key));
+          // A Form step left blank sends volunteers to the sign-up form from step 1.
+          const usesFormLink = st.kind === 'form' && !!formLink && !(st.link || '').trim();
           return (
             <div key={st.id || i} className="cr-group">
               <div style={S('display:flex;align-items:center;gap:12px')}>
@@ -1328,11 +1376,12 @@ function PipelineEditor({ steps, onChange, title, blurb, error }) {
                       ariaLabel={`Step ${n} ${cfg.link.label.toLowerCase()}`}
                       value={st.link || ''}
                       onChange={(v) => setStep(i, { link: v })}
-                      placeholder={cfg.link.ph}
+                      placeholder={usesFormLink ? formLink : cfg.link.ph}
                       maxLength={300}
                       inputMode="url"
                       error={linkMissing ? 'Paste the link so volunteers can do this step.' : undefined}
                     />
+                    {usesFormLink ? <p className="cr-pipe-uses" style={S(`margin:6px 0 0;font:400 13px/1.4 ${F.body};color:${C.ink2}`)}>Uses your sign-up form link. Paste another link to change it.</p> : null}
                     </div>
                   ) : <span />}
                   {cfg.when ? (
@@ -1361,6 +1410,12 @@ function PipelineEditor({ steps, onChange, title, blurb, error }) {
   );
 }
 
+/* The review row for the organization's own form, when there is one. */
+function signupRow(d) {
+  if (!String(d.signupUrl || '').trim()) return [];
+  return [['Their own form', d.signupOnly ? 'Spots held only through it. Volunteers still apply here.' : 'Linked next to Apply']];
+}
+
 function Step4({ d, publishing, onPublish, onBack, isTeam }) {
   const slots = totalSlots(d);
   const sessions = generatedSessions(d);
@@ -1368,7 +1423,7 @@ function Step4({ d, publishing, onPublish, onBack, isTeam }) {
   const roles = (d.teamRoles || []).filter((r) => r.name && r.name.trim());
   const starter = (d.starterTasks || []).filter((t) => t.title && t.title.trim());
   const pipe = labeledSteps(d.pipeline);
-  const pipeNoLink = pipe.filter(stepNeedsLink).length;
+  const pipeNoLink = pipe.filter((st) => stepNeedsLink(st, draftFormLink(d))).length;
   const noBriefing = roles.filter((r) => !(r.briefing || '').trim()).length;
   const oneTime = /one time/i.test(d.repeats);
   const place = d.delivery === 'remote' ? 'Remote' : [d.site.trim(), d.delivery === 'hybrid' ? 'and online' : ''].filter(Boolean).join(' ');
@@ -1389,6 +1444,7 @@ function Step4({ d, publishing, onPublish, onBack, isTeam }) {
         ],
         ['Starter tasks', plural(starter.length, 'task')],
         ['Who should apply', d.audience.length ? d.audience.join(', ') : 'Anyone'],
+        ...signupRow(d),
         // Only worth a row when something blocks publishing.
         ...(roles.length ? [] : [['Ready to publish', 'Add a role first', true]]),
       ]
@@ -1407,6 +1463,7 @@ function Step4({ d, publishing, onPublish, onBack, isTeam }) {
           pipeNoLink > 0,
         ],
         ['Who should apply', d.audience.length ? d.audience.join(', ') : 'Anyone'],
+        ...signupRow(d),
         ['Safety', safe ? 'All 3 checked' : 'Needs attention', !safe],
       ];
   return (

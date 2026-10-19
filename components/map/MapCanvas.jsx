@@ -9,18 +9,24 @@
    hold next/link links and the listing's photo. The map pans so an open
    popup fits inside it.
 
+   Dots close enough that one's tap area would cover another's (downtown, at
+   the default zoom) draw as one numbered dot. Its popup lists every org in
+   it, with Zoom in to pull them apart, so every dot can always be reached.
+   The links in an org's popup (volunteer page, website, phone) start loading
+   for the dots in view a moment after they land, so a tap rarely waits.
+
    Controls (top right): zoom in and out, Near me (browser location, a blue
    dot), and Expand when the caller passes onExpand. The scroll wheel zooms
    only once the map has been clicked or focused, so the page never gets
    stuck scrolling the map; `wheel="always"` is for the full-screen map.
    ========================================================================== */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { S } from '../../lib/style.js';
 import { C, F, R, SH } from '../../lib/tokens.js';
-import { directionsHref } from '../../lib/geo.js';
+import { directionsHref, distanceMiles } from '../../lib/geo.js';
 import { Icon } from '../ui.jsx';
-import { MapPopup, MapListPopup, MapOrgPopup, pinHtml, dotHtml } from '../vu/MapPins.jsx';
+import { MapPopup, MapListPopup, MapOrgPopup, MapOrgListPopup, pinHtml, dotHtml, dotStyle, warmOrgLinks } from '../vu/MapPins.jsx';
 import { loadLeaflet, createBaseMap, INDIANAPOLIS, DEFAULT_ZOOM, FIT_MAX_ZOOM, useReducedMotion } from './leaflet.js';
 
 const POP_GAP = 22; // popup bottom to the pin's center (MapPopup's own offset)
@@ -28,6 +34,21 @@ const POP_EDGE = 10; // room kept between a popup and the map's edge
 const OVERLAY_GAP = 8; // room kept between a popup and the key or the buttons
 const MIN_VISIBLE = 240; // never treat less than this much of the map as on screen
 const NEAR_ZOOM = 14;
+const HERE_ZOOM = 13; // around the visitor when nothing is close by
+const NEAR_MILES = 12; // what counts as "around" the visitor when fitting the view
+const NEAR_MIN = 6; // ...but always the nearest few, when that radius holds fewer
+const FAR_MILES = 60; // with no location, places farther than this from the rest stay out of the fit
+const FAR_SHARE = 0.6; // ...but only when most places are close; a list spread over many states fits them all
+// How far from its center a dot's tap area reaches, in px (globals.css,
+// .vu-np-dot::before): 28px across with a mouse, 44px on a touch screen, and
+// 40px for a numbered dot. Dots closer than that share a numbered dot.
+const DOT_REACH = 14;
+const DOT_REACH_TOUCH = 22;
+const GROUP_REACH = 20;
+const GROUP_ZOOM_MAX = 18; // Zoom in on a group never goes past this
+const LINK_WARM_MAX = 16; // orgs whose links load ahead of a tap, nearest the middle first
+const LINK_WARM_AT_ONCE = 2;
+const LINK_WARM_DELAY_MS = 1500;
 const FIT_PADDING = 48;
 const FIT_PADDING_TOP = 104;
 const GEO_OPTS = { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 };
@@ -41,7 +62,10 @@ const NEAR_ME_ERRORS = {
 /**
  * @param {object} props
  * @param {Array<{key:string,point:{lat:number,lng:number},items:object[],label:string,address:string,ariaLabel:string}>} props.pins
- * @param {Array<{key:string,ein:string,name:string,cause?:string,address?:string,point:{lat:number,lng:number}}>} [props.dots]
+ * @param {Array<{key:string,ein:string,name:string,cause?:string,address?:string,point:{lat:number,lng:number},orgs:Array<{ein:string,name:string,cause?:string}>}>} [props.dots] one per address
+ * @param {string|null} [props.hoverDot] dot key whose row is hovered in the list
+ * @param {{lat:number,lng:number}|null} [props.here] the visitor's location (Near me, or the page's)
+ * @param {(p:{lat:number,lng:number})=>void} [props.onHere] Near me found the visitor
  * @param {Map<string, object|null>} [props.photos]
  * @param {string|null} [props.highlight] listing id hovered in the list
  * @param {string|null} props.picked a pin or dot key
@@ -53,7 +77,7 @@ const NEAR_ME_ERRORS = {
  * @param {string} [props.ariaLabel]
  * @param {boolean} [props.autoFocus] focus the map once it's drawn (the full-screen map)
  */
-export default function MapCanvas({ pins, dots = [], photos, highlight = null, picked, onPick, center = null, wheel = 'focus', onExpand, notOnMap = 0, ariaLabel = 'Map', autoFocus = false, className, style }) {
+export default function MapCanvas({ pins, dots = [], photos, highlight = null, hoverDot = null, picked, onPick, center = null, here = null, onHere, wheel = 'focus', onExpand, notOnMap = 0, ariaLabel = 'Map', autoFocus = false, className, style }) {
   const reduced = useReducedMotion();
   const wrapRef = useRef(null);
   const elRef = useRef(null);
@@ -74,7 +98,18 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
   const [, setTick] = useState(0);
   const [locating, setLocating] = useState(false);
   const [nearMsg, setNearMsg] = useState('');
+  // Each Near me answer looks again, even when the spot is the same as last time.
+  const [nearTick, setNearTick] = useState(0);
+  // Places the fit left out (far from the rest), and a tick that fits everything.
+  const [farOut, setFarOut] = useState(0);
+  const [allTick, setAllTick] = useState(0);
+  const fittedAll = useRef(''); // the places "Zoom out to see" was pressed for
   const keyboardPick = useRef(false);
+  // The visitor moved the map themselves; new places stop refitting it until the results change wholesale.
+  const userMoved = useRef(false);
+  const fittedKeys = useRef(new Set());
+  const hereRefProp = useRef(onHere);
+  hereRefProp.current = onHere;
 
   /* ---- the map itself ---------------------------------------------------- */
   useEffect(() => {
@@ -88,6 +123,12 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
         const redraw = () => setTick((t) => t + 1);
         map.on('move zoom resize viewreset', redraw);
         map.on('click', () => pickRef.current(null));
+        map.on('dragstart', () => {
+          userMoved.current = true;
+        });
+        map.getContainer().addEventListener('wheel', () => {
+          if (map.scrollWheelZoom.enabled()) userMoved.current = true;
+        }, { passive: true });
         if (wheel === 'always') {
           map.scrollWheelZoom.enable();
         } else {
@@ -225,21 +266,41 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
   }, [ready, pins, picked, highlight]);
 
   /* ---- nonprofit dots ------------------------------------------------------- */
+  // Grouped again at each zoom: dots whose tap areas overlap share one numbered dot.
+  const zoom = ready && mapRef.current ? mapRef.current.getZoom() : null;
+  const shown = useMemo(() => {
+    const m = mapRef.current;
+    if (!ready || !m || zoom === null) return dots;
+    return groupDots(dots, (pt) => m.project([pt.lat, pt.lng], zoom));
+  }, [ready, dots, zoom]);
+  // Every group drawn since the dots last changed, so an open group's popup
+  // stays put while a zoom regroups the dots under it.
+  const groups = useMemo(() => new Map(), [dots]);
+  shown.forEach((d) => {
+    if (d.group) groups.set(d.key, d);
+  });
+
   useEffect(() => {
     const L = LRef.current;
     const map = mapRef.current;
     if (!ready || !L || !map) return;
-    const keep = new Set(dots.map((d) => d.key));
+    const keep = new Set(shown.map((d) => d.key));
     dotMarkers.current.forEach((m, key) => {
       if (!keep.has(key)) {
         m.remove();
         dotMarkers.current.delete(key);
       }
     });
-    dots.forEach((d) => {
-      if (dotMarkers.current.has(d.key)) return;
+    shown.forEach((d) => {
+      const have = dotMarkers.current.get(d.key);
+      if (have) {
+        labelDot(have, d);
+        return;
+      }
+      const n = orgCount(d);
+      const size = n > 1 ? 28 : 24;
       const marker = L.marker([d.point.lat, d.point.lng], {
-        icon: L.divIcon({ className: 'vu-lnp', html: dotHtml(), iconSize: [0, 0] }),
+        icon: L.divIcon({ className: 'vu-lnp', html: dotHtml(n), iconSize: [size, size] }),
         keyboard: true,
         zIndexOffset: -500,
       });
@@ -247,52 +308,138 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
         if (e.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
         pickRef.current(d.key, { keyboard: false });
       });
+      // A pointer on its way to one org's dot starts loading that org's links.
+      if (n === 1) marker.on('mouseover mousedown', () => warmOrgLinks([d.ein]));
       marker.on('add', () => {
-        const el = marker.getElement();
-        if (!el) return;
-        el.setAttribute('aria-label', `${d.name}, nonprofit from IRS records`);
-        el.setAttribute('data-ein', d.ein);
+        labelDot(marker, d);
         onKeys(marker, d.key);
+        const el = marker.getElement();
+        if (el && n === 1) el.addEventListener('focus', () => warmOrgLinks([d.ein]));
       });
       marker.addTo(map);
       dotMarkers.current.set(d.key, marker);
     });
-  }, [ready, dots]);
+  }, [ready, shown]);
+
+  // The picked dot, or the one whose row is hovered, grows and turns ink.
+  useEffect(() => {
+    if (!ready) return;
+    shown.forEach((d) => {
+      const m = dotMarkers.current.get(d.key);
+      if (!m) return;
+      const on = d.key === picked || d.key === hoverDot || Boolean(hoverDot && d.members && d.members.includes(hoverDot));
+      const el = m.getElement();
+      const dot = el && el.querySelector('.vu-np-dot');
+      if (dot) {
+        dot.classList.toggle('is-on', on);
+        dot.style.cssText = dotStyle(orgCount(d), on);
+      }
+      if (el) el.setAttribute('aria-pressed', d.key === picked ? 'true' : 'false');
+      m.setZIndexOffset(on ? 900 : -500);
+    });
+  }, [ready, shown, picked, hoverDot]);
+
+  // A moment after the dots land, the links for the ones in view start
+  // loading, a couple at a time, so their popups open ready.
+  const dotsKey = dots.map((d) => d.key).sort().join('|');
+  useEffect(() => {
+    if (!ready || !dots.length) return undefined;
+    const t = setTimeout(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      const bounds = m.getBounds();
+      const mid = m.getCenter();
+      const eins = dots
+        .filter((d) => bounds.contains([d.point.lat, d.point.lng]))
+        .sort((a, b) => distanceMiles(mid, a.point) - distanceMiles(mid, b.point))
+        .flatMap((d) => (d.orgs || [d]).map((o) => o.ein))
+        .slice(0, LINK_WARM_MAX);
+      warmOrgLinks(eins, LINK_WARM_AT_ONCE);
+    }, LINK_WARM_DELAY_MS);
+    return () => clearTimeout(t);
+    // dotsKey stands in for dots.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, dotsKey]);
+
+  /* ---- you are here ---------------------------------------------------------- */
+  const hereKey = here ? `${here.lat.toFixed(5)},${here.lng.toFixed(5)}` : '';
+  useEffect(() => {
+    const L = LRef.current;
+    const m = mapRef.current;
+    if (!ready || !L || !m) return;
+    if (!here) {
+      if (hereRef.current) hereRef.current.remove();
+      hereRef.current = null;
+      return;
+    }
+    const at = [here.lat, here.lng];
+    if (hereRef.current) hereRef.current.setLatLng(at);
+    else hereRef.current = L.circleMarker(at, { radius: 7, weight: 3, color: '#fff', fillColor: C.here, fillOpacity: 1, interactive: false, className: 'vu-here' }).addTo(m);
+    // hereKey stands in for here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, hereKey]);
 
   /* ---- what the map looks at ------------------------------------------------ */
-  // Fit to the pins whenever the set of places changes; with none, look at the
-  // searched town (or Indianapolis). Debounced, since lazily placed pins arrive one
-  // by one.
-  const placesKey = pins.map((p) => `${p.point.lat.toFixed(5)},${p.point.lng.toFixed(5)}`).sort().join('|');
+  // Fit to every pin and dot whenever the set of places changes. With the
+  // visitor's location, fit to them and what's around them instead. With
+  // nothing placed, look at the searched town (or Indianapolis). Debounced,
+  // since lazily placed pins arrive one by one. Once the visitor has moved
+  // the map, new places don't move it again until the results change wholesale.
+  const spots = [...pins.map((p) => ({ key: p.key, point: p.point })), ...dots.map((d) => ({ key: d.key, point: d.point }))];
+  const placesKey = spots.map((p) => p.key).sort().join('|');
   const centerKey = center ? `${center.lat.toFixed(4)},${center.lng.toFixed(4)}` : '';
+  const spotsRef = useRef(spots);
+  spotsRef.current = spots;
+  useEffect(() => {
+    userMoved.current = false; // a new location is a fresh look
+  }, [hereKey, nearTick]);
   useEffect(() => {
     const L = LRef.current;
     const map = mapRef.current;
     if (!ready || !L || !map) return undefined;
     const t = setTimeout(() => {
-      // A pin that lands while a popup is open doesn't yank the map out from under it.
+      // A place that lands while a popup is open doesn't yank the map out from under it.
       if (!mapRef.current || pickedRef.current) return;
+      const now = spotsRef.current;
+      const keys = new Set(now.map((p) => p.key));
+      const overlap = [...fittedKeys.current].some((k) => keys.has(k));
+      if (userMoved.current && overlap) return;
+      userMoved.current = false;
+      fittedKeys.current = keys;
       const animate = !reduced;
-      if (pins.length) {
-        const bounds = L.latLngBounds(pins.map((p) => [p.point.lat, p.point.lng]));
-        // More room at the top, where the key sits, and on the right, under the
-        // buttons; any part of the box that's off screen right now doesn't count.
-        const off = wrapRef.current ? offscreen(wrapRef.current) : { top: 0, bottom: 0 };
-        map.fitBounds(bounds, { paddingTopLeft: [FIT_PADDING, FIT_PADDING_TOP + off.top], paddingBottomRight: [FIT_PADDING + 24, FIT_PADDING + off.bottom], maxZoom: FIT_MAX_ZOOM, animate });
+      const off = wrapRef.current ? offscreen(wrapRef.current) : { top: 0, bottom: 0 };
+      // More room at the top, where the key sits, and on the right, under the
+      // buttons; any part of the box that's off screen right now doesn't count.
+      const pad = { paddingTopLeft: [FIT_PADDING, FIT_PADDING_TOP + off.top], paddingBottomRight: [FIT_PADDING + 24, FIT_PADDING + off.bottom], animate };
+      const pts = allTick && fittedAll.current === placesKey ? now.map((p) => p.point) : fitPoints(now.map((p) => p.point), here, center);
+      setFarOut(now.length - pts.length);
+      if (here) {
+        if (!pts.length) map.setView([here.lat, here.lng], HERE_ZOOM, { animate });
+        else map.fitBounds(L.latLngBounds([[here.lat, here.lng], ...pts.map((p) => [p.lat, p.lng])]), { ...pad, maxZoom: NEAR_ZOOM });
+      } else if (pts.length) {
+        map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])), { ...pad, maxZoom: FIT_MAX_ZOOM });
       } else {
         const c = center || INDIANAPOLIS;
         map.setView([c.lat, c.lng], DEFAULT_ZOOM, { animate });
       }
     }, 250);
     return () => clearTimeout(t);
-    // placesKey and centerKey stand in for pins and center.
+    // placesKey, centerKey and hereKey stand in for the places, center and here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, placesKey, centerKey]);
+  }, [ready, placesKey, centerKey, hereKey, nearTick, allTick]);
+
+  // "Zoom out to see 3 more": fit every place, the far ones too, until the places change.
+  function showAll() {
+    fittedAll.current = placesKey;
+    userMoved.current = false;
+    fittedKeys.current = new Set();
+    setAllTick((t) => t + 1);
+  }
 
   /* ---- popup ---------------------------------------------------------------- */
   const map = mapRef.current;
   const pickedPin = picked ? pins.find((p) => p.key === picked) || null : null;
-  const pickedDot = picked && !pickedPin ? dots.find((d) => d.key === picked) || null : null;
+  const pickedDot = picked && !pickedPin ? shown.find((d) => d.key === picked) || dots.find((d) => d.key === picked) || groups.get(picked) || null : null;
   const target = pickedPin || pickedDot;
 
   // Pan so the open popup sits inside the map, then move keyboard focus into
@@ -365,24 +512,58 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
         />
       );
     } else {
-      popup = (
-        <MapOrgPopup
-          x={x}
-          y={y}
-          width={popW}
-          name={pickedDot.name}
-          cause={pickedDot.cause}
-          address={pickedDot.address}
-          href={`/nonprofits/${pickedDot.ein}`}
-          directions={directions}
-        />
-      );
+      const miles = here ? distanceMiles(here, pickedDot.point) : NaN;
+      const canZoom = Boolean(pickedDot.group) && map.getZoom() < Math.min(GROUP_ZOOM_MAX, map.getMaxZoom());
+      popup =
+        pickedDot.orgs && pickedDot.orgs.length > 1 ? (
+          <MapOrgListPopup
+            x={x}
+            y={y}
+            width={Math.min(272, W - 2 * POP_EDGE)}
+            listMax={Math.max(120, Math.min(260, H - 150))}
+            orgs={pickedDot.orgs}
+            address={pickedDot.address}
+            miles={miles}
+            directions={pickedDot.address ? directionsHref(pickedDot.address) : ''}
+            together={Boolean(pickedDot.group)}
+            onZoom={canZoom ? () => zoomToGroup(pickedDot) : null}
+          />
+        ) : (
+          <MapOrgPopup
+            key={pickedDot.ein}
+            x={x}
+            y={y}
+            width={popW}
+            ein={pickedDot.ein}
+            name={pickedDot.name}
+            cause={pickedDot.cause}
+            address={pickedDot.address}
+            miles={miles}
+            href={`/nonprofits/${pickedDot.ein}`}
+            directions={directionsHref(pickedDot.address || `${target.point.lat},${target.point.lng}`)}
+          />
+        );
     }
   }
 
   /* ---- controls --------------------------------------------------------------- */
+  /** Zoom in on a group until its dots draw apart (or as far as the map goes). */
+  function zoomToGroup(g) {
+    const L = LRef.current;
+    if (!map || !L) return;
+    const pts = (g.members || []).map((k) => dots.find((d) => d.key === k)).filter(Boolean).map((d) => [d.point.lat, d.point.lng]);
+    if (!pts.length) return;
+    userMoved.current = true;
+    pickRef.current(null);
+    const b = L.latLngBounds(pts);
+    // A tiny group fits at a huge zoom; ask for one step past where it splits, never past the cap.
+    const want = Math.min(GROUP_ZOOM_MAX, map.getMaxZoom(), Math.max(map.getZoom() + 1, map.getBoundsZoom(b.pad(1.5))));
+    map.setView(b.getCenter(), want, { animate: !reduced });
+  }
+
   function zoomBy(d) {
     if (!map) return;
+    userMoved.current = true;
     if (d > 0) map.zoomIn(1, { animate: !reduced });
     else map.zoomOut(1, { animate: !reduced });
   }
@@ -397,15 +578,17 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocating(false);
-        const L = LRef.current;
         const m = mapRef.current;
-        if (!L || !m) return;
-        const at = [pos.coords.latitude, pos.coords.longitude];
-        if (hereRef.current) hereRef.current.setLatLng(at);
-        else {
-          hereRef.current = L.circleMarker(at, { radius: 7, weight: 3, color: '#fff', fillColor: C.here, fillOpacity: 1, interactive: false, className: 'vu-here' }).addTo(m);
+        if (!m) return;
+        const at = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        if (hereRefProp.current) {
+          hereRefProp.current(at);
+          setNearTick((t) => t + 1);
+        } else {
+          const L = LRef.current;
+          if (L && !hereRef.current) hereRef.current = L.circleMarker([at.lat, at.lng], { radius: 7, weight: 3, color: '#fff', fillColor: C.here, fillOpacity: 1, interactive: false, className: 'vu-here' }).addTo(m);
+          m.setView([at.lat, at.lng], Math.max(m.getZoom(), NEAR_ZOOM), { animate: !reduced });
         }
-        m.setView(at, Math.max(m.getZoom(), NEAR_ZOOM), { animate: !reduced });
       },
       (err) => {
         setLocating(false);
@@ -451,11 +634,21 @@ export default function MapCanvas({ pins, dots = [], photos, highlight = null, p
       </div>
 
       <div ref={keyRef} style={S('position:absolute;left:12px;top:12px;right:64px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;pointer-events:none;z-index:3')}>
-        <MapKey />
+        <MapKey pins={pins.length > 0 || !dots.length} dots={dots.length > 0 || !pins.length} />
         {notOnMap > 0 ? (
           <span className="vu-map-note" style={S(`max-width:100%;background:#fff;border-radius:${R.pill};box-shadow:${SH.float};padding:7px 12px;font:500 13px/1.25 ${F.body};color:${C.ink2}`)}>
             {notOnMap} {notOnMap === 1 ? "listing isn't" : "listings aren't"} on the map
           </span>
+        ) : null}
+        {farOut > 0 ? (
+          <button
+            type="button"
+            className="vu-map-note vu-btn"
+            onClick={showAll}
+            style={S(`pointer-events:auto;max-width:100%;min-height:36px;background:#fff;border:0;border-radius:${R.pill};box-shadow:${SH.float};padding:8px 14px;font:600 13px/1.25 ${F.body};color:${C.ink};cursor:pointer;text-align:left`)}
+          >
+            Zoom out to see {farOut} more {farOut === 1 ? 'place' : 'places'}
+          </button>
         ) : null}
         {nearMsg ? (
           <span role="status" className="vu-map-note" style={S(`max-width:100%;background:#fff;border-radius:${R.photo};box-shadow:${SH.float};padding:8px 12px;font:500 13px/1.35 ${F.body};color:${C.ink}`)}>
@@ -524,6 +717,98 @@ function popupPan({ pt, size, popW, popH, off, keyBottom, ctrl }) {
   return { dx: Math.round(pt.x - targetX), dy: Math.round(pt.y - targetY) };
 }
 
+/**
+ * The points a fit should hold. Around the visitor: everything within
+ * NEAR_MILES, or at least the nearest NEAR_MIN. Otherwise every point except
+ * strays far from the rest (an org whose IRS address is its national office),
+ * and only when most points are close together: a list spread across many
+ * states (a keyword search with no place) fits all of them. Whatever is left
+ * out is counted on the map, with a button that fits it in.
+ */
+function fitPoints(points, here, center) {
+  if (!points.length) return [];
+  if (here) {
+    const byDist = points.map((p) => ({ p, d: distanceMiles(here, p) })).sort((a, b) => a.d - b.d);
+    const near = byDist.filter((x) => x.d <= NEAR_MILES);
+    return (near.length >= NEAR_MIN ? near : byDist.slice(0, NEAR_MIN)).map((x) => x.p);
+  }
+  const mid = (vals) => {
+    const v = [...vals].sort((a, b) => a - b);
+    return v[Math.floor(v.length / 2)];
+  };
+  const ref = center || { lat: mid(points.map((p) => p.lat)), lng: mid(points.map((p) => p.lng)) };
+  const close = points.filter((p) => distanceMiles(ref, p) <= FAR_MILES);
+  return close.length && close.length >= points.length * FAR_SHARE ? close : points;
+}
+
+const orgCount = (d) => (d.orgs && d.orgs.length) || 1;
+
+/**
+ * Dots grouped so no dot's tap area covers another's at this zoom. `project`
+ * turns a point into pixels. Closest pairs merge first, and a group's center
+ * moves to the middle of its dots, so merging repeats until nothing overlaps.
+ * A dot left alone comes back as it was; a group is
+ * { key: 'npg:...', group: true, members: [dot keys], point, orgs, address, ein }.
+ */
+function groupDots(dots, project) {
+  if (dots.length < 2) return dots;
+  const touch = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const reach = (c) => (c.n > 1 ? GROUP_REACH : touch ? DOT_REACH_TOUCH : DOT_REACH) + 1;
+  let cl = dots.map((d) => ({ members: [d], n: orgCount(d), px: project(d.point) }));
+  for (;;) {
+    let best = null;
+    for (let i = 0; i < cl.length; i += 1) {
+      for (let j = i + 1; j < cl.length; j += 1) {
+        const a = cl[i];
+        const b = cl[j];
+        const gap = Math.max(Math.abs(a.px.x - b.px.x), Math.abs(a.px.y - b.px.y));
+        if (gap < Math.max(reach(a), reach(b)) && (!best || gap < best.gap)) best = { i, j, gap };
+      }
+    }
+    if (!best) break;
+    const a = cl[best.i];
+    const b = cl[best.j];
+    const wa = a.members.length;
+    const wb = b.members.length;
+    const merged = { members: [...a.members, ...b.members], n: a.n + b.n, px: { x: (a.px.x * wa + b.px.x * wb) / (wa + wb), y: (a.px.y * wa + b.px.y * wb) / (wa + wb) } };
+    cl = [...cl.filter((_, k) => k !== best.i && k !== best.j), merged];
+  }
+  return cl.map((c) => {
+    if (c.members.length === 1) return c.members[0];
+    const ms = [...c.members].sort((x, y) => (x.key < y.key ? -1 : 1));
+    const orgs = ms.flatMap((d) => d.orgs || [d]).sort((x, y) => String(x.name).localeCompare(String(y.name)));
+    const addresses = new Set(ms.map((d) => d.address || ''));
+    return {
+      key: `npg:${ms.map((d) => d.key.replace(/^np:/, '')).join('+')}`,
+      group: true,
+      members: ms.map((d) => d.key),
+      point: { lat: ms.reduce((t, d) => t + d.point.lat, 0) / ms.length, lng: ms.reduce((t, d) => t + d.point.lng, 0) / ms.length },
+      orgs,
+      address: addresses.size === 1 ? [...addresses][0] : '',
+      ein: orgs[0].ein,
+      name: orgs[0].name,
+      cause: '',
+    };
+  });
+}
+
+function labelDot(marker, d) {
+  const el = marker.getElement();
+  if (!el) return;
+  const n = orgCount(d);
+  const names = (d.orgs || []).slice(0, 3).map((o) => o.name).join(', ');
+  const more = n > 3 ? `, and ${n - 3} more` : '';
+  el.setAttribute(
+    'aria-label',
+    n === 1 ? `${d.name}, nonprofit from IRS records` : d.group && !d.address ? `${n} nonprofits close together: ${names}${more}` : `${n} nonprofits at ${d.address || 'one address'}: ${names}${more}`
+  );
+  if (d.group) el.setAttribute('data-group', String(d.members.length));
+  else el.removeAttribute('data-group');
+  el.setAttribute('data-ein', d.ein);
+  el.setAttribute('data-eins', (d.orgs || [d]).map((o) => o.ein).join(','));
+  el.setAttribute('data-count', String(n));
+}
+
 function isOn(pin, picked, highlight) {
   return picked === pin.key || (highlight !== null && highlight !== undefined && pin.items.some((l) => l.id === highlight));
 }
@@ -556,17 +841,22 @@ function MapButton({ label, icon, disabled, onClick, divider = false }) {
 }
 
 /** The map key. The opportunity swatch is a small pin, so it reads as one. */
-function MapKey() {
+/** The key names only what the map is showing (both while nothing has landed yet). */
+function MapKey({ pins = true, dots = true }) {
   return (
     <div style={S(`max-width:100%;display:flex;flex-wrap:wrap;column-gap:14px;row-gap:6px;align-items:center;background:#fff;border-radius:${R.photo};padding:7px 12px;box-shadow:${SH.float};font:500 12px/1 ${F.body};color:${C.ink2}`)}>
-      <span style={S('display:inline-flex;align-items:center;gap:6px;white-space:nowrap')}>
-        <i aria-hidden="true" style={S(`font-style:normal;padding:3px 6px;border-radius:${R.pill};background:#fff;box-shadow:0 1px 3px rgba(30,36,33,.28);font:600 10px/1 ${F.body};color:${C.ink};font-variant-numeric:tabular-nums`)}>9 AM</i>
-        Opportunity
-      </span>
-      <span style={S('display:inline-flex;align-items:center;gap:6px;white-space:nowrap')}>
-        <i aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.ink3}`, display: 'block', background: '#fff' }} />
-        Nonprofit, not on VolunteerU
-      </span>
+      {pins ? (
+        <span style={S('display:inline-flex;align-items:center;gap:6px;white-space:nowrap')}>
+          <i aria-hidden="true" style={S(`font-style:normal;padding:3px 6px;border-radius:${R.pill};background:#fff;box-shadow:0 1px 3px rgba(30,36,33,.28);font:600 10px/1 ${F.body};color:${C.ink};font-variant-numeric:tabular-nums`)}>9 AM</i>
+          Opportunity
+        </span>
+      ) : null}
+      {dots ? (
+        <span style={S('display:inline-flex;align-items:center;gap:6px;white-space:nowrap')}>
+          <i aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.ink3}`, display: 'block', background: '#fff' }} />
+          Nonprofit, not on VolunteerU
+        </span>
+      ) : null}
     </div>
   );
 }

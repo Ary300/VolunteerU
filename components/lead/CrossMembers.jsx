@@ -17,7 +17,7 @@ import { Pressable, Field, Select, TextArea, EmptyState, Avatar, Icon, Button, S
 import { C, F, R } from '../../lib/tokens.js';
 import { openModal, toast, menuFromEvent } from '../../lib/overlays.js';
 import { copyText } from '../../lib/db.js';
-import { loadProjectMembers, setMemberAssignment, confirmMemberHour, checkInCodeMatches } from '../../lib/listings.js';
+import { loadProjectMembers, setMemberAssignment, confirmMemberHour, checkInCodeMatches, memberHourEntries } from '../../lib/listings.js';
 import MessageThread from '../MessageThread.jsx';
 
 const H2 = `margin:0;font:650 22px/1.15 ${F.display};letter-spacing:-0.02em;color:${C.ink}`;
@@ -234,15 +234,15 @@ export function ShareLink({ p }) {
 /* A member's logged hours, with a Confirm toggle. Confirmed hours count on the
    volunteer's profile. Shared by the team + pipeline managers. */
 function MemberHoursConfirm({ app, onDone }) {
-  const log = (app.member_state && app.member_state.hoursLog) || [];
-  const confirmed = (app.assignment && app.assignment.confirmedHours) || {};
+  // Confirmed entries read the lead's saved value, not the member's log.
+  const log = memberHourEntries(app).filter((h) => !h.removed);
   const [busy, setBusy] = useState(null);
   if (!log.length) return null;
-  const done = log.filter((h) => confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
-  const waiting = log.filter((h) => !confirmed[h.id]).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  const done = log.filter((h) => h.confirmed).reduce((a, h) => a + Number(h.hrs || 0), 0);
+  const waiting = log.filter((h) => !h.confirmed && !h.declined).reduce((a, h) => a + Number(h.hrs || 0), 0);
   async function toggle(h) {
     if (busy) return;
-    const was = !!confirmed[h.id];
+    const was = !!h.confirmed;
     setBusy(h.id);
     const { ok } = await confirmMemberHour(app.id, h.id, !was);
     setBusy(null);
@@ -264,7 +264,7 @@ function MemberHoursConfirm({ app, onDone }) {
       </div>
       <ul style={S('margin:6px 0 0;padding:0;list-style:none')}>
         {log.map((h) => {
-          const on = !!confirmed[h.id];
+          const on = !!h.confirmed;
           const working = busy === h.id;
           return (
             <li key={h.id} style={S(`border-top:1px solid ${C.line}`)}>
@@ -274,7 +274,9 @@ function MemberHoursConfirm({ app, onDone }) {
                 {h.date ? <span style={S(`color:${C.ink2}`)}>, {h.date}</span> : null}
               </span>
               <span style={S(`font:600 14px/1 ${F.body};color:${C.ink};${NUM}`)}>{hrsLabel(h.hrs)}</span>
-              {on ? (
+              {h.declined ? (
+                <StatusText tone="mute" title={h.declineNote || undefined}>Not confirmed</StatusText>
+              ) : on ? (
                 <span style={S('flex:none;display:inline-flex;align-items:center;gap:10px')}>
                   <StatusText tone="ok">{working ? 'Removing' : 'Confirmed'}</StatusText>
                   <Pressable

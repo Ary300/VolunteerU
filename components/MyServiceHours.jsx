@@ -33,6 +33,7 @@ const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
 const STATUS = {
   confirmed: { tone: 'ok', label: 'Confirmed' },
   waiting: { tone: 'wait', label: 'Waiting' },
+  declined: { tone: 'mute', label: 'Not confirmed' },
   own: { tone: 'mute', label: 'Logged on your own' },
 };
 
@@ -64,7 +65,7 @@ export function shiftRows(serviceEntries, hoursLog) {
       ...serviceTitle(e),
       cause: e.cause || '',
       hrs: Number(e.hrs) || 0,
-      status: e.verified ? 'confirmed' : 'waiting',
+      status: e.verified ? 'confirmed' : e.declined ? 'declined' : 'waiting',
       source: 'project',
       // Hours the volunteer logged on a joined project can come off until the
       // organizer confirms them (same rule as My crew). Shifts the organizer
@@ -90,18 +91,36 @@ export function shiftRows(serviceEntries, hoursLog) {
 }
 
 /** Organizations the volunteer joined, with their shifts and hours, for "Where you've helped". */
-export function helpedPlaces(apps, serviceEntries) {
-  return (apps || [])
+export function helpedPlaces(apps, serviceEntries, hoursLog = []) {
+  const joined = (apps || [])
     .filter((a) => a.status === 'accepted' && a.listings)
     .map((a) => {
-      const mine = (serviceEntries || []).filter((e) => e.applicationId === a.id);
+      const mine = (serviceEntries || []).filter((e) => e.applicationId === a.id && !e.declined);
       const ok = r1(mine.filter((e) => e.verified).reduce((t, e) => t + e.hrs, 0));
       const wait = r1(mine.filter((e) => !e.verified).reduce((t, e) => t + e.hrs, 0));
       const parts = mine.length
         ? [`${mine.length} ${mine.length === 1 ? 'shift' : 'shifts'}`, ok ? `${hrsShort(ok)} confirmed` : null, wait ? `${hrsShort(wait)} waiting` : null].filter(Boolean)
         : ['Joined, no hours logged yet'];
       return { id: a.listing_id || a.id, name: a.listings.name || 'A project', cause: a.listings.cause || '', cover: a.listings.cover || '', live: !a.listings.unlisted && !!a.listing_id, parts, line: parts.join(', '), weight: mine.length };
-    })
+    });
+  // Organizations from hours logged on your own count on the profile too, so
+  // they get a row (no link: they aren't VolunteerU listings).
+  const key = (v) => String(v || '').trim().toLowerCase();
+  const known = new Set(joined.map((p) => key(p.name)));
+  const own = new Map();
+  for (const h of hoursLog || []) {
+    const k = key(h.org);
+    if (!k || known.has(k)) continue;
+    const cur = own.get(k) || { name: String(h.org).trim(), n: 0, hrs: 0 };
+    cur.n += 1;
+    cur.hrs += Number(h.hrs) || 0;
+    own.set(k, cur);
+  }
+  const ownRows = [...own.entries()].map(([k, o]) => {
+    const parts = [`${o.n} ${o.n === 1 ? 'shift' : 'shifts'}`, `${hrsShort(r1(o.hrs))} logged on your own`];
+    return { id: `own:${k}`, name: o.name, cause: '', cover: '', live: false, parts, line: parts.join(', '), weight: o.n };
+  });
+  return [...joined, ...ownRows]
     .sort((x, y) => y.weight - x.weight)
     .slice(0, HELPED_MAX);
 }
@@ -201,7 +220,7 @@ export function NoShifts({ isolated, nextShift = '' }) {
     ? 'Pick another cause, or show all causes.'
     : upcoming
       ? `Your next shift is ${nextShift}. Log your hours after it and they show up here.`
-      : 'Shifts you sign up for and hours you log show up here, newest first.';
+      : 'Hours you log after a shift show up here, newest first.';
   return (
     <div style={S(`margin-top:14px;padding:20px 0;border-top:1px solid ${C.line}`)}>
       <div style={S(`font:600 16px/1.3 ${F.body};color:${C.ink}`)}>{title}</div>
@@ -253,6 +272,8 @@ function ShiftRow({ row, onRemove }) {
         <div className="vu-row-t">{row.title}</div>
         {meta.length ? <div className="vu-row-m">{withSeps(meta)}</div> : null}
         {row.category ? <div className="vu-row-m">{causeLabel(row.category)}</div> : null}
+        {/* Why the organizer didn't confirm it, or that Attendance already counted the day. */}
+        {row.status === 'declined' && row.raw && row.raw.declineNote ? <div className="vu-row-m">{row.raw.declineNote}</div> : null}
       </div>
       <span className="vu-pf-shift-hrs vu-row-num">
         {hrsShort(row.hrs)}

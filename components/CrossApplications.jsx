@@ -19,7 +19,7 @@
 import { useEffect, useState } from 'react';
 import { S, s, cx, H } from '../lib/style.js';
 import { C, F } from '../lib/tokens.js';
-import { loadOwnerApplications, setApplicationStatus } from '../lib/listings.js';
+import { loadOwnerApplications, setApplicationStatus, myShiftSignUps } from '../lib/listings.js';
 import { toast, openModal } from '../lib/overlays.js';
 import MessageThread from './MessageThread.jsx';
 import { APPLICATION_STATUS } from '../lib/seed.js';
@@ -104,11 +104,21 @@ function monthDay(iso) {
 /** "Line packer · Applied Oct 16" as ordered parts. Inside one project the
     project's name is the page title, so only the account-wide list (no
     `listingId`) names the listing: "For Saturday Food Distribution · …". */
+/** The shift an applicant picked on the join page ("Sat, Oct 31", or
+    "Sat, Oct 31 and 1 more"), so the lead knows the date before accepting. */
+function pickedShift(app) {
+  if (app.status === 'withdrawn' || app.status === 'declined') return '';
+  const mine = myShiftSignUps(app).filter((x) => !x.past && x.d);
+  if (!mine.length) return '';
+  return mine.length > 1 ? `${mine[0].d} and ${mine.length - 1} more` : String(mine[0].d);
+}
+
 function factsFor(app, scoped) {
   const applied = monthDay(app.created_at);
   return [
     scoped ? '' : app.listings && app.listings.name ? `For ${app.listings.name}` : 'For your project',
     app.position || '',
+    pickedShift(app),
     applied ? `Applied ${applied}` : '',
   ].filter(Boolean);
 }
@@ -384,7 +394,13 @@ function CrossRow({ app, busy, onDecide, onRevert }) {
           onWaitlist={() => onDecide(app, 'waitlisted')}
           onDecline={() => onDecide(app, 'declined')}
         />
-      ) : app.status === 'withdrawn' ? null : (
+      ) : app.status === 'withdrawn' ? null : app.status === 'waitlisted' ? (
+        // A spot opened: accept straight from the waitlist.
+        <>
+          <Button variant="dark" size="sm" onClick={() => onDecide(app, 'accepted')} disabled={busy} aria-label={`Accept ${app.applicant_name} from the waitlist`}>Accept</Button>
+          <UndoButton name={app.applicant_name} busy={busy} onClick={() => onRevert(app)} />
+        </>
+      ) : (
         <UndoButton name={app.applicant_name} busy={busy} onClick={() => onRevert(app)} />
       )}
     </Row>
@@ -413,6 +429,11 @@ function LocalRow({ a, local }) {
           onWaitlist={() => local.onDecide(a, 'waitlisted')}
           onDecline={() => local.onDecide(a, 'declined')}
         />
+      ) : a.status === 'waitlisted' ? (
+        <>
+          <Button variant="dark" size="sm" onClick={() => local.onDecide(a, 'accepted')} aria-label={`Accept ${a.n} from the waitlist`}>Accept</Button>
+          <UndoButton name={a.n} onClick={() => local.onUndo(a)} />
+        </>
       ) : (
         <UndoButton name={a.n} onClick={() => local.onUndo(a)} />
       )}

@@ -14,12 +14,14 @@
    DateBlock beside the text, else just the text.
    ========================================================================== */
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { S } from '../../lib/style.js';
 import { C, F, SH } from '../../lib/tokens.js';
 import { splitWhen } from '../../lib/format.js';
 import DateBlock from './DateBlock.jsx';
 import { whenParts, Sep } from './ListingCard.jsx';
+import { Icon } from '../ui.jsx';
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -95,8 +97,29 @@ export function pinHtml(label, selected = false) {
   return text ? `<span class="vu-pin${on}">${escHtml(text)}</span>` : `<span class="vu-pin-dot${on}"></span>`;
 }
 
-/** HTML for a Leaflet divIcon that looks like MapDot (a nonprofit). */
-export const dotHtml = () => '<span class="vu-np-dot"></span>';
+const DOT_ON = `border:3px solid ${C.ink};box-shadow:0 0 0 2px #fff, 0 1px 4px rgba(30,36,33,.35)`;
+
+/**
+ * Inline style for a nonprofit dot: '' for the plain 12px dot, the grown ink
+ * ring when `on`, and the numbered 24px dot when it stands for `n` > 1 orgs
+ * (one address, or several close together).
+ */
+export function dotStyle(n = 1, on = false) {
+  if (n <= 1) return on ? `width:16px;height:16px;${DOT_ON}` : '';
+  const base = `width:24px;height:24px;display:grid;place-items:center;font:600 12px/1 ${F.body};color:${C.ink};font-variant-numeric:tabular-nums;border-color:${C.ink2}`;
+  return on ? `${base};width:28px;height:28px;${DOT_ON}` : base;
+}
+
+/**
+ * HTML for a Leaflet divIcon that looks like MapDot (a nonprofit), or a
+ * numbered dot for `n` orgs. The marker box is sized (so it can be clicked
+ * like any element); the dot sits at its center.
+ */
+export function dotHtml(n = 1) {
+  const style = dotStyle(n, false);
+  const dot = `<span class="${n > 1 ? 'vu-np-dot vu-np-many' : 'vu-np-dot'}"${style ? ` style="${escHtml(style)}"` : ''}>${n > 1 ? escHtml(n > 99 ? '99+' : String(n)) : ''}</span>`;
+  return `<span style="position:absolute;left:50%;top:50%">${dot}</span>`;
+}
 
 /** Hollow dot for a registered nonprofit that hasn't posted on VolunteerU. */
 export function MapDot({ x, y, title, onClick }) {
@@ -181,9 +204,9 @@ function PlaceLine({ place }) {
 /** The popup's foot: open the page, and directions in a new tab. */
 function PopupLinks({ href, openLabel, directions }) {
   if (!href && !directions) return null;
-  const link = S(`display:inline-flex;align-items:center;gap:6px;min-height:32px;font:600 14px/1 ${F.body};color:${C.ink}`);
+  const link = S(`display:inline-flex;align-items:center;gap:6px;min-height:44px;font:600 14px/1 ${F.body};color:${C.ink}`);
   return (
-    <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;column-gap:18px;row-gap:4px;padding:4px 14px 8px;border-top:1px solid ${C.line}`)}>
+    <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;column-gap:18px;padding:0 14px 2px;border-top:1px solid ${C.line}`)}>
       {href ? (
         <Link href={href} className="vu-link-ul" style={link}>
           {openLabel}
@@ -199,24 +222,210 @@ function PopupLinks({ href, openLabel, directions }) {
   );
 }
 
+/* ---- nonprofit popups -------------------------------------------------------- */
+
+const details = new Map(); // ein -> Promise<organization|null>
+
+const httpUrl = (u) => (/^https?:\/\/[^\s"<>]+\.[^\s"<>]+$/i.test(String(u || '')) ? String(u) : '');
+const telHref = (phone) => {
+  const digits = String(phone || '').replace(/[^\d+]/g, '');
+  return digits.replace(/\D/g, '').length >= 10 ? `tel:${digits}` : '';
+};
+
 /**
- * Popup for a nonprofit's dot: its name, cause and city, a link to its page
- * on VolunteerU, and directions.
+ * The org's record with its links (/api/nonprofits?ein=&links=1, which reads
+ * its IRS return and website for a volunteer page), fetched once per page and
+ * only when its popup opens. Null when it can't be loaded.
  */
-export function MapOrgPopup({ x, y, name, cause, address, href, directions, width = 248 }) {
+function loadDetail(ein) {
+  const id = String(ein || '');
+  if (!details.has(id)) {
+    const p = fetch(`/api/nonprofits?ein=${encodeURIComponent(id)}&links=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => (b && b.organization) || null)
+      .catch(() => {
+        details.delete(id); // a dropped connection can be tried again next open
+        return null;
+      });
+    details.set(id, p);
+  }
+  return details.get(id);
+}
+
+/**
+ * Starts loading the links for these orgs ahead of a tap, `atOnce` at a
+ * time; orgs already loaded or loading are skipped. Fire and forget.
+ * @param {string[]} eins
+ */
+export function warmOrgLinks(eins, atOnce = 2) {
+  const todo = [...new Set((eins || []).map((e) => String(e || '')).filter((e) => e && !details.has(e)))];
+  if (!todo.length) return;
+  let next = 0;
+  const worker = () => {
+    if (next >= todo.length) return undefined;
+    const ein = todo[next];
+    next += 1;
+    return loadDetail(ein).then(worker);
+  };
+  for (let i = 0; i < Math.min(atOnce, todo.length); i += 1) worker();
+}
+
+/**
+ * Where to send someone who wants to help: the org's volunteer page when one
+ * was found, its website otherwise, and its phone (lib/nonprofitLinks.js).
+ * All from public records; empty while loading or when there's none.
+ */
+export function useOrgLinks(ein) {
+  const [state, setState] = useState({ ein: null, volunteer: '', website: '', phone: '', phoneText: '' });
+  useEffect(() => {
+    let live = true;
+    if (!ein) return undefined;
+    loadDetail(ein).then((o) => {
+      if (!live) return;
+      setState({
+        ein,
+        volunteer: httpUrl(o && o.volunteerUrl),
+        website: httpUrl(o && o.website),
+        phone: telHref(o && (o.phoneTel || o.phone)),
+        phoneText: String((o && o.phone) || ''),
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [ein]);
+  return { ...state, loading: state.ein !== ein };
+}
+
+/** "0.4 mi away", "12 mi away", or '' without a distance. */
+export function milesAway(mi) {
+  if (!Number.isFinite(mi)) return '';
+  return `${mi < 10 ? mi.toFixed(1) : Math.round(mi)} mi away`;
+}
+
+const popBox = (x, y, width, z = 2) =>
+  S(`position:absolute;left:${x}%;top:${y}%;transform:translate(-50%, calc(-100% - 16px));width:${width}px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:${SH.popup};z-index:${z}`);
+
+// Every action in a nonprofit popup is at least 44px tall, and a short one
+// ("Call") at least 44px wide, so a thumb can hit it.
+const footLink = S(`display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:44px;font:600 14px/1 ${F.body};color:${C.ink}`);
+const primaryLink = S(`display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:999px;background:${C.ember};color:#fff;font:600 14px/1 ${F.body}`);
+
+/**
+ * Popup for a nonprofit's dot: its name, cause, distance, street address, and
+ * what someone can do next. Volunteer with them (their volunteer page) or
+ * Visit website (their homepage, when no volunteer page was found), the same
+ * names the org's page uses for the same links; Call when it has a phone;
+ * Directions; and Open page (the org's page on VolunteerU, which is the main
+ * action when there's no site to send them to).
+ * @param {object} props
+ * @param {string} props.ein @param {string} props.name @param {string} [props.cause]
+ * @param {string} [props.address] @param {number} [props.miles] from the visitor, when known
+ * @param {string} props.href the org's page @param {string} props.directions
+ */
+export function MapOrgPopup({ x, y, ein, name, cause, address, miles, href, directions, width = 248 }) {
+  const links = useOrgLinks(ein);
+  const out = links.volunteer || links.website;
+  const meta = [cause && !/^nonprofit$/i.test(cause) ? cause : '', milesAway(miles)].filter(Boolean);
   return (
-    <div
-      className="vu-mappop"
-      style={S(`position:absolute;left:${x}%;top:${y}%;transform:translate(-50%, calc(-100% - 16px));width:${width}px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:${SH.popup};z-index:2`)}
-    >
+    <div className="vu-mappop" data-ein={ein} style={popBox(x, y, width)}>
       <div style={S('position:relative;padding:12px 14px 10px')}>
         <Link href={href} className="vu-card-link" style={S(`display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font:600 15px/20px ${F.body};color:${C.ink}`)}>
           {name}
         </Link>
-        <div style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{[cause, 'nonprofit from IRS records'].filter(Boolean).join(', ')}</div>
+        {meta.length ? (
+          <div style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>
+            {meta.map((m, i) => (
+              <span key={m}>
+                {i ? <Sep /> : null}
+                {m}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <PlaceLine place={address} />
       </div>
-      <PopupLinks href={href} openLabel="See nonprofit" directions={directions} />
+      <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;column-gap:14px;row-gap:2px;padding:6px 14px 6px;border-top:1px solid ${C.line}`)}>
+        {links.loading ? (
+          <span role="status" style={S(`display:inline-flex;align-items:center;min-height:44px;font:400 13px/1.3 ${F.body};color:${C.ink2}`)}>
+            Looking for their volunteer page
+          </span>
+        ) : out ? (
+          <a href={out} target="_blank" rel="noopener noreferrer" className="vu-btn-primary" data-act={links.volunteer ? 'volunteer' : 'website'} style={primaryLink}>
+            {links.volunteer ? 'Volunteer with them' : 'Visit website'}
+            <Icon name="external" size={14} />
+            <span className="vu-sr">{links.volunteer ? "(opens their volunteer page in a new tab)" : '(opens their website in a new tab)'}</span>
+          </a>
+        ) : (
+          <Link href={href} className="vu-btn-primary" data-act="open" style={primaryLink}>
+            Open page
+          </Link>
+        )}
+        {links.phone ? (
+          <a href={links.phone} className="vu-link-ul" data-act="call" style={footLink}>
+            Call
+            {links.phoneText ? <span className="vu-sr">{links.phoneText}</span> : null}
+          </a>
+        ) : null}
+        <a href={directions} target="_blank" rel="noopener noreferrer" className="vu-link-ul" data-act="directions" style={footLink}>
+          Directions
+          <span className="vu-sr">(opens Google Maps in a new tab)</span>
+        </a>
+        {out || links.loading ? (
+          <Link href={href} className="vu-link-ul" data-act="open" style={footLink}>
+            Open page
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Popup for several nonprofits on one dot: one address (a shared office
+ * building), or, with `together`, dots too close to tell apart at this zoom.
+ * "{n} nonprofits here" (or "close together"), the address when they share
+ * one, and one row each linking to its page, with its own address when they
+ * don't. `onZoom`, when given, adds Zoom in, which pulls the dots apart.
+ * @param {{ orgs: Array<{ein:string,name:string,cause?:string,address?:string}>, address?:string, miles?:number, directions?:string, together?:boolean, onZoom?:(()=>void)|null }} props
+ */
+export function MapOrgListPopup({ x, y, orgs = [], address, miles, directions, together = false, onZoom = null, width = 272, listMax = 260 }) {
+  const meta = [address, milesAway(miles)].filter(Boolean).join(', ');
+  const ownAddress = together && !address;
+  return (
+    <div className="vu-mappop" data-group={together ? String(orgs.length) : undefined} style={popBox(x, y, width, 4)}>
+      <div style={S(`position:relative;padding:12px 14px 10px;border-bottom:1px solid ${C.line}`)}>
+        <div style={S(`font:600 14px/18px ${F.body};color:${C.ink}`)}>
+          {orgs.length} nonprofits {ownAddress ? 'close together' : 'here'}
+        </div>
+        {meta ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{meta}</div> : null}
+      </div>
+      <ul style={S(`margin:0;padding:4px 0;list-style:none;max-height:${listMax}px;overflow-y:auto;overscroll-behavior:contain`)}>
+        {orgs.map((o) => (
+          <li key={o.ein} style={S('position:relative;padding:8px 14px')}>
+            <Link href={`/nonprofits/${o.ein}`} className="vu-card-link vu-trunc" style={S(`display:block;font:600 14px/18px ${F.body};color:${C.ink}`)}>
+              {o.name}
+            </Link>
+            {o.cause && !/^nonprofit$/i.test(o.cause) ? <div style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{o.cause}</div> : null}
+            {ownAddress && o.address ? <div className="vu-trunc" style={S(`margin-top:2px;font:400 13px/18px ${F.body};color:${C.ink2}`)}>{o.address}</div> : null}
+          </li>
+        ))}
+      </ul>
+      {onZoom ? (
+        <div style={S(`position:relative;z-index:2;display:flex;flex-wrap:wrap;column-gap:18px;padding:0 14px;border-top:1px solid ${C.line}`)}>
+          <button type="button" onClick={onZoom} className="vu-link-ul" data-act="zoom" style={{ ...footLink, background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
+            Zoom in to see each one
+          </button>
+          {directions ? (
+            <a href={directions} target="_blank" rel="noopener noreferrer" className="vu-link-ul" data-act="directions" style={footLink}>
+              Directions
+              <span className="vu-sr">(opens Google Maps in a new tab)</span>
+            </a>
+          ) : null}
+        </div>
+      ) : (
+        <PopupLinks directions={directions} />
+      )}
     </div>
   );
 }

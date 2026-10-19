@@ -78,8 +78,9 @@ function unlockBody() {
 /* Pages someone reaches from a shared link (a nonprofit page, or its
    not-found page for a bad EIN). The welcome tour points at the main tabs, so
    it waits until the person opens one of them instead of covering the page
-   they came to see. */
-const WELCOME_HELD = [/^\/nonprofits(\/|$)/];
+   they came to see. My crew waits too: a student who joined from an invite
+   goes there to see shifts and log hours. */
+const WELCOME_HELD = [/^\/nonprofits(\/|$)/, /^\/crew(\/|$)/];
 
 /**
  * Which walkthrough may show right now: 'founder', 'welcome' or null.

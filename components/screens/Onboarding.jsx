@@ -29,6 +29,7 @@ import { track } from '../../lib/analytics.js';
 import { defaultDraft, generatedSessions } from '../../lib/createDraft.js';
 import { sameSitePath } from '../../lib/safePath.js';
 import { markOnboardingFinished } from '../../lib/onboardingFlag.js';
+import { getLocation, areaOf } from '../../lib/location.js';
 
 const MISSION_MAX = 240;
 const INTEREST_MIN_CHARS = 8;
@@ -135,6 +136,9 @@ export default function Onboarding() {
   const { state } = useSnapshot();
   const ob = state.onboarding;
   const nextPath = safeNext(params.get('next'));
+  // Signing up from a listing: the listing is the point, so step 2's answers
+  // are all optional and "Back to the opportunity" always goes back.
+  const toListing = nextPath.startsWith('/join/');
 
   // A brand-new account has an empty draft; anything else is a resume.
   const resuming = !!(ob.draft && (ob.draft.join || ob.draft.start));
@@ -156,6 +160,29 @@ export default function Onboarding() {
   // Stays set once finish() succeeds, so a second click during navigation
   // can't create a second project.
   const finishing = useRef(false);
+  // Setup already finished and this page opened again (browser Back from
+  // the listing it sent you to, or a stale tab): go on to where it was
+  // headed instead of showing the old answers. finish() and skip() set
+  // `finishing` before they mark setup done, so their own flip is skipped.
+  const completed = !!ob.completed;
+  // A browser Back lands here through the router's history restore, which
+  // drops a router.replace made while it settles, so this leaves with a plain
+  // location replace (the onboarding entry is swapped for the destination).
+  useEffect(() => {
+    if (!completed || finishing.current) return;
+    finishing.current = true;
+    window.location.replace(nextPath || '/app');
+  }, [completed, nextPath]);
+  // The place this browser already knows (Discover's "Use my location" or a
+  // typed ZIP) fills the ZIP and the town, so nobody types them twice.
+  useEffect(() => {
+    const rec = getLocation();
+    if (!rec || rec.status !== 'set') return;
+    if (rec.zip) setIdentity((v) => (v.zip ? v : { ...v, zip: rec.zip }));
+    const area = areaOf(rec);
+    if (area && !/^\d{5}$/.test(area)) setJoin((j) => (j.location ? j : { ...j, location: area }));
+    // Once on open; later edits are the student's own.
+  }, []);
   // The "Check the highlighted fields" toast, cleared once the form moves on.
   const warnId = useRef(null);
   const warn = () => {
@@ -212,9 +239,9 @@ export default function Onboarding() {
       if (!start.positions.length) e.positions = 'Choose at least 1 position.';
     } else {
       const interest = join.interest.trim();
-      if (interest.length < INTEREST_MIN_CHARS) e.interest = 'Enter a few words about what you want to do.';
-      else if (countWords(interest) > INTEREST_MAX_WORDS) e.interest = `Keep it to ${INTEREST_MAX_WORDS} words.`;
-      if (!join.location.trim()) e.location = 'Enter your city or town.';
+      if (countWords(interest) > INTEREST_MAX_WORDS) e.interest = `Keep it to ${INTEREST_MAX_WORDS} words.`;
+      else if (!toListing && interest.length < INTEREST_MIN_CHARS) e.interest = 'Enter a few words about what you want to do.';
+      if (!toListing && !join.location.trim()) e.location = 'Enter your city or town.';
     }
     setErrors(e);
     return !Object.keys(e).length;
@@ -311,7 +338,7 @@ export default function Onboarding() {
     st.onboarding.completed = true;
     st.onboarding.intent = intent;
     if (isStart) return;
-    saveJoinPrefs(st, { partial: false });
+    saveJoinPrefs(st, { partial: toListing });
   }
 
   /**
@@ -425,6 +452,7 @@ export default function Onboarding() {
   // Skip keeps every answer already given. A project can't be half-created,
   // so the start path says plainly that nothing was made.
   function skip() {
+    finishing.current = true;
     clearWarn();
     markOnboardingFinished();
     let keptPrefs = false;
@@ -493,7 +521,7 @@ export default function Onboarding() {
             ) : isStart ? (
               <StartForm start={start} setStart={setStart} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} />
             ) : (
-              <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} finishLabel={finishLabel(nextPath)} />
+              <JoinForm join={join} setJoin={setJoin} errors={errors} busy={busy} onFinish={finish} onBack={back} onSkip={skip} finishLabel={finishLabel(nextPath)} optional={toListing} />
             )}
           </div>
         </div>
@@ -695,23 +723,23 @@ function StartForm({ start, setStart, errors, busy, onFinish, onBack, onSkip }) 
   );
 }
 
-function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip, finishLabel: label }) {
+function JoinForm({ join, setJoin, errors, busy, onFinish, onBack, onSkip, finishLabel: label, optional = false }) {
   const set = (k) => (v) => setJoin((f) => ({ ...f, [k]: v }));
   return (
     <div className="vu-screen">
       <Heading sub="We use this to sort Discover. Change it any time in Settings.">What are you looking for?</Heading>
       <div style={S('margin-top:28px')}>
         <div className="vu-ob-sec">
-          <Field label="Where are you?" value={join.location} onChange={set('location')} placeholder="City or town, e.g. Indianapolis" autoComplete="address-level2" maxLength={60} required error={errors.location} />
+          <Field label={optional ? 'Where are you? (optional)' : 'Where are you?'} value={join.location} onChange={set('location')} placeholder="City or town, e.g. Indianapolis" autoComplete="address-level2" maxLength={60} required={!optional} error={errors.location} />
         </div>
         <div className="vu-ob-sec">
           <TextArea
-            label="What kind of volunteering sounds good?"
+            label={optional ? 'What kind of volunteering sounds good? (optional)' : 'What kind of volunteering sounds good?'}
             value={join.interest}
             onChange={set('interest')}
             maxWords={INTEREST_MAX_WORDS}
             counter
-            required
+            required={!optional}
             minHeight={88}
             placeholder="e.g. Tutoring younger kids on weekends"
             hint="A sentence or two is plenty."

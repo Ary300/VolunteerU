@@ -4,8 +4,8 @@
    MapOverlay, the map popped out to fill the screen.
 
    A modal dialog over everything: a title bar with Close, and whatever map
-   the caller puts inside. Escape closes it (after any open popup, which
-   handles Escape first), Tab stays inside, the page behind doesn't scroll,
+   the caller puts inside. Escape closes it, after first closing any open
+   popup (`onEscape` says whether it did, wherever focus is), Tab stays inside, the page behind doesn't scroll,
    and focus goes back to whatever opened it. Following a link inside closes
    it, except links that open a new tab.
    ========================================================================== */
@@ -19,13 +19,16 @@ import { Icon } from '../ui.jsx';
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * @param {{ title: string, onClose: () => void, children: React.ReactNode }} props
+ * @param {{ title: string, onClose: () => void, onEscape?: () => boolean, children: React.ReactNode }} props
+ *   onEscape runs first on Escape; returning true (it closed a popup) keeps the map open
  */
-export default function MapOverlay({ title, onClose, children }) {
+export default function MapOverlay({ title, onClose, onEscape, children }) {
   const boxRef = useRef(null);
   const closeRef = useRef(null);
   const closeFn = useRef(onClose);
   closeFn.current = onClose;
+  const escFn = useRef(onEscape);
+  escFn.current = onEscape;
 
   useEffect(() => {
     const opener = typeof document !== 'undefined' ? document.activeElement : null;
@@ -42,6 +45,7 @@ export default function MapOverlay({ title, onClose, children }) {
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       e.stopPropagation();
+      if (escFn.current && escFn.current()) return;
       closeFn.current();
       return;
     }

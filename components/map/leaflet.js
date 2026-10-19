@@ -84,7 +84,7 @@ export function createBaseMap(L, el, { center = INDIANAPOLIS, zoom = DEFAULT_ZOO
     fadeAnimation: !reduced,
     markerZoomAnimation: !reduced,
     inertia: !reduced,
-    minZoom: 3,
+    minZoom: 2, // low enough to fit a nationwide list, Alaska and Hawaii included, in a phone-wide map
     maxZoom: 19,
     zoomSnap: 0.5,
   });
