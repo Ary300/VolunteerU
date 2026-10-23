@@ -691,13 +691,16 @@ function Opportunities({ state, view, query, homeCity, origin, onRetry, onWiden,
   );
 }
 
-function Nonprofits({ state, rows: shownRows, query, homeRegion, discoverHref, origin = null }) {
+/* Causes whose label doesn't read right before "nonprofits", as Discover words them. */
+const NP_WORDS = { animals: 'Animal nonprofits', seniors: 'Nonprofits serving seniors' };
+
+function Nonprofits({ state, rows: shownRows, query, homeRegion, discoverHref, origin = null, sectionRef = null, lead = false }) {
   // Nearest to the visitor first, each with its distance, when we know where they are.
   const nearest = useNearestFirst(shownRows || state.rows, origin);
   const rows = nearest.rows;
   const near = query.near || homeRegion;
   const c = CATEGORIES.find((x) => x.key === query.cat);
-  const what = query.q ? `Nonprofits for “${query.q}”` : c && c.cause ? `${c.label} nonprofits` : 'Registered nonprofits';
+  const what = query.q ? `Nonprofits for “${query.q}”` : c && c.cause ? NP_WORDS[c.key] || `${c.label} nonprofits` : 'Registered nonprofits';
   const homeCity = cityOf(homeRegion);
   const home = Boolean(homeCity) && near === homeRegion && !query.q && !query.near && !(c && c.cause);
   // Where the rows really come from (loadOrgs reports it), so the heading
@@ -748,7 +751,7 @@ function Nonprofits({ state, rows: shownRows, query, homeRegion, discoverHref, o
     );
   }
   return (
-    <section id="lp-np" className="lp-sec" style={S('margin-top:88px')} aria-labelledby="lp-np-h" aria-busy={state.status === 'loading' ? 'true' : 'false'}>
+    <section ref={sectionRef} id="lp-np" className="lp-sec" style={lead ? undefined : S('margin-top:88px')} aria-labelledby="lp-np-h" aria-busy={state.status === 'loading' ? 'true' : 'false'}>
       <div className="lp-sec-head">
         <div style={S('min-width:0')}>
           <h2 id="lp-np-h">{title}</h2>
@@ -1060,6 +1063,8 @@ export default function Landing() {
   const discoverHref = discoverUrl({ when: query.when });
 
   const orgRows = orgs.rows.slice(0, MAX_ORGS);
+  // Nothing posted for this search, and nothing on later dates to offer.
+  const noListings = opps.status === 'done' && !view.pool.length && !view.laterCount;
   const showNonprofits = () => {
     const el = typeof document !== 'undefined' ? document.getElementById('lp-np') : null;
     if (!el) return;
@@ -1120,7 +1125,9 @@ export default function Landing() {
           <CategoryRow className="vu-show-mobile" value={query.cat} onChange={onCategory} label="Browse by cause" short />
         </div>
 
-        <Opportunities
+        {/* With no listings to show, the nonprofits for the same search take
+            the results' place instead of an empty notice. */}
+        {noListings ? null : <Opportunities
           sectionRef={resultsRef}
           state={opps}
           view={view}
@@ -1136,9 +1143,9 @@ export default function Landing() {
           discoverHref={discoverHref}
           homeCity={homeCity}
           origin={origin}
-        />
+        />}
 
-        <Nonprofits state={orgs} rows={orgRows} query={query} homeRegion={homeRegion} discoverHref={nonprofitsHref} origin={origin} />
+        <Nonprofits state={orgs} rows={orgRows} query={query} homeRegion={homeRegion} discoverHref={nonprofitsHref} origin={origin} sectionRef={noListings ? resultsRef : null} lead={noListings} />
 
         <VolunteerOrLead goSearch={goSearch} startProject={startProject} art={art} />
         </div>
